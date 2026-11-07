@@ -52,6 +52,15 @@ def exercise(scenario, env, xid, out, label, large=False):
                     word['top'] = str(int(word['top']) // 3 + height - footer_height)
                     words.append(word)
         ocr_path.unlink()
+        if any(normalized(term).replace(' ', '') not in text.replace(' ', '') for term in required):
+            # Selected rows in dark overlays can be missed by whole-window OCR.
+            # Inspect the actual centered content at higher contrast before failing.
+            ocr_path=out/f'{label}-ocr-center.png'
+            crop=f'{width//2}x{height//2}+{width//4}+{height//4}'
+            run(['convert',str(path),'-crop',crop,'+repage','-resize','300%',
+                 '-colorspace','gray','-auto-level','-negate',str(ocr_path)],env)
+            text += ' ' + normalized(run(['tesseract',str(ocr_path),'stdout','--psm','6'],env).stdout)
+            ocr_path.unlink()
         for term in required:
             # At small sizes Tesseract sometimes reads the highlighted German
             # selection count's final letters as "ahit". Keep the numeric count
@@ -322,7 +331,7 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
         key('ctrl+k'); type_text('NO MATCH UI')
-        expect('local search filter reports no matching rows', ['Keine lokalen Treffer'])
+        expect('local search filter reports no matching rows', ['Keine passenden Gespräche oder Personen'])
         key('ctrl+a'); key('BackSpace')
         click('schreiben')
         type_text('DRAFTALPHA'); key('Return')
@@ -433,6 +442,53 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('Offline Enter did not submit the draft to the scoped thread')
         if 'UI_THREAD_FIXTURE offline_reply_queued=true' not in log:
             raise AssertionError('The fixture did not acknowledge local thread staging')
+    elif scenario == 'search-navigation':
+        expect('switcher displays its initial matching conversation', ['Produktteam', 'Gruppengespräch'])
+        click('Produkt', xmin=300, ymin=300)
+        key('ctrl+a'); key('BackSpace')
+        expect_settled('empty switcher shows recent rooms', ['Mara Fischer', 'Weber'])
+        key('Down'); key('Down'); key('Return')
+        expect_settled('arrows and Enter open the selected conversation', ['Nachricht an Mara Fischer'], ['Mit Pfeiltasten auswählen'])
+        key('ctrl+k')
+        expect('keyboard shortcut reopens switcher', ['Mit Pfeiltasten auswählen'])
+        type_text('Jonas')
+        expect_settled('switcher matches a group participant as well as a direct room', ['Jonas Weber', 'Produktteam'])
+        key('Escape')
+        expect('Escape closes switcher', ['Nachricht an Mara Fischer'], ['Mit Pfeiltasten auswählen'])
+    elif scenario == 'account-search':
+        expect('account search groups matching messages', ['Produktteam', 'Navigation', 'Mara Fischer'])
+        key('Return')
+        expect('Enter opens the selected message in context', ['Nachricht an Produktteam'], ['Weitere Ergebnisse'])
+    elif scenario == 'discover':
+        expect('open conversations show descriptions and counts', ['Designrunde', 'Kaffeepause', '18 Teilnehmende'])
+        click('discovery-search-input', inspected_point=(1280, 800, 340, 320))
+        time.sleep(.25)
+        type_text('Design')
+        expect_settled('typing narrows the loaded rooms immediately', ['Designrunde'], ['Kaffeepause'])
+        key('Escape')
+        expect('Escape closes open conversation browsing', ['Nachricht an Produktteam'], ['Designrunde'])
+    elif scenario == 'reference-preview':
+        expect('resolved reference card is shown with its source message', ['Ein ruhiger Ort', 'Studiokonzept'])
+        click('Vorschau verbergen', inspected_point=(1280, 800, 826, 400))
+        expect('reference card can be collapsed locally', ['Vorschau anzeigen'], ['Ein ruhiger Ort'])
+        click('Vorschau', xmin=300, ymin=250)
+        expect('collapsed reference card can be restored', ['Ein ruhiger Ort', 'Studiokonzept'])
+    elif scenario in ('create34', 'create35'):
+        expect('creation form shows the inline invitations and presets', ['Projekt Atlas', 'Mara Fischer', 'Jonas Weber', 'Webinar'])
+        click('Offenes', xmin=300)
+        expect('open conversation choice describes link access', ['Personen mit Link'])
+        click('Webinar', xmin=300)
+        expect('a preset explains its purpose', ['moderierte Veranstaltungen'])
+    elif scenario == 'sidebar-room-menu':
+        expect('conversation actions expose notification settings', ['Benachrichtigungen', 'Archivieren'])
+        click('Benachrichtigungen')
+        time.sleep(1)
+        expect('sidebar action opens the selected room notification controls', ['Alle Nachrichten', 'Nur Erwähnungen', 'Anrufbenachrichtigungen'])
+    elif scenario == 'search-filter':
+        click('Alle', ymin=190)
+        expect_settled('sidebar filters start with the loaded rooms', ['Produktteam', 'Designbesprechung', 'Erwähnungen'])
+        click('Erwähnungen')
+        expect_settled('mention filter keeps known mentions and explains unknown state', ['Produktteam', 'Erwähnungen sind noch nicht bekannt'], ['Designbesprechung'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])

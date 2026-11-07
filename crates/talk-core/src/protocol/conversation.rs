@@ -16,6 +16,7 @@ pub enum Setting {
     Avatar,
     ReadOnly,
     Notifications,
+    CallNotifications,
     Important,
     Sensitive,
     Expiration,

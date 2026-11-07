@@ -36,6 +36,7 @@ impl AssetSource for Assets {
             "icons/browser.svg" => include_bytes!("../../assets/icons/browser.svg"),
             "icons/check.svg" => include_bytes!("../../assets/icons/check.svg"),
             "icons/check-circle.svg" => include_bytes!("../../assets/icons/check-circle.svg"),
+            "icons/bell-off.svg" => include_bytes!("../../assets/icons/bell-off.svg"),
             "icons/bell.svg" => include_bytes!("../../assets/icons/bell.svg"),
             "icons/clock.svg" => include_bytes!("../../assets/icons/clock.svg"),
             "icons/refresh.svg" => include_bytes!("../../assets/icons/refresh.svg"),

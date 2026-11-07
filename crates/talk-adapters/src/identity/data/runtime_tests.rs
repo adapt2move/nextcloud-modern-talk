@@ -46,6 +46,7 @@ async fn cache_reads_and_durable_admission_bypass_a_blocked_credential_restore_a
                 unread: 0,
                 unread_direct_mention: None,
                 last_read_message: None,
+                unread_mention: None,
                 participant_count: Some(3),
                 participant_count_at: Some(now),
                 last_activity: Some(now),

@@ -140,8 +140,6 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   markers, quotes, links and code with hidden syntax and canonical Markdown
   serialization. Arbitrary Notion blocks, tables and embedded content are absent.
   Native rich-editor/link/IME interaction still needs platform qualification.
-- Complete document viewers, account-wide content search and parts of moderation
-  remain incomplete. Documents can open in the Cloud web view.
 - Typing uses the active ordinary local room's internal or HPB signaling session
   only when typing privacy and current room policy permit it. Classified,
   channel, federated and unknown-policy rooms are excluded. Indicators are
@@ -173,6 +171,31 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   deterministic waveform placeholder supports pointer scrubbing and five-second
   arrow-key seeking; it is not derived from the audio. Native microphone, speaker,
   permission and mobile interoperability have not yet been qualified.
+- The quick switcher searches loaded conversation names, up to 16 observed
+  participant names per eligible room, and the server's user directory. Its
+  participant index is session-only and is filled gradually when permitted.
+  Sidebar unread and mention filters are stored per durable account. Eligible
+  cached rooms retain previously reported mention flags; missing or changed
+  observations remain unknown. Room notification edits are optimistic and
+  reconciled with the server. An uncertain write requires a fresh room read.
+- Open-conversation browsing requires `listable-rooms`. The Talk v4 listing
+  does not expose a reliable member count before joining; protected or unknown
+  password states cannot yet be joined through the directory.
+- Account-wide message search requires the server's Talk message provider and
+  supported filters. It shows at most two pages and only results for rooms in
+  the currently admitted room list; offline suggestions use the selected cached
+  history. Search dates use the local system timezone and locale formatting,
+  including daylight-saving changes; date filters wait for timezone discovery.
+  Complete document viewers and parts of moderation remain incomplete. Documents can
+  open in the Cloud web view.
+- Link cards resolve at most two HTTP(S) links per eligible message using the
+  NextCloud references endpoint. Up to 64 URLs are held in a session cache for
+  fifteen minutes; negative results expire sooner. Only installation-owned
+  reference-preview image routes are fetched, with bounded decoded image sizes.
+  Provider selection and arbitrary embedded web content are not implemented.
+- Conversation creation supports local-directory invitations and the returned
+  webinar, presentation and voice-room presets. Other special-purpose presets
+  and non-user invitation sources are not offered in the creation flow.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms
@@ -253,6 +276,8 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   need platform qualification. Windows is compile-checked only.
 - Native credential storage may be unavailable or report cleanup pending.
   The explicitly selected private-file fallback is persistent but unencrypted.
+- Local preferences saved by this version use schema 8; older clients cannot open
+  those preferences.
 - macOS profiles upgraded to the persistent volume association cannot be opened
   by v0.0.8 and older builds. A legacy profile whose mount device value changed
   needs the explicit storage reassociation action. Copied or replaced directories

@@ -43,6 +43,7 @@ pub enum RoomSetting {
     Avatar,
     ReadOnly,
     Notifications,
+    CallNotifications,
     Important,
     Sensitive,
     Expiration,
@@ -108,9 +109,23 @@ pub struct AccountPerson {
     pub label: Text<512>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreationPreset {
+    pub id: Text<128>,
+    pub name: Text<256>,
+    pub description: Text<1024>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CreateAction {
     Refresh,
     FindPeople(Text<256>),
+    AddInvite(AccountPersonRef),
+    RemoveInvite(AccountPersonRef),
+    Conversation {
+        name: Text<256>,
+        description: Text<2000>,
+        public: bool,
+        preset: Option<Text<128>>,
+    },
     Group(Text<256>),
     Direct(AccountPersonRef),
     DirectMember(PersonRef),
@@ -124,11 +139,18 @@ pub struct CreationResult {
     pub request: RequestId,
     pub completion: Completion,
     pub conversation: Option<ConversationRef>,
+    pub incomplete_invitations: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreatePanel {
     pub account: AccountScope,
     pub group: Decision,
+    pub extended: super::presentation::FeatureSupport,
+    pub public: super::presentation::FeatureSupport,
+    pub private_allowed: bool,
+    pub public_allowed: bool,
+    pub presets: Page<CreationPreset, 30>,
+    pub invites: Page<AccountPerson, 20>,
     pub state: RemoteState,
     pub uncertain: bool,
     pub people: Page<AccountPerson, 100>,
@@ -140,6 +162,12 @@ impl CreatePanel {
         Self {
             account,
             group: Decision::Unknown,
+            extended: super::presentation::FeatureSupport::Unknown,
+            public: super::presentation::FeatureSupport::Unknown,
+            private_allowed: false,
+            public_allowed: false,
+            presets: Page::empty(),
+            invites: Page::empty(),
             state: RemoteState::Idle,
             uncertain: false,
             people: Page::empty(),

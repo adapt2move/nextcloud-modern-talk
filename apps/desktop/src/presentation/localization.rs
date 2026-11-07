@@ -1,10 +1,13 @@
 //! Own interface copy only. User, room and message content never enters this catalog.
 //! Source keys are stable German author strings; translations remain centralized.
+mod account_search;
 mod call;
 mod chat;
 mod connection;
 mod content;
 mod conversation;
+mod creation;
+mod discovery;
 mod files;
 mod onboarding;
 mod own_status;
@@ -13,7 +16,10 @@ mod polls;
 mod private_reply;
 mod reaction_authors;
 mod recovery;
+mod reference;
 mod resources;
+mod search_navigation;
+mod sidebar_notifications;
 mod threads;
 mod typing;
 mod unread;
@@ -27,12 +33,18 @@ pub fn text(locale: Locale, key: &str) -> &str {
     }
     for catalog in [
         call::MESSAGES,
+        account_search::MESSAGES,
         chat::MESSAGES,
         connection::MESSAGES,
         content::MESSAGES,
         files::MESSAGES,
         polls::MESSAGES,
         conversation::MESSAGES,
+        creation::MESSAGES,
+        discovery::MESSAGES,
+        reference::MESSAGES,
+        search_navigation::MESSAGES,
+        sidebar_notifications::MESSAGES,
         resources::MESSAGES,
         threads::MESSAGES,
         unread::MESSAGES,
@@ -97,12 +109,18 @@ mod tests {
     #[test]
     fn resource_keys_are_unique_and_translations_preserve_named_arguments() {
         for catalog in [
+            account_search::MESSAGES,
+            search_navigation::MESSAGES,
+            sidebar_notifications::MESSAGES,
             resources::MESSAGES,
             threads::MESSAGES,
             unread::MESSAGES,
             recovery::MESSAGES,
             conversation::MESSAGES,
             call::MESSAGES,
+            creation::MESSAGES,
+            discovery::MESSAGES,
+            reference::MESSAGES,
             chat::MESSAGES,
             connection::MESSAGES,
             content::MESSAGES,

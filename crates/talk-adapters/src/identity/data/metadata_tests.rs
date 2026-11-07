@@ -27,6 +27,12 @@ fn legacy_room_decodes_without_details_and_observation_schema_has_no_authority_f
     );
     let restored: CacheRoom = codec::decode(&legacy, META_BYTES).unwrap();
     assert_eq!(restored.observation, None);
+    assert_eq!(restored.unread_mention, None);
+    let mut mentioned = base.clone();
+    mentioned.unread_mention = Some(true);
+    let encoded = codec::encode(&mentioned, META_BYTES).unwrap();
+    let restored: CacheRoom = codec::decode(&encoded, META_BYTES).unwrap();
+    assert_eq!(restored.unread_mention, Some(true));
     let mut value = base;
     assert!(value.retain_observation(observation(100)));
     let encoded = codec::encode(&value, META_BYTES).unwrap();

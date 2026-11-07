@@ -240,6 +240,7 @@ fn feature(setting: Setting) -> &'static str {
         Setting::Avatar => "avatar",
         Setting::ReadOnly => "read-only-rooms",
         Setting::Notifications => "notification-levels",
+        Setting::CallNotifications => "notification-calls",
         Setting::Important => "important-conversations",
         Setting::Sensitive => "sensitive-conversations",
         Setting::Expiration => "message-expiration",
@@ -322,7 +323,10 @@ pub(super) fn control(
         Decision::Unknown
     } else if (matches!(
         setting,
-        Setting::Notifications | Setting::Important | Setting::Sensitive
+        Setting::Notifications
+            | Setting::CallNotifications
+            | Setting::Important
+            | Setting::Sensitive
     ) || moderator(room))
     {
         Decision::Allowed
@@ -493,6 +497,7 @@ impl NextcloudClient {
             Setting::Avatar,
             Setting::ReadOnly,
             Setting::Notifications,
+            Setting::CallNotifications,
             Setting::Important,
             Setting::Sensitive,
             Setting::Expiration,
@@ -757,7 +762,8 @@ impl NextcloudClient {
             C::SetName(_) | C::SetDescription(_) => Setting::Metadata,
             C::SetEmojiAvatar { .. } | C::RemoveAvatar => Setting::Avatar,
             C::SetReadOnly(_) => Setting::ReadOnly,
-            C::SetNotifications(_) | C::SetCallNotifications(_) => Setting::Notifications,
+            C::SetNotifications(_) => Setting::Notifications,
+            C::SetCallNotifications(_) => Setting::CallNotifications,
             C::SetImportant(_) => Setting::Important,
             C::SetSensitive(_) => Setting::Sensitive,
             C::SetExpiration(_) => Setting::Expiration,

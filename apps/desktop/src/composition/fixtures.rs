@@ -4,10 +4,10 @@ mod dialog;
 pub(super) use content::images as content_images;
 use talk_core::ui::presentation::{
     AccountView, CallStage, CallStreamView, CallTileKind, CallView, Completion, ContentState,
-    ConversationKind, ConversationRef, ConversationView, DeliveryState, FileView, LoginFailure,
-    LoginPhase, LoginView, MediaState, NativeDesktopPort, NativeStoreState, ParticipantView,
-    Presence, PresentationSnapshot, RequestId, RequiredGate, ScreenShareState, StorageStatus,
-    SubmissionResult, UiIntent,
+    ConversationKind, ConversationRef, ConversationView, DeliveryState, FeatureSupport, FileView,
+    LoginFailure, LoginPhase, LoginView, MediaState, NativeDesktopPort, NativeStoreState,
+    ParticipantView, Presence, PresentationSnapshot, RequestId, RequiredGate, ScreenShareState,
+    StorageStatus, SubmissionResult, UiIntent,
 };
 use talk_core::ui::{
     AccountId, AccountScope, CallGeneration, CallScope, ConversationId, Decision, HostId, Page,
@@ -144,9 +144,15 @@ pub const SCENARIOS: &[&str] = &[
     "files",
     "thread",
     "search",
+    "search-navigation",
+    "account-search",
+    "reference-preview",
+    "search-filter",
+    "sidebar-room-menu",
     "create34",
     "create35",
     "discover",
+    "discover-joining",
     "uncertain",
     "pending",
     "incoming",
@@ -465,6 +471,92 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     account
                 }),
         );
+        return state;
+    }
+    if scenario == Some("sidebar-room-menu") {
+        return snapshot(Some("details-ready"));
+    }
+    if scenario == Some("discover-joining") {
+        let mut state = snapshot(Some("chat"));
+        let context = context(7);
+        let mut room = state.conversations.as_slice()[0].clone();
+        room.context = context;
+        room.navigation_key = None;
+        room.title = text("Designrunde");
+        room.kind = ConversationKind::Unknown;
+        room.send = Decision::Unknown;
+        room.attach = Decision::Unknown;
+        room.call = Decision::Unknown;
+        room.call_scope = None;
+        room.draft_clipboard = Decision::Unknown;
+        room.favorite = None;
+        room.archive = Decision::Unknown;
+        room.participants = None;
+        room.unread = 0;
+        room.unread_mention = None;
+        room.notification_muted = None;
+        room.organization.category = talk_core::ui::presentation::ConversationCategory::Unknown;
+        room.organization.favorites = FeatureSupport::Unknown;
+        room.organization.favorite_change = Decision::Unknown;
+        room.organization.classified = None;
+        state.conversations =
+            page(std::iter::once(room).chain(state.conversations.as_slice().iter().cloned()));
+        state.selected = Some(context);
+        state.content = ContentState::Loading;
+        state.messages = Page::empty();
+        state.files = Page::empty();
+        state.participants = Page::empty();
+        state.conversation_panel = None;
+        state.message_panel = None;
+        state.content_panel = Default::default();
+        state.discover_panel = Some(talk_core::ui::discover::Panel {
+            account: context.account,
+            request: RequestId(1),
+            query: text(""),
+            support: FeatureSupport::Supported,
+            state: talk_core::ui::conversation::RemoteState::Saving(RequestId(1)),
+            rooms: page([talk_core::ui::discover::Room {
+                context,
+                name: text("Designrunde"),
+                description: None,
+                participants: None,
+                join: Decision::Allowed,
+            }]),
+            loaded: true,
+            joining: Some(context),
+            uncertain: false,
+        });
+        return state;
+    }
+    if scenario == Some("reference-preview") {
+        let mut state = snapshot(Some("chat"));
+        let context = state.selected.expect("fictional room");
+        let mut first = state.messages.as_slice()[0].clone();
+        first.body = text("Hier ist der Entwurf: https://example.test/studio");
+        first.attachments = Page::empty();
+        first.metadata.rich = Page::empty();
+        state.messages =
+            page(std::iter::once(first).chain(state.messages.as_slice().iter().skip(1).cloned()));
+        state.reference_previews = page([talk_core::ui::reference::Preview {
+            context,
+            message: 1,
+            ordinal: 0,
+            title: text("Ein ruhiger Ort für neue Ideen"),
+            description: Some(text("Ein fiktiver Einblick in das neue Studiokonzept.")),
+        }]);
+        state.content_panel.account = Some(context.account);
+        state.content_panel.context = Some(context);
+        state.content_panel.assets = page([talk_core::ui::content::AssetView {
+            target: talk_core::ui::content::AssetTarget::Reference {
+                context,
+                message: 1,
+                ordinal: 0,
+            },
+            state: talk_core::ui::content::AssetState::Ready { key: 42 },
+            emoji: None,
+            color: None,
+            document_pages: None,
+        }]);
         return state;
     }
     if matches!(
@@ -884,6 +976,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         content_panel: talk_core::ui::content::ContentPanel::default(),
         file_export: None,
         create_panel: None,
+        discover_panel: None,
+        search_panel: None,
+        reference_previews: Page::empty(),
         revision: 1,
         login: LoginView {
             phase: LoginPhase::EnterServer,
@@ -992,7 +1087,12 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     }
     s.accounts = page([AccountView {
         scope: scope(),
-        navigation_key: None,
+        navigation_key: Some(
+            talk_core::preferences::navigation::NavigationAccountKey::new(
+                "a1:00000000000000000000000000000001:00000000000000000000000000000002",
+            )
+            .expect("fixture key"),
+        ),
         connection: talk_core::ui::presentation::AccountConnectionState::Disconnected,
         connection_failure: match scenario {
             "chat-server-denied" | "accounts-server-denied" => {
@@ -1099,6 +1199,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 archived: Some(id == 6),
                 archive: Decision::Unknown,
                 unread,
+                unread_mention: Some(id == 1),
+                notification_muted: Some(id == 4),
+                last_activity: Some(100 - id as u64),
                 unread_direct_mention: Some(id == 1 && unread > 0),
                 last_read_message: (id == 1).then_some(1),
                 presence: if scenario == "chat-presence" && id == 3 {
@@ -1116,6 +1219,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 } else {
                     7
                 }),
+                participant_names: if id == 1 {
+                    page([text("Mara Fischer"), text("Jonas Weber")])
+                } else {
+                    Page::empty()
+                },
                 send: Decision::Allowed,
                 attach: Decision::Unknown,
                 draft_clipboard: Decision::Allowed,
@@ -1147,6 +1255,17 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             },
         ),
     );
+    if scenario == "search-filter" {
+        s.conversations = page(s.conversations.as_slice().iter().cloned().map(|mut row| {
+            if row.context == context(2) {
+                row.unread_mention = None;
+            }
+            if row.context == context(1) {
+                row.unread = 1;
+            }
+            row
+        }));
+    }
     match scenario {
         "offline" => s.content = ContentState::Offline,
         "offline-empty" => {
@@ -1437,6 +1556,130 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             panel.older = Some(101);
             s.message_panel = Some(panel);
         }
+    }
+    if scenario == "account-search" {
+        s.accounts = page(s.accounts.as_slice().iter().cloned().map(|mut account| {
+            account.connection = talk_core::ui::presentation::AccountConnectionState::Connected;
+            account
+        }));
+        s.search_panel = Some(talk_core::ui::search::Panel {
+            account: scope(),
+            request: RequestId(1),
+            term: text("Navigation"),
+            filters: talk_core::ui::search::Filters {
+                conversation: None,
+                person: None,
+                from_self: false,
+                since: None,
+                until: None,
+            },
+            state: talk_core::ui::conversation::RemoteState::Idle,
+            hits: page([
+                talk_core::ui::search::Hit {
+                    context: context(1),
+                    message: 1,
+                    title: text("Mara Fischer"),
+                    excerpt: text("Die neue Navigation ist bereit für einen letzten Blick."),
+                },
+                talk_core::ui::search::Hit {
+                    context: context(1),
+                    message: 2,
+                    title: text("Jonas Weber"),
+                    excerpt: text("Können wir die Navigation noch einmal prüfen?"),
+                },
+                talk_core::ui::search::Hit {
+                    context: context(2),
+                    message: 8,
+                    title: text("Alex Sommer"),
+                    excerpt: text("Die Navigation ist im Entwurf aktualisiert."),
+                },
+            ]),
+            loaded: true,
+            more: true,
+        });
+    }
+    if scenario == "discover" {
+        s.accounts = page(s.accounts.as_slice().iter().cloned().map(|mut account| {
+            account.connection = talk_core::ui::presentation::AccountConnectionState::Connected;
+            account
+        }));
+        s.discover_panel = Some(talk_core::ui::discover::Panel {
+            account: scope(),
+            request: RequestId(1),
+            query: text(""),
+            support: talk_core::ui::presentation::FeatureSupport::Supported,
+            state: talk_core::ui::conversation::RemoteState::Idle,
+            rooms: page([
+                talk_core::ui::discover::Room {
+                    context: context(7),
+                    name: text("Designrunde"),
+                    description: Some(text(
+                        "Ideen, Entwürfe und offene Fragen aus dem Designteam.",
+                    )),
+                    participants: Some(18),
+                    join: Decision::Allowed,
+                },
+                talk_core::ui::discover::Room {
+                    context: context(8),
+                    name: text("Kaffeepause"),
+                    description: Some(text("Ein Ort für kurze Gespräche zwischendurch.")),
+                    participants: Some(9),
+                    join: Decision::Allowed,
+                },
+                talk_core::ui::discover::Room {
+                    context: context(9),
+                    name: text("Community-Projekte"),
+                    description: Some(text("Gemeinsam an neuen Projekten arbeiten.")),
+                    participants: None,
+                    join: Decision::Allowed,
+                },
+            ]),
+            loaded: true,
+            joining: None,
+            uncertain: false,
+        });
+    }
+    if matches!(scenario, "create34" | "create35") {
+        use talk_core::ui::conversation::{
+            AccountPerson, AccountPersonRef, CreatePanel, CreationPreset,
+        };
+        let mut panel = CreatePanel::new(scope());
+        panel.group = Decision::Allowed;
+        panel.extended = talk_core::ui::presentation::FeatureSupport::Supported;
+        panel.public = talk_core::ui::presentation::FeatureSupport::Supported;
+        panel.private_allowed = true;
+        panel.public_allowed = true;
+        panel.invites = page([
+            AccountPerson {
+                id: AccountPersonRef {
+                    account: scope(),
+                    local: 1,
+                },
+                name: text("Mara Fischer"),
+                label: text("Design"),
+            },
+            AccountPerson {
+                id: AccountPersonRef {
+                    account: scope(),
+                    local: 2,
+                },
+                name: text("Jonas Weber"),
+                label: text("Produkt"),
+            },
+        ]);
+        panel.presets = page([
+            CreationPreset {
+                id: text("webinar"),
+                name: text("Webinar"),
+                description: text("Für moderierte Veranstaltungen."),
+            },
+            CreationPreset {
+                id: text("presentation"),
+                name: text("Präsentation"),
+                description: text("Für gemeinsame Präsentationen."),
+            },
+        ]);
+        s.create_panel = Some(panel);
     }
     s
 }
@@ -2215,6 +2458,7 @@ impl NativeDesktopPort for DevelopmentPort {
                     request,
                     completion: Completion::ServerAccepted,
                     conversation: Some(direct),
+                    incomplete_invitations: false,
                 });
                 self.snapshot.create_panel = Some(panel);
             }

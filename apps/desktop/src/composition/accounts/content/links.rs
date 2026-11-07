@@ -51,6 +51,7 @@ fn destination(
                         .as_slice()
                         .iter()
                         .chain(p.thread_messages.as_slice())
+                        .chain(p.thread_root_message.iter())
                         .chain(p.pinned_messages.as_slice())
                 }),
         )

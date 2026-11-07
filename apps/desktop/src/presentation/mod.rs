@@ -1,4 +1,5 @@
 mod account_removal;
+mod account_search;
 mod account_settings;
 mod attachments;
 mod call;
@@ -9,6 +10,7 @@ mod controls;
 mod conversation_dialog;
 mod creation;
 mod device_settings;
+mod discovery;
 mod feedback;
 mod focus;
 pub mod input;
@@ -25,12 +27,14 @@ mod people_card;
 mod permissions;
 pub mod preferences;
 pub(super) mod probes;
+mod references;
 mod selectable;
 mod settings;
 mod settings_pages;
 mod shell;
 mod sidebar;
 mod state;
+mod switcher;
 pub mod theme;
 mod toast;
 mod typing;
@@ -93,8 +97,11 @@ pub enum LocalAction {
     Window(window_chrome::Action),
     Content(content::Action),
     CreateMode(bool),
+    CreatePublic(bool),
+    CreatePreset(Option<talk_core::ui::Text<128>>),
+    AddCreationInvite(talk_core::ui::conversation::AccountPersonRef),
+    RemoveCreationInvite(talk_core::ui::conversation::AccountPersonRef),
     FindPeople,
-    FindSearchPeople,
     CreateConversation,
     CreateDirect(talk_core::ui::conversation::AccountPersonRef),
     CheckUpdates,
@@ -106,6 +113,7 @@ pub enum LocalAction {
     EmojiPicker(ConversationRef),
     ThreadEmojiPicker(ConversationRef),
     Open(Overlay),
+    OpenRoomNotifications,
     Close,
     DismissFeedback,
     DismissActionToast(ConversationRef, u64),
@@ -139,6 +147,8 @@ pub enum LocalAction {
     ThreadNotification(i8),
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
+    SidebarFilter(talk_core::preferences::navigation::SidebarFilter),
+    SidebarRoomNotifications(ConversationRef),
     Favorite(ConversationRef, bool),
     Archive(ConversationRef, bool),
     Send,
@@ -201,6 +211,18 @@ pub enum LocalAction {
     StopDevice(talk_core::preferences::devices::DeviceKind),
     Search,
     SearchKind(SearchKind),
+    AccountSearchSubmit,
+    AccountSearchMore,
+    AccountSearchFindPerson,
+    AccountSearchSelf,
+    AccountSearchPerson(talk_core::ui::conversation::AccountPersonRef),
+    AccountSearchRooms,
+    AccountSearchRoom(Option<ConversationRef>),
+    AccountSearchHit(ConversationRef, u128),
+    DiscoverSearch,
+    DiscoverJoin(ConversationRef),
+    ToggleReference(ConversationRef, u128, u16),
+    OpenReference(ConversationRef, u128, u16),
     CreateGroup,
     RenameLocalGroup(talk_core::preferences::navigation::NavigationGroupId),
     MoveLocalGroup(talk_core::preferences::navigation::NavigationGroupId, bool),
@@ -250,6 +272,7 @@ pub struct InitialView {
     pub new_thread_fixture: bool,
     pub private_reply_fixture: bool,
     pub scale: u16,
+    pub sidebar_menu_fixture: bool,
 }
 
 use crate::presentation::feedback::Feedback;
@@ -264,6 +287,11 @@ pub struct Desktop {
     update_restart_pending: bool,
     room_ui: conversation_dialog::RoomUi,
     people_card: people_card::Card,
+    account_search_ui: account_search::AccountSearchUi,
+    discovery_search: Entity<TextInput>,
+    discovery_request: u64,
+    discovery_join: Option<ConversationRef>,
+    reference_ui: references::ReferenceUi,
     message_ui: messaging::MessageUi,
     content_ui: content::ContentUi,
     offline_notice: connectivity::Notice,
@@ -404,6 +432,7 @@ pub struct Desktop {
     account_removal: account_removal::AccountRemovalUi,
     pub search_kind: SearchKind,
     directory_query: Option<(talk_core::ui::AccountScope, String)>,
+    switcher: switcher::Switcher,
     pub thread_parent: Option<(ConversationRef, u128)>,
     pending_thread_open: Option<(ConversationRef, u128)>,
     thread_width: f32,
@@ -456,6 +485,7 @@ impl Desktop {
             new_thread_fixture,
             private_reply_fixture,
             scale,
+            sidebar_menu_fixture,
         } = initial;
         let snapshot = port
             .take_snapshot()
@@ -468,6 +498,11 @@ impl Desktop {
         let mut recording_consent = call::consent::State::default();
         recording_consent.observe(consent_scope);
         let initial_overlay = initial_overlay.or(consent_scope.map(|_| Overlay::RecordingConsent));
+        let fixture_sidebar_menu = if sidebar_menu_fixture {
+            snapshot.selected.map(|context| (context, "room"))
+        } else {
+            None
+        };
         let initial_room_menu = (development && room_menu_fixture)
             .then(|| {
                 snapshot.conversations.as_slice().iter().find(|room| {
@@ -525,7 +560,7 @@ impl Desktop {
             let _ = weak.update(cx, |_, cx| cx.notify());
         });
         let input_observers = [
-            cx.observe(&search, |_, _, cx| cx.notify()),
+            cx.observe(&search, |this, _, cx| this.switcher_input_changed(cx)),
             cx.observe(&sidebar_filter, |_, _, cx| cx.notify()),
             cx.observe(&composer, |_, _, cx| cx.notify()),
             cx.observe(&thread_composer, |_, _, cx| cx.notify()),
@@ -569,6 +604,9 @@ impl Desktop {
                 preferences.active.locale.resolve(&[])
             };
         let room_ui = conversation_dialog::RoomUi::new(theme, cx);
+        let account_search_ui = account_search::AccountSearchUi::new(theme, cx);
+        let discovery_search =
+            cx.new(|cx| TextInput::new("Offene Gespräche suchen …", 256, theme, cx));
         let message_ui = messaging::MessageUi::new(cx);
         let content_ui =
             content::ContentUi::new(theme, snapshot.active_account, snapshot.selected, cx);
@@ -576,6 +614,8 @@ impl Desktop {
         for input in room_ui
             .inputs()
             .into_iter()
+            .chain(account_search_ui.inputs())
+            .chain([discovery_search.clone()])
             .chain([
                 message_ui.search.clone(),
                 message_ui.time_input.clone(),
@@ -633,6 +673,11 @@ impl Desktop {
             _text_link_subscription: text_link_subscription,
             room_ui,
             people_card: people_card::Card::new(cx),
+            account_search_ui,
+            discovery_search,
+            discovery_request: 0,
+            discovery_join: None,
+            reference_ui: references::ReferenceUi::default(),
             message_ui,
             content_ui,
             offline_notice: connectivity::Notice::default(),
@@ -702,7 +747,7 @@ impl Desktop {
                 SidebarDestination::Conversations
             },
             collapsed_sections: [false; 5],
-            room_menu: initial_room_menu,
+            room_menu: fixture_sidebar_menu.or(initial_room_menu),
             archive_request: 0,
             navigation_open: false,
             sidebar_hidden: false,
@@ -753,6 +798,7 @@ impl Desktop {
             account_removal: account_removal::AccountRemovalUi::new(cx),
             search_kind: SearchKind::All,
             directory_query: None,
+            switcher: switcher::Switcher::default(),
             thread_parent: None,
             pending_thread_open: None,
             thread_width: 400.,
@@ -844,7 +890,31 @@ impl Desktop {
             );
         }
         if development && initial_overlay == Some(Overlay::Search) {
-            desktop.search.update(cx, |i, _| i.set_value("Navigation"));
+            let term = desktop
+                .snapshot
+                .search_panel
+                .as_ref()
+                .map(|p| p.term.as_str().to_owned());
+            if term.is_some() {
+                desktop.search_kind = SearchKind::Messages;
+            }
+            desktop
+                .search
+                .update(cx, |i, _| i.set_value(term.as_deref().unwrap_or("Produkt")));
+            desktop.switcher_input_changed(cx);
+        }
+        if development
+            && initial_overlay == Some(Overlay::Create)
+            && desktop.snapshot.create_panel.is_some()
+        {
+            desktop.room_ui.create_direct = false;
+            desktop
+                .conversation_name
+                .update(cx, |i, _| i.set_value("Projekt Atlas"));
+            desktop
+                .room_ui
+                .description
+                .update(cx, |i, _| i.set_value("Ideen und Updates für das Projekt."));
         }
         if development {
             desktop
@@ -1135,6 +1205,7 @@ impl Desktop {
         {
             self.recent_call_reaction = Some((call.scope, reaction.clone(), Instant::now()));
         }
+        self.observe_reference_previews(&next);
         self.snapshot = next;
         self.retain_thread_edit();
         let limit = self.composer_message_limit();
@@ -1146,6 +1217,8 @@ impl Desktop {
         self.refresh_content_ui(cx);
         self.refresh_private_reply();
         self.refresh_creation(cx);
+        self.refresh_account_search_jump();
+        self.refresh_discovery();
         self.refresh_room_dialog(cx);
         self.refresh_message_ui_after_rebind(
             selected_rebind && self.message_ui.editing.is_some(),
@@ -1159,6 +1232,7 @@ impl Desktop {
             self.stop_device_preview(cx);
         }
         if previous_account != self.snapshot.active_account {
+            self.room_menu = None;
             self.permission_ui.microphone_ready = false;
             self.destination = SidebarDestination::Conversations;
             self.collapsed_sections = [false; 5];
@@ -1167,6 +1241,9 @@ impl Desktop {
             self.highlighted_message = None;
             self.highlight_started = None;
             self.sidebar_filter.update(cx, |i, _| i.reset());
+            self.account_search_ui.reset(cx);
+            self.discovery_search.update(cx, |input, _| input.reset());
+            self.discovery_join = None;
             self.feedback_return_focus = None;
             self.pending_feedback_focus = false;
             self.search.update(cx, |i, cx| {
@@ -1453,6 +1530,14 @@ impl Desktop {
             LocalAction::Window(action) => action.perform(window),
             LocalAction::Content(action) => self.content_action(action, window, cx),
             LocalAction::CreateMode(direct) => self.room_ui.create_direct = direct,
+            LocalAction::CreatePublic(public) => self.room_ui.create_public = public,
+            LocalAction::CreatePreset(preset) => self.room_ui.create_preset = preset,
+            LocalAction::AddCreationInvite(person) => {
+                self.submit_creation(talk_core::ui::conversation::CreateAction::AddInvite(person))
+            }
+            LocalAction::RemoveCreationInvite(person) => self.submit_creation(
+                talk_core::ui::conversation::CreateAction::RemoveInvite(person),
+            ),
             LocalAction::FindPeople => {
                 if let Ok(query) =
                     talk_core::ui::Text::new(self.room_ui.search.read(cx).content.trim())
@@ -1462,16 +1547,33 @@ impl Desktop {
                     ));
                 }
             }
-            LocalAction::FindSearchPeople => self.find_search_people(cx),
             LocalAction::CreateConversation => {
-                if let Ok(name) =
-                    talk_core::ui::Text::new(self.conversation_name.read(cx).content.trim())
-                {
-                    self.submit_creation(talk_core::ui::conversation::CreateAction::Group(name));
+                if let (Ok(name), Ok(description)) = (
+                    talk_core::ui::Text::new(self.conversation_name.read(cx).content.trim()),
+                    talk_core::ui::Text::new(self.room_ui.description.read(cx).content.trim()),
+                ) {
+                    self.submit_creation(talk_core::ui::conversation::CreateAction::Conversation {
+                        name,
+                        description,
+                        public: self.room_ui.create_public,
+                        preset: self.room_ui.create_preset.clone(),
+                    });
                 }
             }
             LocalAction::Person(action) => self.person_action(action, window, cx),
             LocalAction::CreateDirect(person) => {
+                if self.overlay == Some(Overlay::Search)
+                    && !self
+                        .directory_query
+                        .as_ref()
+                        .is_some_and(|(account, query)| {
+                            Some(*account) == self.snapshot.active_account
+                                && *account == person.account
+                                && query == &self.search.read(cx).content.trim().to_lowercase()
+                        })
+                {
+                    return;
+                }
                 self.submit_creation(talk_core::ui::conversation::CreateAction::Direct(person))
             }
             LocalAction::CheckUpdates => {
@@ -1529,6 +1631,18 @@ impl Desktop {
                     self.show_composer_emoji(true, window, cx);
                 }
             }
+            LocalAction::OpenRoomNotifications => {
+                self.handle(LocalAction::Open(Overlay::RoomInfo), window, cx);
+                if self.overlay == Some(Overlay::RoomInfo) {
+                    self.handle(
+                        LocalAction::Room(conversation_dialog::Action::Tab(
+                            conversation_dialog::Tab::Notifications,
+                        )),
+                        window,
+                        cx,
+                    );
+                }
+            }
             LocalAction::Open(overlay) => {
                 self.own_status_open = false;
                 self.own_status_editing = false;
@@ -1557,6 +1671,7 @@ impl Desktop {
                 {
                     return;
                 }
+                self.room_menu = None;
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
@@ -1593,13 +1708,20 @@ impl Desktop {
                 if overlay == Overlay::Create {
                     self.open_creation(cx);
                 }
+                if overlay == Overlay::Discover {
+                    self.open_discovery(cx);
+                }
                 if matches!(overlay, Overlay::RoomInfo | Overlay::Participants) {
                     self.open_room_dialog(overlay, cx);
                 }
                 self.pending_modal_focus = true;
                 if overlay == Overlay::Search {
                     self.directory_query = None;
+                    self.switcher_input_changed(cx);
+                    self.schedule_switcher_directory(cx);
                     self.search.focus_handle(cx).focus(window);
+                } else if overlay == Overlay::Discover {
+                    self.discovery_search.focus_handle(cx).focus(window);
                 } else {
                     self.modal_focus.focus(window);
                 }
@@ -1639,7 +1761,62 @@ impl Desktop {
                     self.handle(LocalAction::Open(Overlay::Thread), window, cx);
                 }
             }
-            LocalAction::SearchKind(kind) => self.search_kind = kind,
+            LocalAction::SearchKind(kind) => {
+                self.search_kind = kind;
+                self.schedule_switcher_directory(cx);
+            }
+            LocalAction::AccountSearchSubmit => self.start_account_search(cx),
+            LocalAction::AccountSearchMore => self.next_account_search(cx),
+            LocalAction::AccountSearchFindPerson => self.find_account_search_person(cx),
+            LocalAction::AccountSearchSelf => self.account_search_toggle_self(cx),
+            LocalAction::AccountSearchPerson(person) => {
+                self.select_account_search_person(person, cx)
+            }
+            LocalAction::AccountSearchRooms => self.account_search_room_picker(),
+            LocalAction::AccountSearchRoom(room) => self.select_account_search_room(room),
+            LocalAction::AccountSearchHit(context, message) => {
+                if Some(context) == self.snapshot.selected
+                    && self.snapshot.search_panel.as_ref().is_some_and(|p| {
+                        p.hits
+                            .as_slice()
+                            .iter()
+                            .any(|hit| hit.context == context && hit.message == message)
+                    })
+                    && self
+                        .snapshot
+                        .messages
+                        .as_slice()
+                        .iter()
+                        .any(|row| row.local_id == message)
+                {
+                    self.handle(LocalAction::LocateMessage(context, message), window, cx);
+                    return;
+                }
+                if Some(context.account) == self.snapshot.active_account
+                    && self.snapshot.search_panel.as_ref().is_some_and(|p| {
+                        p.hits
+                            .as_slice()
+                            .iter()
+                            .any(|hit| hit.context == context && hit.message == message)
+                    })
+                    && self.save_draft(cx)
+                    && self.submit(UiIntent::OpenConversation(context))
+                {
+                    self.account_search_ui.jump =
+                        Some((context, message, self.snapshot.selected, Instant::now()));
+                    self.overlay = None;
+                    self.refresh_account_search_jump();
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::DiscoverSearch => self.search_discovery(cx),
+            LocalAction::DiscoverJoin(context) => self.join_discovery(context, window, cx),
+            LocalAction::ToggleReference(context, message, ordinal) => {
+                self.toggle_reference(context, message, ordinal)
+            }
+            LocalAction::OpenReference(context, message, ordinal) => {
+                self.open_reference(context, message, ordinal)
+            }
             LocalAction::CreateGroup => self.create_group(cx),
             LocalAction::RenameLocalGroup(id) => self.rename_local_group(id, cx),
             LocalAction::MoveLocalGroup(id, up) => self.move_local_group(id, up, cx),
@@ -2107,6 +2284,23 @@ impl Desktop {
                 }
             }
             LocalAction::CollapseSection(section) => self.collapse_sidebar_section(section, cx),
+            LocalAction::SidebarFilter(filter) => self.edit_navigation(
+                talk_core::preferences::navigation::RemoteNavigationSupport::Unsupported,
+                talk_core::preferences::navigation::NavigationEdit::SetFilter(filter),
+                cx,
+            ),
+            LocalAction::SidebarRoomNotifications(context) => {
+                self.room_menu = None;
+                if self.save_thread_draft(cx)
+                    && self.save_draft(cx)
+                    && self.submit(UiIntent::OpenConversation(context))
+                {
+                    self.refresh(cx);
+                    if self.snapshot.selected == Some(context) {
+                        self.handle(LocalAction::OpenRoomNotifications, window, cx);
+                    }
+                }
+            }
             LocalAction::Favorite(context, favorite) => {
                 if let Some(row) = self
                     .snapshot
@@ -2133,6 +2327,7 @@ impl Desktop {
                 }
             }
             LocalAction::Archive(context, archived) => {
+                self.room_menu = None;
                 if self.snapshot.conversation_list.content == ContentState::Ready
                     && self.snapshot.conversations.as_slice().iter().any(|r| {
                         r.context == context
@@ -2761,6 +2956,11 @@ impl Desktop {
                 cx.stop_propagation();
                 return;
             }
+            if self.overlay.is_none() && self.room_menu.take().is_some() {
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
             if self.conversation_search_open() && self.composer_available() {
                 self.handle(
                     LocalAction::Message(messaging::Action::CloseSearch),
@@ -2789,11 +2989,28 @@ impl Desktop {
             self.handle(LocalAction::Open(Overlay::Settings), window, cx);
             cx.stop_propagation();
         } else if key == "enter"
+            && self.overlay == Some(Overlay::Discover)
+            && self.discovery_search.focus_handle(cx).is_focused(window)
+            && !self.discovery_search.read(cx).composing()
+        {
+            self.search_discovery(cx);
+            cx.stop_propagation();
+        } else if key == "enter"
             && self.overlay == Some(Overlay::Search)
             && self.search.focus_handle(cx).is_focused(window)
             && !self.search.read(cx).composing()
         {
-            self.handle(LocalAction::FindSearchPeople, window, cx);
+            if self.search_kind == SearchKind::Messages {
+                if self.account_search_current(cx) {
+                    if let Some((context, message)) = self.account_search_selected() {
+                        self.handle(LocalAction::AccountSearchHit(context, message), window, cx);
+                    }
+                } else {
+                    self.handle(LocalAction::AccountSearchSubmit, window, cx);
+                }
+            } else if let Some(action) = self.switcher_action() {
+                self.handle(action, window, cx);
+            }
             cx.stop_propagation();
         } else if self.composer_available()
             && !self.onboarding_open
@@ -2868,8 +3085,10 @@ impl Desktop {
             &self.own_status_icon_input,
             &self.message_ui.search,
             &self.message_ui.time_input,
+            &self.discovery_search,
         ]
         .into_iter()
+        .chain(self.account_search_ui.inputs().iter())
         .chain(self.room_ui.inputs().iter())
         .chain(self.content_ui.inputs())
         {
@@ -2887,8 +3106,10 @@ impl Desktop {
             &self.upload_folder,
             &self.message_ui.search,
             &self.message_ui.time_input,
+            &self.discovery_search,
         ]
         .into_iter()
+        .chain(self.account_search_ui.inputs().iter())
         .chain(self.room_ui.inputs().iter())
         .chain(self.content_ui.inputs())
         .any(|input| input.focus_handle(cx).is_focused(window))
@@ -3074,6 +3295,28 @@ impl Render for Desktop {
                 i.text_scale = f32::from(self.scale) / 100.;
             });
         }
+        for (input, key) in [
+            (&self.account_search_ui.person, "Person suchen …"),
+            (&self.account_search_ui.since, "TT.MM.JJJJ"),
+            (&self.account_search_ui.until, "TT.MM.JJJJ"),
+        ] {
+            input.update(cx, |i, _| i.set_placeholder(self.l(key)));
+        }
+        for input in self.account_search_ui.inputs() {
+            input.update(cx, |i, _| {
+                i.theme = t;
+                i.text_scale = f32::from(self.scale) / 100.;
+                i.interactive = self.overlay == Some(Overlay::Search)
+                    && self.search_kind == SearchKind::Messages
+                    && !incoming;
+            });
+        }
+        self.discovery_search.update(cx, |input, _| {
+            input.theme = t;
+            input.text_scale = f32::from(self.scale) / 100.;
+            input.interactive = self.overlay == Some(Overlay::Discover) && !incoming;
+            input.set_placeholder(self.l("Offene Gespräche suchen …"));
+        });
         for input in self.room_ui.inputs() {
             input.update(cx, |i, _| {
                 i.theme = t;
@@ -3088,8 +3331,15 @@ impl Render for Desktop {
         }
         self.configure_member_inputs(incoming, cx);
         if self.overlay == Some(Overlay::Create) {
-            self.room_ui.search.update(cx, |i, _| {
-                i.interactive = !incoming && self.room_ui.create_direct
+            self.room_ui
+                .search
+                .update(cx, |i, _| i.interactive = !incoming);
+            self.room_ui.description.update(cx, |i, _| {
+                i.interactive = !incoming
+                    && !self.room_ui.create_direct
+                    && self.snapshot.create_panel.as_ref().is_some_and(|p| {
+                        p.extended == talk_core::ui::presentation::FeatureSupport::Supported
+                    });
             });
         }
         for input in [&self.message_ui.search, &self.message_ui.time_input] {
@@ -3237,8 +3487,10 @@ impl Render for Desktop {
             &self.own_status_icon_input,
             &self.message_ui.search,
             &self.message_ui.time_input,
+            &self.discovery_search,
         ]
         .into_iter()
+        .chain(self.account_search_ui.inputs().iter())
         .chain(self.room_ui.inputs().iter())
         .chain(self.content_ui.inputs())
         {
@@ -3363,6 +3615,34 @@ impl Render for Desktop {
             .text_color(t.text)
             .track_focus(&self.root_focus)
             .tab_group()
+            .capture_action(cx.listener(|this, _: &input::Up, window, cx| {
+                if this.overlay == Some(Overlay::Search)
+                    && this.search.focus_handle(cx).is_focused(window)
+                    && !this.input_composing(cx)
+                {
+                    if this.search_kind == SearchKind::Messages {
+                        this.account_search_move(-1);
+                    } else {
+                        this.switcher_move(-1);
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &input::Down, window, cx| {
+                if this.overlay == Some(Overlay::Search)
+                    && this.search.focus_handle(cx).is_focused(window)
+                    && !this.input_composing(cx)
+                {
+                    if this.search_kind == SearchKind::Messages {
+                        this.account_search_move(1);
+                    } else {
+                        this.switcher_move(1);
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let composing = this.input_composing(cx);
                 if event.keystroke.key != "f7" {
@@ -3372,6 +3652,17 @@ impl Render for Desktop {
                         // open dialogs. Focus transfer preserves this modality.
                         this.keyboard_navigation = true;
                     }
+                }
+                if !composing
+                    && this.overlay == Some(Overlay::Search)
+                    && this.search.focus_handle(cx).is_focused(window)
+                    && !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "up" | "down")
+                {
+                    this.switcher_move(if event.keystroke.key == "up" { -1 } else { 1 });
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
                 }
                 if !composing
                     && (this.person_key(event, window, cx)
@@ -3488,6 +3779,10 @@ impl Render for Desktop {
                 Some(Overlay::Settings | Overlay::Accounts) => Some("close-settings".into()),
                 Some(Overlay::Search) => {
                     self.search.focus_handle(cx).focus(window);
+                    None
+                }
+                Some(Overlay::Discover) => {
+                    self.discovery_search.focus_handle(cx).focus(window);
                     None
                 }
                 Some(Overlay::CreatePoll) => {

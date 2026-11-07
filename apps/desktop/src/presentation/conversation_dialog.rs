@@ -76,6 +76,8 @@ pub(crate) enum Action {
 }
 pub(super) struct RoomUi {
     pub create_direct: bool,
+    pub create_public: bool,
+    pub create_preset: Option<Text<128>>,
     pub create_account: Option<talk_core::ui::AccountScope>,
     pub create_people_request: Option<super::creation::PeopleRequest>,
     pub context: Option<ConversationRef>,
@@ -115,6 +117,8 @@ impl RoomUi {
         let password = cx.new(|cx| TextInput::new("Neues Passwort", 512, theme, cx));
         Self {
             create_direct: true,
+            create_public: false,
+            create_preset: None,
             create_account: None,
             create_people_request: None,
             context: None,
@@ -1044,7 +1048,7 @@ impl Desktop {
                             "Anrufbenachrichtigungen",
                             "Anrufhinweise unabhängig von Nachrichten einstellen.",
                             d.call_notifications,
-                            RoomSetting::Notifications,
+                            RoomSetting::CallNotifications,
                             ConversationAction::SetCallNotifications(
                                 d.call_notifications != Some(true),
                             ),

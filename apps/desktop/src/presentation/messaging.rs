@@ -9,7 +9,7 @@ mod pins;
 mod private_reply;
 mod reactions;
 mod recovery;
-mod row;
+pub(super) mod row;
 mod thread_actions;
 
 use super::{

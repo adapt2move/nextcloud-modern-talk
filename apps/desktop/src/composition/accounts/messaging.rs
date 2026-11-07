@@ -344,13 +344,27 @@ impl Accounts {
         self.project_queued_read(context);
         self.project_outbox(context);
         self.project_uploads();
+        self.prune_references();
     }
     pub(super) fn invalidate_history(&mut self, context: ConversationRef, state: ContentState) {
+        if self.snapshot.selected == Some(context) && state == ContentState::Denied {
+            self.retire_references();
+        }
         if self.snapshot.selected == Some(context) {
             self.queued_read.clear();
         }
         if state == ContentState::Denied {
             self.forget_poll_room(context);
+            if let Some(panel) = &mut self.snapshot.search_panel {
+                panel.hits = page(
+                    panel
+                        .hits
+                        .as_slice()
+                        .iter()
+                        .filter(|hit| hit.context != context)
+                        .cloned(),
+                );
+            }
             self.revoke_room_metadata(context, UnavailableReason::PermissionDenied);
             self.invalidate_cached_room(context);
         }
@@ -1410,6 +1424,7 @@ impl Accounts {
         }
         let mut reload = false;
         let mut thread_changed = false;
+        let mut confirmed_read_state = None;
         let completion = match result {
             Ok(result) => {
                 let mut completion = Completion::ServerAccepted;
@@ -1673,10 +1688,12 @@ impl Accounts {
                                             row.last_read_message = Some(id);
                                             row.unread_direct_mention =
                                                 row.unread_direct_mention.map(|_| false);
+                                            row.unread_mention = Some(false);
                                         }
                                         row
                                     }),
                                 );
+                                confirmed_read_state = Some(true);
                             }
                         } else if matches!(work, Work::Unread | Work::UnreadFrom(_)) {
                             self.snapshot.conversations =
@@ -1687,9 +1704,11 @@ impl Accounts {
                                         if let Work::UnreadFrom(previous) = work {
                                             row.last_read_message = Some(previous);
                                         }
+                                        row.unread_mention = None;
                                     }
                                     row
                                 }));
+                            confirmed_read_state = Some(false);
                         }
                         if work == Work::Share {
                             panel.uploaded = None;
@@ -1884,6 +1903,9 @@ impl Accounts {
                         })
                     };
             }
+        }
+        if let Some(read) = confirmed_read_state {
+            self.remember_cached_unread_state(context, read);
         }
         self.reconcile_content_assets();
         if reload && let Ok((command, work)) = self.live_message_request(context) {

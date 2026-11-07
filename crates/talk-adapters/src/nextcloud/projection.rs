@@ -16,6 +16,7 @@ impl Project for Room {
         value["status"] = json!(self.status);
         value["statusIcon"] = json!(self.status_icon);
         value["statusMessage"] = json!(self.status_message);
+        value["unreadMention"] = json!(self.unread_mention);
         value["lastReadMessage"] = json!(self.last_read);
         value["lastCommonReadMessage"] = json!(self.common_read);
         value

@@ -194,12 +194,21 @@ impl Desktop {
                     }),
             );
         };
-        let kind = match row.kind {
-            ConversationKind::Direct => "Persönliches Gespräch",
-            ConversationKind::Group => "Gruppengespräch",
-            ConversationKind::GuestAccessible => "Gespräch mit Gastzugang",
-            ConversationKind::NoteToSelf => "Deine Notizen",
-            ConversationKind::Unknown => "Unbekannte Gesprächsart",
+        let joining = self
+            .snapshot
+            .discover_panel
+            .as_ref()
+            .is_some_and(|panel| panel.joining == Some(row.context) && panel.state.pending());
+        let kind = if joining {
+            "Beitritt läuft …"
+        } else {
+            match row.kind {
+                ConversationKind::Direct => "Persönliches Gespräch",
+                ConversationKind::Group => "Gruppengespräch",
+                ConversationKind::GuestAccessible => "Gespräch mit Gastzugang",
+                ConversationKind::NoteToSelf => "Deine Notizen",
+                ConversationKind::Unknown => "Unbekannte Gesprächsart",
+            }
         };
         let call_availability = Availability::when(
             self.selected_call().is_some(),
@@ -230,6 +239,7 @@ impl Desktop {
             self.can_favorite(row),
             "Favoriten sind für dieses Gespräch nicht verfügbar.",
         );
+        let title_availability = Availability::when(!joining, "Der Beitritt wird überprüft.");
         let search_availability = self.message_available(MessageFeature::Search);
         let h = chat_header::theme(t, self.palette);
         let presence = if row.kind == ConversationKind::Direct {
@@ -295,7 +305,7 @@ impl Desktop {
                                 self.control(
                                     "conversation-title",
                                     ButtonStyle::Quiet,
-                                    Availability::available().hinted().explained_elsewhere(),
+                                    title_availability.hinted().explained_elsewhere(),
                                     LocalAction::MessageIn(
                                         row.context,
                                         super::messaging::Action::Files,
@@ -396,10 +406,11 @@ impl Desktop {
                 )
             })
             .when(
-                !matches!(
-                    row.kind,
-                    ConversationKind::Direct | ConversationKind::NoteToSelf
-                ),
+                !joining
+                    && !matches!(
+                        row.kind,
+                        ConversationKind::Direct | ConversationKind::NoteToSelf
+                    ),
                 |d| {
                     d.child(
                         self.icon_button(
@@ -416,7 +427,7 @@ impl Desktop {
                     )
                 },
             )
-            .when(row.kind != ConversationKind::NoteToSelf, |d| {
+            .when(!joining && row.kind != ConversationKind::NoteToSelf, |d| {
                 d.child(self.icon_button(
                     "call",
                     (call_icon, call_name),
@@ -436,14 +447,33 @@ impl Desktop {
                     cx,
                 ))
             })
-            .child(self.icon_button(
-                "room-info",
-                ("settings", "Gesprächseinstellungen"),
-                ButtonStyle::Quiet,
-                Availability::available().explained_elsewhere(),
-                LocalAction::Open(Overlay::RoomInfo),
-                cx,
-            ));
+            .when(!joining && row.notification_muted.is_some(), |d| {
+                d.child(self.icon_button(
+                    "room-notification-settings",
+                    (
+                        if row.notification_muted == Some(true) {
+                            "bell-off"
+                        } else {
+                            "bell"
+                        },
+                        "Gesprächsbenachrichtigungen",
+                    ),
+                    ButtonStyle::Quiet,
+                    Availability::available().explained_elsewhere(),
+                    LocalAction::OpenRoomNotifications,
+                    cx,
+                ))
+            })
+            .when(!joining, |d| {
+                d.child(self.icon_button(
+                    "room-info",
+                    ("settings", "Gesprächseinstellungen"),
+                    ButtonStyle::Quiet,
+                    Availability::available().explained_elsewhere(),
+                    LocalAction::Open(Overlay::RoomInfo),
+                    cx,
+                ))
+            });
         // Header hints protect the entire neighboring title/action/status region.
         // Its measured bounds grow with wrapping/text scale; no toolbar offsets.
         let header = div()
@@ -452,7 +482,7 @@ impl Desktop {
             .when(cfg!(target_os = "windows"), |d| d.bg(gpui::rgb(0xffffff)))
             .child(header)
             .when(!self.background_inert, |d| {
-                d.when(row.kind != ConversationKind::NoteToSelf, |d| {
+                d.when(!joining && row.kind != ConversationKind::NoteToSelf, |d| {
                     d.child(self.reason_tip(
                         "call".into(),
                         call_availability.below_control(),
@@ -468,15 +498,25 @@ impl Desktop {
                         cx,
                     ))
                 })
-                .child(self.reason_tip(
-                    "room-info".into(),
-                    Availability::available().below_control(),
-                    Some("Gesprächseinstellungen"),
-                    cx,
-                ))
+                .when(!joining && row.notification_muted.is_some(), |d| {
+                    d.child(self.reason_tip(
+                        "room-notification-settings".into(),
+                        Availability::available().below_control(),
+                        Some("Gesprächsbenachrichtigungen"),
+                        cx,
+                    ))
+                })
+                .when(!joining, |d| {
+                    d.child(self.reason_tip(
+                        "room-info".into(),
+                        Availability::available().below_control(),
+                        Some("Gesprächseinstellungen"),
+                        cx,
+                    ))
+                })
                 .child(self.reason_tip(
                     "conversation-title".into(),
-                    Availability::available().below_control(),
+                    title_availability.below_control(),
                     Some("Geteilte Inhalte"),
                     cx,
                 ))
@@ -493,10 +533,11 @@ impl Desktop {
                     cx,
                 ))
                 .when(
-                    !matches!(
-                        row.kind,
-                        ConversationKind::Direct | ConversationKind::NoteToSelf
-                    ),
+                    !joining
+                        && !matches!(
+                            row.kind,
+                            ConversationKind::Direct | ConversationKind::NoteToSelf
+                        ),
                     |d| {
                         d.child(self.reason_tip(
                             "room-members".into(),

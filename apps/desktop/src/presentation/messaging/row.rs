@@ -12,7 +12,7 @@ use talk_core::ui::{
     presentation::{ContentState, DeliveryState, MessageView},
 };
 
-pub(super) fn surface_id(
+pub(in crate::presentation) fn surface_id(
     name: &'static str,
     context: talk_core::ui::presentation::ConversationRef,
     message: u128,
@@ -253,6 +253,9 @@ impl Desktop {
         }
         if let Some(upload) = upload {
             content = content.child(self.pending_upload_card(context, upload, cx));
+        }
+        if !m.metadata.deleted {
+            content = content.children(self.reference_cards(m, thread, cx));
         }
         let media = self.media_attachments(m);
         if !m.metadata.deleted && !media.is_empty() {

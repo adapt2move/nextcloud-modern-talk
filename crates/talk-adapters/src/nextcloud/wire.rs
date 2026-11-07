@@ -148,6 +148,7 @@ impl Capabilities {
             } else {
                 Decision::Unknown
             },
+            listable_rooms: self.feature("listable-rooms"),
             message_limit: self.message_limit,
             reference_correlation: self.has("chat-reference-id"),
             channel_semantics: self.has("announcement-preset"),
@@ -386,6 +387,18 @@ pub(super) fn room(
         } else {
             integer(data.get("lastReadMessage"))
         },
+        unread_mention: (caps.feature("mention-flag") == FeatureSupport::Supported)
+            .then(|| data.get("unreadMention").and_then(Value::as_bool))
+            .flatten(),
+        notification_muted: (caps.feature("notification-levels") == FeatureSupport::Supported)
+            .then(
+                || match data.get("notificationLevel").and_then(Value::as_i64) {
+                    Some(0..=2) => Some(false),
+                    Some(3) => Some(true),
+                    _ => None,
+                },
+            )
+            .flatten(),
         last_activity: integer(data.get("lastActivity")),
         call_active: data.get("hasCall").and_then(Value::as_bool),
         sensitive: classified

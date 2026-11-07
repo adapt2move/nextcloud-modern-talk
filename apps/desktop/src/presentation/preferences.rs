@@ -114,6 +114,13 @@ pub trait ComputerSettingsPort {
     > {
         Err(talk_core::preferences::time::LocalTimeError::Unavailable)
     }
+    fn search_date_boundary(
+        &self,
+        _local: talk_core::ui::Text<32>,
+        _end: bool,
+    ) -> Result<talk_core::ui::Text<32>, talk_core::preferences::time::LocalTimeError> {
+        Err(talk_core::preferences::time::LocalTimeError::Unavailable)
+    }
     fn local_datetime(&self, _timestamp: u64) -> Option<talk_core::ui::Text<32>> {
         None
     }

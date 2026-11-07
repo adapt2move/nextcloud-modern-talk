@@ -1736,7 +1736,10 @@ impl Worker {
                         state: SendState::Uncertain,
                     });
                 }
-                if matches!(request, ProtocolRequest::CreateGroup { .. }) {
+                if matches!(
+                    request,
+                    ProtocolRequest::CreateGroup { .. } | ProtocolRequest::CreateConversation(_)
+                ) {
                     if self.create_uncertain {
                         return Err(ErrorKind::Uncertain.into());
                     }
@@ -1795,9 +1798,17 @@ impl Worker {
                     (Ok(ProtocolReply::Conversation(_)), ProtocolRequest::CreateGroup { .. }) => {
                         self.create_uncertain = false;
                     }
-                    (Err(e), ProtocolRequest::CreateGroup { .. })
-                        if e.kind != ErrorKind::Uncertain =>
-                    {
+                    (
+                        Ok(ProtocolReply::CreatedConversation { .. }),
+                        ProtocolRequest::CreateConversation(_),
+                    ) => {
+                        self.create_uncertain = false;
+                    }
+                    (
+                        Err(e),
+                        ProtocolRequest::CreateGroup { .. }
+                        | ProtocolRequest::CreateConversation(_),
+                    ) if e.kind != ErrorKind::Uncertain => {
                         self.create_uncertain = false;
                     }
                     _ => {}
@@ -1861,7 +1872,9 @@ impl Worker {
                 .and_then(|server_id| ledger.room_key(self.account, server_id).ok().flatten());
         };
         match reply {
-            ProtocolReply::Conversation(room) => project(room),
+            ProtocolReply::Conversation(room) | ProtocolReply::CreatedConversation { room, .. } => {
+                project(room)
+            }
             ProtocolReply::Conversations(list) => {
                 let mut rooms = Page::empty();
                 for mut room in list.rooms.as_slice().iter().cloned() {

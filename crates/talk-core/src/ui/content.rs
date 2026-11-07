@@ -36,6 +36,11 @@ pub enum AssetTarget {
         file: u64,
         generation: u64,
     },
+    Reference {
+        context: ConversationRef,
+        message: u128,
+        ordinal: u16,
+    },
     Thumbnail(AttachmentRef),
     Image(AttachmentRef),
 }
@@ -44,6 +49,7 @@ impl AssetTarget {
         match self {
             Self::ConversationAvatar(c)
             | Self::MessageAvatar { context: c, .. }
+            | Self::Reference { context: c, .. }
             | Self::ParticipantAvatar { context: c, .. } => Some(*c),
             Self::Thumbnail(a) | Self::Image(a) => Some(a.context),
             Self::SelfAvatar | Self::PersonAvatar(_) | Self::CloudFile { .. } => None,

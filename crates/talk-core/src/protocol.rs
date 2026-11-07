@@ -40,6 +40,7 @@ pub struct AccountProbe {
     pub family: ServerFamily,
     pub talk_available: bool,
     pub group_creation: Decision,
+    pub listable_rooms: FeatureSupport,
     pub message_limit: Option<u32>,
     pub reference_correlation: bool,
     pub channel_semantics: bool,
@@ -132,6 +133,9 @@ pub struct Conversation {
     pub unread_direct_mention: Option<bool>,
     /// Last read message; zero represents the server's first-unread sentinel.
     pub last_read_message: Option<u64>,
+    /// None means the server did not supply mention state.
+    pub unread_mention: Option<bool>,
+    pub notification_muted: Option<bool>,
     pub last_activity: Option<u64>,
     pub call_active: Option<bool>,
     pub sensitive: bool,
@@ -176,6 +180,22 @@ pub struct ConversationList {
     pub scope: AccountScope,
     /// Full reconciliation only. An oversized list fails; it is never silently truncated.
     pub rooms: Page<Conversation, 100>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OpenConversation {
+    pub id: ConversationId,
+    pub name: Text<256>,
+    pub description: Option<Text<4000>>,
+    /// Absent when the listing endpoint does not provide an authoritative count.
+    pub participants: Option<u32>,
+    pub password_required: Option<bool>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OpenConversations {
+    pub scope: AccountScope,
+    pub rooms: Page<OpenConversation, 100>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -329,4 +349,7 @@ pub struct CallObservation {
 
 pub mod content;
 pub mod conversation;
+pub mod creation;
 pub mod messaging;
+pub mod reference;
+pub mod search;

@@ -33,6 +33,8 @@ fn listed(context: ConversationRef) -> protocol::Conversation {
         unread_messages: Some(0),
         unread_direct_mention: Some(false),
         last_read_message: Some(0),
+        unread_mention: None,
+        notification_muted: None,
         last_activity: Some(1),
         call_active: Some(false),
         sensitive: false,
@@ -101,6 +103,127 @@ fn known(now: Instant) -> (Accounts, ConversationRef, protocol::Conversation) {
     panel.details = Some(value);
     model.snapshot.conversation_panel = Some(panel);
     (model, context, room)
+}
+
+#[test]
+fn notification_edits_project_immediately_and_restore_the_previous_room_on_failure() {
+    let (mut model, context, _) = known(Instant::now());
+    let before = model
+        .snapshot
+        .conversations
+        .as_slice()
+        .iter()
+        .find(|r| r.context == context)
+        .unwrap()
+        .notification_muted;
+    let change = NotificationChange::Messages {
+        desired: view::NotificationLevel::Never,
+        previous: Some(view::NotificationLevel::Mention),
+        previous_muted: before,
+    };
+    model.project_notification_change(context, change, true);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .notifications,
+        Some(view::NotificationLevel::Never)
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .notification_muted,
+        Some(true)
+    );
+    model.project_notification_change(context, change, false);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .notifications,
+        Some(view::NotificationLevel::Mention)
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .notification_muted,
+        before
+    );
+    let call = NotificationChange::Calls {
+        desired: false,
+        previous: Some(true),
+    };
+    model.project_notification_change(context, call, true);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .call_notifications,
+        Some(false)
+    );
+    model.project_notification_change(context, call, false);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .call_notifications,
+        Some(true)
+    );
+}
+
+#[test]
+fn participant_index_tickets_retire_on_hints_permission_changes_and_removal() {
+    let now = Instant::now();
+    let (mut model, context, mut room) = known(now);
+    let metadata = &mut model
+        .background
+        .account_mut(context.account)
+        .unwrap()
+        .metadata;
+    let first = metadata.participant_index_ticket(context).unwrap();
+    metadata.hint();
+    let after_hint = metadata.participant_index_ticket(context).unwrap();
+    assert_ne!(first, after_hint);
+    room.actions.list_participants = Decision::Denied;
+    metadata.reconcile(context.account, &list(context, [room.clone()]));
+    assert_eq!(metadata.participant_index_ticket(context), None);
+    room.actions.list_participants = Decision::Allowed;
+    metadata.reconcile(context.account, &list(context, [room.clone()]));
+    let restored = metadata.participant_index_ticket(context).unwrap();
+    assert_ne!(after_hint, restored);
+    metadata.reconcile(context.account, &list(context, []));
+    metadata.reconcile(context.account, &list(context, [room]));
+    assert_ne!(metadata.participant_index_ticket(context), Some(restored));
 }
 
 #[test]

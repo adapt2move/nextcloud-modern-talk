@@ -350,6 +350,9 @@ pub struct ConversationView {
     pub unread: u32,
     pub unread_direct_mention: Option<bool>,
     pub last_read_message: Option<u128>,
+    pub unread_mention: Option<bool>,
+    pub notification_muted: Option<bool>,
+    pub last_activity: Option<u64>,
     pub favorite: Option<bool>,
     pub organization: ConversationOrganization,
     pub tags: Option<Page<TagRef, 20>>,
@@ -361,6 +364,8 @@ pub struct ConversationView {
     pub status_icon: Option<Text<64>>,
     pub status_message: Option<Text<320>>,
     pub participants: Option<u16>,
+    /// A small, session-only index of names observed with participant permission.
+    pub participant_names: Page<Text<256>, 16>,
     pub send: Decision,
     pub attach: Decision,
     /// Explicit clipboard-export privacy policy, not a generic server permission
@@ -661,6 +666,9 @@ pub struct PresentationSnapshot {
     pub content_panel: super::content::ContentPanel,
     pub file_export: Option<super::content::FileExportView>,
     pub create_panel: Option<super::conversation::CreatePanel>,
+    pub discover_panel: Option<super::discover::Panel>,
+    pub search_panel: Option<super::search::Panel>,
+    pub reference_previews: super::reference::Previews,
     pub revision: u64,
     pub login: LoginView,
     pub accounts: Page<AccountView, 8>,
@@ -740,6 +748,16 @@ pub enum UiIntent {
     MarkRoomUnread {
         request: RequestId,
         context: ConversationRef,
+    },
+    Discover {
+        account: AccountScope,
+        request: RequestId,
+        action: super::discover::Action,
+    },
+    AccountSearch {
+        account: AccountScope,
+        request: RequestId,
+        action: super::search::Action,
     },
     /// Acknowledge or cancel only this native promise, including after navigation.
     FinishFileExport {

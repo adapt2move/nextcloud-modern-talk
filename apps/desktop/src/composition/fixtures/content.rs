@@ -735,6 +735,25 @@ pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::cont
         }
         return jobs;
     }
+    if scenario == Some("reference-preview") {
+        return vec![super::super::accounts::content::ImageJob {
+            cached: false,
+            local: None,
+            attachment: None,
+            preview_generation: None,
+            account: scope(),
+            target: AssetTarget::Reference {
+                context: context(1),
+                message: 1,
+                ordinal: 0,
+            },
+            key: 42,
+            bytes: talk_core::protocol::content::ImageBytes::new(
+                include_bytes!("../../../assets/fixtures/content-photo.png").to_vec(),
+            )
+            .expect("bounded authored fixture"),
+        }];
+    }
     if !matches!(
         scenario,
         Some(

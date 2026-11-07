@@ -92,6 +92,8 @@ impl Account {
 }
 #[derive(Clone, Debug)]
 pub struct Room {
+    /// The room exists, but at least one requested invitation was rejected.
+    pub incomplete_invitations: bool,
     pub avatar_version: Option<String>,
     /// User status returned for one-to-one conversations when available.
     pub status: Option<String>,
@@ -112,6 +114,7 @@ pub struct Room {
     pub favorite: Option<bool>,
     pub archived: Option<bool>,
     pub unread: Option<u64>,
+    pub unread_mention: Option<bool>,
     /// Zero represents Talk's explicit first-message unread sentinel (-2).
     pub last_read: Option<u64>,
     pub common_read: Option<u64>,
@@ -152,6 +155,7 @@ impl Room {
         }
         let v = &v;
         let result = Self {
+            incomplete_invitations: v.get("invalidParticipants").is_some(),
             avatar_version: string(v.get("avatarVersion"), 128)?,
             // Optional status is display-only: an oversized field must not hide
             // the room list. NC34/35 allow 80 Unicode characters (320 UTF-8 bytes).
@@ -173,6 +177,7 @@ impl Room {
             favorite: v.get("isFavorite").and_then(Value::as_bool),
             archived: v.get("isArchived").and_then(Value::as_bool),
             unread: integer(v.get("unreadMessages")),
+            unread_mention: v.get("unreadMention").and_then(Value::as_bool),
             last_read: if v
                 .get("lastReadMessage")
                 .is_some_and(|value| value.as_i64() == Some(-2) || value.as_str() == Some("-2"))

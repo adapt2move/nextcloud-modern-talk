@@ -398,13 +398,18 @@ async fn complete_lists_keep_metadata_and_stable_ids_but_partial_or_oversized_li
     data["isFavorite"] = json!(true);
     data["isArchived"] = json!(true);
     data["unreadMessages"] = json!(7);
+    data["unreadMention"] = json!(true);
     let mut partial = Reply::data(json!([]));
     partial.status = 206;
     let mut capabilities = caps(35);
     capabilities["capabilities"]["spreed"]["features"]
         .as_array_mut()
         .unwrap()
-        .extend([json!("archived-conversations-v2"), json!("favorites")]);
+        .extend([
+            json!("archived-conversations-v2"),
+            json!("favorites"),
+            json!("mention-flag"),
+        ]);
     let server = Server::start(vec![
         Reply::data(capabilities.clone()),
         Reply::data(json!([data.clone()])),
@@ -436,6 +441,7 @@ async fn complete_lists_keep_metadata_and_stable_ids_but_partial_or_oversized_li
     assert_eq!(first.rooms.as_slice()[0].archived, Some(true));
     assert_eq!(first.rooms.as_slice()[0].favorite, Some(true));
     assert_eq!(first.rooms.as_slice()[0].unread_messages, Some(7));
+    assert_eq!(first.rooms.as_slice()[0].unread_mention, Some(true));
     assert_eq!(
         c.request(context(&r), ProtocolRequest::ListConversations)
             .await

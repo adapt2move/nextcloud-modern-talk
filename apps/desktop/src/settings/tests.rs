@@ -347,7 +347,7 @@ fn schema_six_migrates_with_empty_recents_and_invalid_recent_rows_are_rejected()
         ..LocalPreferences::default()
     };
     let old = storage::encode(&values)
-        .replace("preferences 7", "preferences 6")
+        .replace("preferences 8", "preferences 6")
         .replace("recent_reactions=none\n", "");
     assert_eq!(
         storage::decode(old.as_bytes()).unwrap(),
@@ -568,7 +568,7 @@ fn codec_bounds_corruption_and_conservative_v1_v2_migration() {
                     (expected.clone(), LoadState::Migrated)
                 );
                 let v3 = storage::encode(&expected);
-                assert!(v3.starts_with("nextcloud-modern-talk-preferences 7\n"));
+                assert!(v3.starts_with("nextcloud-modern-talk-preferences 8\n"));
                 assert_eq!(
                     storage::decode(v3.as_bytes()).unwrap(),
                     (expected, LoadState::Loaded)
@@ -581,7 +581,7 @@ fn codec_bounds_corruption_and_conservative_v1_v2_migration() {
     assert!(storage::decode(v3.replace("calendar_sounds=0\n", "").as_bytes()).is_err());
     assert!(storage::decode(format!("{v3}sounds=0\n").as_bytes()).is_err());
     assert_eq!(
-        storage::decode(v3.replace("preferences 7", "preferences 99").as_bytes()),
+        storage::decode(v3.replace("preferences 8", "preferences 99").as_bytes()),
         Err(PreferenceError::UnsupportedVersion)
     );
     assert_eq!(
@@ -783,7 +783,33 @@ fn navigation_roundtrip_capacity_and_partial_page_never_evict() {
             },
         )
         .unwrap();
+    values
+        .navigation
+        .apply(
+            account.clone(),
+            support,
+            NavigationEdit::SetFilter(SidebarFilter::Mentions),
+        )
+        .unwrap();
+    values
+        .navigation
+        .apply(
+            other.clone(),
+            support,
+            NavigationEdit::SetFilter(SidebarFilter::Unread),
+        )
+        .unwrap();
     let encoded = storage::encode(&values);
+    let repeated_filter = encoded.clone()
+        + encoded
+            .lines()
+            .find(|l| l.starts_with("layout_filter="))
+            .unwrap()
+        + "\n";
+    assert_eq!(
+        storage::decode(repeated_filter.as_bytes()),
+        Err(PreferenceError::InvalidData)
+    );
     assert_eq!(
         storage::decode(encoded.as_bytes()).unwrap(),
         (values.clone(), LoadState::Loaded)
@@ -836,6 +862,44 @@ fn navigation_roundtrip_capacity_and_partial_page_never_evict() {
 }
 
 #[test]
+fn schema_seven_navigation_migrates_with_default_filter() {
+    use talk_core::preferences::navigation::*;
+    let account = NavigationAccountKey::new(&format!("a1:{:032x}:{:032x}", 1, 2)).unwrap();
+    let mut original = LocalPreferences::default();
+    original
+        .navigation
+        .apply(
+            account.clone(),
+            RemoteNavigationSupport::Unsupported,
+            NavigationEdit::SetSectionCollapsed {
+                section: NavigationSection::Personal,
+                collapsed: true,
+            },
+        )
+        .unwrap();
+    let current = storage::encode(&original);
+    let old = current
+        .lines()
+        .filter(|line| !line.starts_with("layout_filter="))
+        .map(|line| {
+            line.replace(
+                "nextcloud-modern-talk-preferences 8",
+                "nextcloud-modern-talk-preferences 7",
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let (loaded, state) = storage::decode(old.as_bytes()).unwrap();
+    assert_eq!(state, LoadState::Migrated);
+    assert_eq!(loaded, original);
+    assert_eq!(
+        loaded.navigation.account(&account).unwrap().filter(),
+        SidebarFilter::All
+    );
+}
+
+#[test]
 fn schema_three_migrates_without_activating_quick_switch_or_losing_choices() {
     use talk_core::preferences::QuickSwitcherPreference;
     let values = LocalPreferences {
@@ -844,7 +908,7 @@ fn schema_three_migrates_without_activating_quick_switch_or_losing_choices() {
         ..LocalPreferences::default()
     };
     let old = storage::encode(&values)
-        .replace("preferences 7", "preferences 3")
+        .replace("preferences 8", "preferences 3")
         .replace("recent_reactions=none\n", "")
         .replace("quick_switcher=auto\n", "")
         .replace("update_channel=stable\n", "")
@@ -864,7 +928,7 @@ fn update_channel_persists_and_migrates_without_changing_other_preferences() {
         ..LocalPreferences::default()
     };
     let old = storage::encode(&values)
-        .replace("preferences 7", "preferences 4")
+        .replace("preferences 8", "preferences 4")
         .replace("recent_reactions=none\n", "")
         .replace("update_channel=stable\n", "")
         .replace("onboarding_resume=none\n", "");
@@ -919,7 +983,7 @@ fn restart_handoff_is_durable_bounded_and_old_autostart_false_is_preserved() {
     assert_eq!(store.load().unwrap().0.onboarding_resume, None);
     assert!(!store.load().unwrap().0.launch_at_login);
     let previous = storage::encode(&values)
-        .replace("preferences 7", "preferences 5")
+        .replace("preferences 8", "preferences 5")
         .replace("recent_reactions=none\n", "")
         .replace("onboarding_resume=none\n", "");
     let (restored, state) = storage::decode(previous.as_bytes()).unwrap();

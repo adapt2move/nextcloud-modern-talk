@@ -35,6 +35,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
                 RoomSetting::Avatar,
                 RoomSetting::ReadOnly,
                 RoomSetting::Notifications,
+                RoomSetting::CallNotifications,
                 RoomSetting::Important,
                 RoomSetting::Sensitive,
                 RoomSetting::Expiration,

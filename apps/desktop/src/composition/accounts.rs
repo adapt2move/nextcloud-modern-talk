@@ -5,6 +5,7 @@ mod calls;
 pub(super) mod content;
 mod conversations;
 mod creation;
+mod discover;
 pub(super) mod files;
 mod history;
 mod messaging;
@@ -12,7 +13,9 @@ mod notifications;
 mod outbox;
 mod preview;
 mod reads;
+mod references;
 mod removal;
+mod search;
 mod startup;
 mod thread_change;
 mod threads;
@@ -60,6 +63,11 @@ enum Purpose {
     Content(OperationId),
     Files(files::Work),
     Create(RequestId, AccountScope, creation::Work),
+    Search(RequestId, AccountScope, bool),
+    Discover(RequestId, AccountScope, Option<ConversationRef>),
+    DiscoverProbe(AccountScope, u64),
+    ParticipantIndex(ConversationRef, u64),
+    Reference(ConversationRef, u128, u16, u64),
     Room(RequestId, ConversationRef, OperationId, conversations::Work),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
     IncomingCalls(AccountScope),
@@ -154,6 +162,14 @@ pub struct Accounts {
     outbox: outbox::Outbox,
     room_invite: Option<(RequestId, talk_core::ui::conversation::PersonRef)>,
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
+    account_search: Option<protocol::search::Query>,
+    account_search_retry: Option<search::Retry>,
+    discover_probe: Option<discover::Probe>,
+    discover_probe_generation: u64,
+    discovery_retry: Option<discover::Retry>,
+    discovery_join: Option<discover::OptimisticJoin>,
+    reference_owner: references::Owner,
+    reference_generation: u64,
     notices: notifications::Notices,
     background: background::Background,
     typing: typing::Typing,
@@ -204,6 +220,14 @@ impl Accounts {
             outbox: outbox::Outbox::default(),
             room_invite: None,
             message_search: None,
+            account_search: None,
+            account_search_retry: None,
+            discover_probe: None,
+            discover_probe_generation: 0,
+            discovery_retry: None,
+            discovery_join: None,
+            reference_owner: references::Owner::default(),
+            reference_generation: 0,
             notices: notifications::Notices::default(),
             background: background::Background::default(),
             typing: typing::Typing::default(),
@@ -317,6 +341,7 @@ impl Accounts {
         self.dirty = true;
     }
     fn clear_content(&mut self) {
+        self.retire_references();
         self.clear_attachment_work();
         self.cancel_csv_file();
         self.queued_read.clear();
@@ -342,6 +367,17 @@ impl Accounts {
             account: scope,
             ..Default::default()
         };
+        self.retire_references();
+        self.reference_owner = references::Owner::default();
+        self.account_search = None;
+        self.account_search_retry = None;
+        self.snapshot.search_panel = None;
+        self.snapshot.discover_panel = scope.map(discover::empty_panel);
+        self.discovery_retry = None;
+        self.discovery_join = None;
+        self.discover_probe_generation = self.discover_probe_generation.saturating_add(1);
+        self.discover_probe =
+            scope.map(|scope| discover::Probe::new(scope, self.discover_probe_generation));
         self.snapshot.create_panel = scope.map(talk_core::ui::conversation::CreatePanel::new);
         self.snapshot.conversations = scope
             .and_then(|s| self.background.account(s))
@@ -569,12 +605,17 @@ impl Accounts {
         self.tick_queued_read(Instant::now());
         self.tick_content();
         self.tick_file_work();
+        self.tick_account_search();
+        self.tick_discovery_probe();
+        self.tick_discovery_retry();
         self.tick_background();
         self.tick_typing();
         self.tick_thread_refresh(Instant::now());
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
+        self.tick_participant_index();
+        self.tick_references();
         if let Some(scope) = self.load_tags
             && self
                 .request(scope, ProtocolRequest::ReadTags, Purpose::Tags(scope))
@@ -690,6 +731,11 @@ impl Accounts {
             Purpose::Content(operation) => self.complete_content(operation, result),
             Purpose::Files(work) => self.complete_file_work(work, result),
             Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
+            Purpose::Search(request,account,append)=>self.complete_account_search(request,account,append,result),
+            Purpose::Discover(request,account,joining)=>self.complete_discovery(request,account,joining,result),
+            Purpose::DiscoverProbe(account,generation)=>self.complete_discovery_probe(account,generation,result),
+            Purpose::ParticipantIndex(context, generation)=>self.complete_participant_index(context,generation,result),
+            Purpose::Reference(context,message,ordinal,generation)=>self.complete_reference(context,message,ordinal,generation,result),
             Purpose::Room(request, context, operation, work) => self.complete_room(request, context, operation, work, result),
             Purpose::Message(request, context, operation, work) => {
                 self.complete_message((request, done.request.0), context, operation, work, result);
@@ -1040,6 +1086,19 @@ impl Accounts {
         });
     }
     fn open(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
+        if self
+            .discovery_join
+            .as_ref()
+            .is_some_and(|join| join.context == context)
+        {
+            if self.snapshot.selected != Some(context) {
+                self.clear_content();
+                self.snapshot.selected = Some(context);
+                self.snapshot.content = ContentState::Loading;
+                self.touch();
+            }
+            return Ok(());
+        }
         if self.cache.is_presentation(context) {
             self.select_conversation(context)?;
             return Ok(());
@@ -1090,6 +1149,16 @@ impl Accounts {
             UiIntent::MarkRoomUnread { request, context } => {
                 self.queue_room_unread(request, context)?;
             }
+            UiIntent::Discover {
+                account,
+                request,
+                action,
+            } => self.submit_discovery(account, request, action)?,
+            UiIntent::AccountSearch {
+                account,
+                request,
+                action,
+            } => self.submit_account_search(account, request, action)?,
             UiIntent::FinishFileExport { request, context } => {
                 self.finish_file_export(request, context)
             }
@@ -1697,6 +1766,9 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         unread: r.unread_messages.unwrap_or(0),
         unread_direct_mention: r.unread_direct_mention,
         last_read_message: r.last_read_message.map(u128::from),
+        unread_mention: r.unread_mention,
+        notification_muted: r.notification_muted,
+        last_activity: r.last_activity,
         favorite: r.favorite,
         tags: r.tag_ids.as_ref().map(|tags| {
             page(tags.as_slice().iter().map(|id| TagRef {
@@ -1736,6 +1808,7 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
             .as_ref()
             .and_then(|status| status.message.clone()),
         participants: None,
+        participant_names: Page::empty(),
         send: r.actions.send_message,
         attach: Decision::Unknown,
         draft_clipboard: if r.sensitive || r.classified || r.organization.classified == Some(true) {

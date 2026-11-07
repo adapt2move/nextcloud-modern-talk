@@ -2,7 +2,7 @@
 //! formatting and deadline resolution only clone this bounded memory snapshot.
 use jiff::{
     Timestamp, ToSpan,
-    civil::DateTime,
+    civil::{Date, DateTime},
     tz::{AmbiguousOffset, TimeZone},
 };
 use std::sync::{OnceLock, RwLock};
@@ -40,6 +40,36 @@ pub fn time_label(seconds: u64) -> Option<String> {
 
 pub fn local_datetime(seconds: u64) -> Option<Text<32>> {
     datetime_in(seconds, &zone().ok()?).ok()
+}
+
+/// Inclusive search boundary for a local calendar day, serialized as an instant.
+/// DST days may contain 23 or 25 hours. A skipped local day is rejected.
+pub fn search_date_boundary(local: Text<32>, end: bool) -> Result<Text<32>, LocalTimeError> {
+    search_boundary_in(&zone()?, local.as_str(), end)
+}
+
+fn search_boundary_in(zone: &TimeZone, local: &str, end: bool) -> Result<Text<32>, LocalTimeError> {
+    let date: Date = local.parse().map_err(|_| LocalTimeError::Invalid)?;
+    let start = zone
+        .to_ambiguous_timestamp(date.at(0, 0, 0, 0))
+        .compatible()
+        .map_err(|_| LocalTimeError::Invalid)?;
+    if start.to_zoned(zone.clone()).date() != date {
+        return Err(LocalTimeError::Skipped);
+    }
+    let at = if end {
+        let next = date
+            .checked_add(1.days())
+            .map_err(|_| LocalTimeError::Invalid)?;
+        zone.to_ambiguous_timestamp(next.at(0, 0, 0, 0))
+            .compatible()
+            .map_err(|_| LocalTimeError::Invalid)?
+            .checked_sub(1.seconds())
+            .map_err(|_| LocalTimeError::Invalid)?
+    } else {
+        start
+    };
+    Text::new(&at.to_string()).map_err(|_| LocalTimeError::Invalid)
 }
 
 pub fn same_local_day(first: u64, second: u64) -> bool {
@@ -156,6 +186,37 @@ mod tests {
             local: Text::new(value).unwrap(),
             repeated,
         }
+    }
+    #[test]
+    fn search_calendar_boundaries_cover_dst_days_and_midnight_transitions() {
+        let berlin = TimeZone::get("Europe/Berlin").unwrap();
+        for (date, start, end) in [
+            ("2026-03-29", "2026-03-28T23:00:00Z", "2026-03-29T21:59:59Z"),
+            ("2026-10-25", "2026-10-24T22:00:00Z", "2026-10-25T22:59:59Z"),
+            ("2024-02-29", "2024-02-28T23:00:00Z", "2024-02-29T22:59:59Z"),
+        ] {
+            assert_eq!(
+                search_boundary_in(&berlin, date, false).unwrap().as_str(),
+                start
+            );
+            assert_eq!(
+                search_boundary_in(&berlin, date, true).unwrap().as_str(),
+                end
+            );
+        }
+        assert!(search_boundary_in(&berlin, "2023-02-29", false).is_err());
+        let sao = TimeZone::get("America/Sao_Paulo").unwrap();
+        assert_eq!(
+            search_boundary_in(&sao, "2018-11-04", false)
+                .unwrap()
+                .as_str(),
+            "2018-11-04T03:00:00Z"
+        );
+        let apia = TimeZone::get("Pacific/Apia").unwrap();
+        assert_eq!(
+            search_boundary_in(&apia, "2011-12-30", false),
+            Err(LocalTimeError::Skipped)
+        );
     }
     #[test]
     fn local_system_clock_format_uses_the_given_zone_without_utc_suffix() {

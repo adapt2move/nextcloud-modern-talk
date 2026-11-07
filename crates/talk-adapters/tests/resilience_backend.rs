@@ -99,6 +99,7 @@ async fn history_recovers_after_gateway_failures_without_losing_the_session() {
             )
             .await
             .unwrap();
+        let operation = OperationId::from_local(200 + index as u128);
         let ProtocolReply::Messaging { result, .. } = reply else {
             panic!("typed send result");
         };

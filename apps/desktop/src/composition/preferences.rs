@@ -477,6 +477,13 @@ impl ComputerSettingsPort for Bridge {
     > {
         talk_adapters::system_time::deadline(choice)
     }
+    fn search_date_boundary(
+        &self,
+        local: talk_core::ui::Text<32>,
+        end: bool,
+    ) -> Result<talk_core::ui::Text<32>, talk_core::preferences::time::LocalTimeError> {
+        talk_adapters::system_time::search_date_boundary(local, end)
+    }
     fn local_datetime(&self, timestamp: u64) -> Option<talk_core::ui::Text<32>> {
         talk_adapters::system_time::local_datetime(timestamp)
     }

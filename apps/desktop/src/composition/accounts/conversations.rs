@@ -1,4 +1,4 @@
-//! Account-owned settings bridge. No speculative mutation is projected as confirmed state.
+//! Account-owned settings bridge. Pending notification edits are reconciled after writes.
 use super::*;
 use talk_core::protocol::conversation as wire;
 use talk_core::ui::conversation as view;
@@ -23,17 +23,21 @@ struct RoomObservation {
     dirty: bool,
     operation: Option<OperationId>,
     reading_details: bool,
+    index_generation: u64,
 }
 #[derive(Default)]
 pub(super) struct Metadata {
     rooms: Vec<RoomObservation>,
     hinted: bool,
+    index_generation: u64,
 }
 fn metadata_identity(room: &protocol::Conversation) -> protocol::Conversation {
     let mut identity = room.clone();
     identity.unread_messages = None;
     identity.unread_direct_mention = None;
     identity.last_read_message = None;
+    identity.unread_mention = None;
+    identity.notification_muted = None;
     identity.last_activity = None;
     identity.call_active = None;
     identity.call_scope = None;
@@ -42,11 +46,31 @@ fn metadata_identity(room: &protocol::Conversation) -> protocol::Conversation {
     identity
 }
 impl Metadata {
+    pub(super) fn readable(&self, context: ConversationRef) -> bool {
+        self.rooms.iter().any(|room| {
+            room.context == context && room.listed.actions.read_messages == Decision::Allowed
+        })
+    }
+    pub(super) fn participant_index_ticket(&self, context: ConversationRef) -> Option<u64> {
+        self.rooms
+            .iter()
+            .find(|room| {
+                room.context == context
+                    && room.listed.actions.read_messages == Decision::Allowed
+                    && room.listed.actions.list_participants == Decision::Allowed
+                    && !room.listed.classified
+                    && !room.listed.sensitive
+                    && !room.listed.unknown_restrictions
+            })
+            .map(|room| room.index_generation)
+    }
     pub(super) fn hint(&mut self) -> Vec<ConversationRef> {
         self.hinted = true;
+        self.index_generation = self.index_generation.saturating_add(1);
         let mut retired = Vec::new();
         for room in &mut self.rooms {
             room.dirty = true;
+            room.index_generation = self.index_generation;
             if room.reading_details && room.operation.take().is_some() {
                 retired.push(room.context);
             }
@@ -59,6 +83,8 @@ impl Metadata {
         list: &protocol::ConversationList,
     ) -> Vec<(ConversationRef, bool)> {
         let mut retired = Vec::new();
+        self.index_generation = self.index_generation.saturating_add(1);
+        let index_generation = self.index_generation;
         self.rooms.retain(|old| {
             old.context.account == scope
                 && list
@@ -75,6 +101,7 @@ impl Metadata {
             let listed = metadata_identity(room);
             if let Some(old) = self.rooms.iter_mut().find(|r| r.context == context) {
                 if self.hinted || old.listed != listed {
+                    old.index_generation = index_generation;
                     let policy_changed = old.listed.role != listed.role
                         || old.listed.actions != listed.actions
                         || old.listed.sensitive != listed.sensitive
@@ -100,6 +127,7 @@ impl Metadata {
                     dirty: true,
                     operation: None,
                     reading_details: false,
+                    index_generation,
                 });
             }
         }
@@ -173,7 +201,9 @@ impl Metadata {
             .flatten()
     }
     pub(super) fn revoke(&mut self, context: ConversationRef) {
+        self.index_generation = self.index_generation.saturating_add(1);
         if let Some(room) = self.rooms.iter_mut().find(|r| r.context == context) {
+            room.index_generation = self.index_generation;
             room.details = None;
             room.observed_at = None;
             room.observed = None;
@@ -203,6 +233,19 @@ pub(super) enum Work {
     Csv,
     Bots,
     BotChange { bot: view::PersonRef, enabled: bool },
+    Notification(NotificationChange),
+}
+#[derive(Clone, Copy)]
+pub(super) enum NotificationChange {
+    Messages {
+        desired: view::NotificationLevel,
+        previous: Option<view::NotificationLevel>,
+        previous_muted: Option<bool>,
+    },
+    Calls {
+        desired: bool,
+        previous: Option<bool>,
+    },
 }
 impl Work {
     fn for_action(action: &view::ConversationAction) -> Self {
@@ -360,9 +403,21 @@ impl Accounts {
         context: ConversationRef,
         reason: UnavailableReason,
     ) {
+        if self.snapshot.selected == Some(context) {
+            self.retire_references();
+        }
         if let Some(account) = self.background.account_mut(context.account) {
             account.metadata.revoke(context);
         }
+        self.background.forget_member_names(context);
+        self.snapshot.conversations =
+            page(self.snapshot.conversations.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participant_names = Page::empty();
+                }
+                row
+            }));
         if let Ok(connection) = &mut self.connection {
             for pending in &self.pending {
                 if matches!(pending.purpose, Purpose::Room(_, c, _, _) if c == context) {
@@ -403,6 +458,13 @@ impl Accounts {
     }
     pub(super) fn operation(&self, context: ConversationRef) -> Result<OperationId, SubmitError> {
         self.current(context.account)?;
+        if self
+            .discovery_join
+            .as_ref()
+            .is_some_and(|join| join.context == context)
+        {
+            return Err(SubmitError::Unavailable(UnavailableReason::PolicyUnknown));
+        }
         if self.snapshot.selected != Some(context) {
             return Err(SubmitError::StaleScope);
         }
@@ -441,6 +503,36 @@ impl Accounts {
             return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
         }
         let mut work = Work::for_action(&action);
+        if let Some(details) = self
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .filter(|p| p.context == context)
+            .and_then(|p| p.details.as_ref())
+        {
+            work = match action {
+                view::ConversationAction::SetNotifications(desired) => {
+                    Work::Notification(NotificationChange::Messages {
+                        desired,
+                        previous: details.notifications,
+                        previous_muted: self
+                            .snapshot
+                            .conversations
+                            .as_slice()
+                            .iter()
+                            .find(|r| r.context == context)
+                            .and_then(|r| r.notification_muted),
+                    })
+                }
+                view::ConversationAction::SetCallNotifications(desired) => {
+                    Work::Notification(NotificationChange::Calls {
+                        desired,
+                        previous: details.call_notifications,
+                    })
+                }
+                _ => work,
+            };
+        }
         if automatic && matches!(action, view::ConversationAction::Members) {
             work = Work::MemberCount;
         }
@@ -509,6 +601,9 @@ impl Accounts {
             .conversation_panel
             .get_or_insert_with(|| view::ConversationPanel::new(context));
         begin_room(panel, request, work);
+        if let Work::Notification(change) = work {
+            self.project_notification_change(context, change, true);
+        }
         self.touch();
         Ok(())
     }
@@ -524,10 +619,7 @@ impl Accounts {
             .background
             .account_mut(context.account)
             .is_some_and(|a| a.metadata.complete(context, operation));
-        if !current
-            || self.snapshot.selected != Some(context)
-            || self.current(context.account).is_err()
-        {
+        if !current || self.current(context.account).is_err() {
             return;
         }
         let result = match reply {
@@ -539,6 +631,14 @@ impl Accounts {
             Err(error) => Err(completion_error(error)),
             _ => Err(Completion::Failed(UnavailableReason::PolicyStale)),
         };
+        if self.snapshot.selected != Some(context) {
+            if let Work::Notification(change) = work {
+                self.project_notification_change(context, change, result.is_ok());
+                self.load_rooms = Some(context.account);
+                self.touch();
+            }
+            return;
+        }
         self.apply_room_result(request, context, work, result);
     }
     /// Projects an already scoped operation result, including explicit read
@@ -550,6 +650,18 @@ impl Accounts {
         work: Work,
         result: Result<wire::ConversationResult, Completion>,
     ) {
+        if let Work::Notification(change) = work
+            && result.is_err()
+            && self
+                .snapshot
+                .conversation_panel
+                .as_ref()
+                .is_some_and(|panel| {
+                    panel.context == context && panel.state == view::RemoteState::Saving(request)
+                })
+        {
+            self.project_notification_change(context, change, false);
+        }
         let read = work.read();
         let Some(panel) = self
             .snapshot
@@ -698,6 +810,25 @@ impl Accounts {
                         panel.details_stale = false;
                     }
                     wire::ConversationResult::Members(people) => {
+                        let names: Page<Text<256>, 16> = page(
+                            people
+                                .as_slice()
+                                .iter()
+                                .filter(|m| !m.is_self && !m.name.as_str().trim().is_empty())
+                                .take(16)
+                                .map(|m| m.name.clone()),
+                        );
+                        let names_allowed =
+                            self.background.account(context.account).is_some_and(|a| {
+                                a.metadata.participant_index_ticket(context).is_some()
+                            });
+                        if names_allowed {
+                            self.background.remember_member_names(
+                                context,
+                                names.clone(),
+                                Instant::now(),
+                            );
+                        }
                         panel.members = page(people.as_slice().iter().map(|m| view::Member {
                             id: person(context, m.id.local),
                             name: m.name.clone(),
@@ -724,6 +855,11 @@ impl Accounts {
                                 let mut row = row.clone();
                                 if row.context == context {
                                     row.participants = count;
+                                    row.participant_names = if names_allowed {
+                                        names.clone()
+                                    } else {
+                                        Page::empty()
+                                    };
                                 }
                                 row
                             }));
@@ -916,6 +1052,80 @@ impl Accounts {
                 self.room_action_inner(request, context, view::ConversationAction::Members, true);
         }
         self.touch();
+    }
+    fn project_notification_change(
+        &mut self,
+        context: ConversationRef,
+        change: NotificationChange,
+        pending_or_accepted: bool,
+    ) {
+        if let Some(details) = self
+            .snapshot
+            .conversation_panel
+            .as_mut()
+            .filter(|p| p.context == context)
+            .and_then(|p| p.details.as_mut())
+        {
+            match change {
+                NotificationChange::Messages {
+                    desired, previous, ..
+                } => {
+                    details.notifications = if pending_or_accepted {
+                        Some(desired)
+                    } else {
+                        previous
+                    }
+                }
+                NotificationChange::Calls { desired, previous } => {
+                    details.call_notifications = if pending_or_accepted {
+                        Some(desired)
+                    } else {
+                        previous
+                    }
+                }
+            }
+        }
+        if let NotificationChange::Messages {
+            desired,
+            previous_muted,
+            ..
+        } = change
+        {
+            self.snapshot.conversations = page(
+                self.snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .cloned()
+                    .map(|mut row| {
+                        if row.context == context {
+                            row.notification_muted = if pending_or_accepted {
+                                Some(desired == view::NotificationLevel::Never)
+                            } else {
+                                previous_muted
+                            };
+                        }
+                        row
+                    }),
+            );
+        }
+    }
+    pub(super) fn restore_pending_notifications(&mut self, account: AccountScope) {
+        let pending: Vec<_> = self
+            .pending
+            .iter()
+            .filter_map(|p| match p.purpose {
+                Purpose::Room(_, context, _, Work::Notification(change))
+                    if context.account == account =>
+                {
+                    Some((context, change))
+                }
+                _ => None,
+            })
+            .collect();
+        for (context, change) in pending {
+            self.project_notification_change(context, change, true);
+        }
     }
 }
 fn begin_room(panel: &mut view::ConversationPanel, request: RequestId, work: Work) {
@@ -1111,6 +1321,7 @@ fn setting(s: wire::Setting) -> view::RoomSetting {
         W::Avatar => V::Avatar,
         W::ReadOnly => V::ReadOnly,
         W::Notifications => V::Notifications,
+        W::CallNotifications => V::CallNotifications,
         W::Important => V::Important,
         W::Sensitive => V::Sensitive,
         W::Expiration => V::Expiration,
