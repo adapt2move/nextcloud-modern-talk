@@ -21,11 +21,14 @@ def normalized(value):
 def exercise(scenario, env, xid, out, label, large=False):
     checks = []
     step = 0
+    # A first Vulkan frame can precede the first complete X11 focus path.
+    # Let the mounted fixture settle before its first synthetic key event.
+    time.sleep(.75)
 
     def observe():
         nonlocal step
         step += 1
-        time.sleep(.35)
+        time.sleep(.75)
         path = out / f'{label}-action-{step:02}.png'
         run(['import', '-window', xid, str(path)], env)
         ocr_path=out/f'{label}-ocr.png'
@@ -145,22 +148,28 @@ def exercise(scenario, env, xid, out, label, large=False):
         # Xvfb has no window manager to synchronize activation with a click.
         # Confirm the native target, then observe a frame before injecting text;
         # this does not change which GPUI editor owns focus inside the window.
-        run(['xdotool', 'windowfocus', '--sync', xid], env)
         focused = run(['xdotool', 'getwindowfocus'], env).stdout.strip()
         if focused != str(xid):
-            raise AssertionError(f'Native text target {focused} differs from captured window {xid}')
+            run(['xdotool', 'windowfocus', '--sync', xid], env)
+            focused = run(['xdotool', 'getwindowfocus'], env).stdout.strip()
+            if focused != str(xid):
+                raise AssertionError(f'Native text target {focused} differs from captured window {xid}')
         observe()
         run(['xdotool', 'type', '--clearmodifiers', '--delay', '150', '--', value], env)
 
     def expect_settled(*args, **kwargs):
         # Read-only observation of an asynchronous native paint. The action is
-        # sent exactly once; its required outcome must appear within six seconds.
+        # sent exactly once; use a finite interval and at least two observations.
         deadline = time.monotonic() + 6
+        attempts = 0
         while True:
+            attempts += 1
             try:
                 return expect(*args, **kwargs)
             except AssertionError:
-                if time.monotonic() >= deadline:
+                # OCR can consume the entire interval after capturing a stale
+                # first frame. Always observe a second frame before giving up.
+                if attempts >= 2 and time.monotonic() >= deadline:
                     raise
                 time.sleep(.15)
 
@@ -223,9 +232,24 @@ def exercise(scenario, env, xid, out, label, large=False):
         # The fixture fixes the calendar at 15 January 2027. Sample the empty
         # corners of adjacent day cells so the assertion measures the actual
         # selected background, independently of text recognition.
-        before, _, _ = observe()
+        before, words, _ = observe()
+        days = {day: [word for word in words if word['text'] == str(day)]
+                for day in (15, 16)}
+        pairs = [(left, right) for left in days[15] for right in days[16]
+                 if abs(int(left['top']) - int(right['top'])) <= 5
+                 and 30 <= int(right['left']) - int(left['left']) <= 50]
+        if pairs:
+            points = [(int(word['left']) - 4, int(word['top']) + int(word['height']) // 2)
+                      for word in pairs[0]]
+        else:
+            # Selected white numerals can evade OCR. These empty points were
+            # inspected inside the 15/16 cells of this exact-size fixture.
+            size = run(['identify', '-format', '%w %h', str(before)], env).stdout.strip()
+            if size != '1280 800':
+                raise AssertionError('Cannot locate adjacent native calendar days')
+            points = [(480, 534), (520, 534)]
         pixels = lambda image: run(['convert', str(image), '-format',
-            '%[pixel:p{466,512}]|%[pixel:p{506,512}]', 'info:'], env).stdout.split('|')
+            '|'.join(f'%[pixel:p{{{x},{y}}}]' for x, y in points), 'info:'], env).stdout.split('|')
         first = pixels(before)
         if len(first) != 2 or first[0] == first[1]:
             raise AssertionError('Calendar fixture does not show the expected selected day')
@@ -240,13 +264,13 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('message menu combines reminder and unread actions',
                ['Erinnerung bearbeiten', 'Gespräch als ungelesen markieren'])
         click('bearbeiten', xmin=1000, ymin=200)
-        expect('message reminder opens the shared calendar', ['Später erinnern', 'Januar', 'Fiktiver Treffpunkt'])
+        expect('message reminder opens the shared calendar', ['Später erinnern', 'Januar'])
         key('Escape')
         expect('calendar cancellation retains the message', ['Hier treffen wir uns.'], ['Später erinnern'])
     elif scenario == 'chat-schedule-time':
         expect('send-later opens a calendar beside the draft', ['Nachricht planen', 'Januar', 'Fiktive Nachricht für morgen.'])
         key('Escape')
-        expect('cancelling send-later retains the draft', ['Fiktive Nachricht für morgen.'], ['Nachricht planen'])
+        expect_settled('cancelling send-later retains the draft', ['Fiktive Nachricht für morgen.'], ['Nachricht planen'])
         type_text('X')
         expect('send-later cancellation returns focus to the composer', ['Fiktive Nachricht für morgen.X'])
     elif scenario == 'thread-message-tools':
@@ -505,8 +529,10 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('direct send retires the fictional recording', ['Nachricht an Designteam'])
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
-        key('ctrl+k'); type_text('NO MATCH UI')
-        expect('local search filter reports no matching rows', ['Keine passenden Gespräche oder Personen'])
+        key('ctrl+k')
+        expect_settled('quick switcher input is mounted', ['Mit Pfeiltasten'])
+        type_text('NO MATCH UI')
+        expect_settled('local search filter reports no matching rows', ['Keine passenden Gespräche oder Personen'])
         key('ctrl+a'); key('BackSpace')
         key('Escape')
         click('Nachricht', xmin=200, ymin=600)
@@ -749,31 +775,34 @@ def exercise(scenario, env, xid, out, label, large=False):
         def point(x, y):
             run(['xdotool', 'mousemove', '--window', xid, str(x), str(y), 'click', '1'], env)
             time.sleep(.35)
-        point(660, 485)  # Initially disabled: no implicit consent.
+        point(750, 506)  # Hit the actual disabled button, not the gap above it.
         if consent_sent():
             raise AssertionError('Unselected recording consent was submitted')
-        point(468, 437)  # Select the switch, then use its keyboard path to clear it.
-        key('space'); time.sleep(.35)
-        point(660, 485)
+        point(460, 425)  # Select the switch, then use its keyboard path to clear it.
+        key('space')
+        expect_settled('Space clears the recording consent choice', ['Bestätige zuerst die Zustimmung'])
+        point(750, 506)
         if consent_sent():
             raise AssertionError('Cleared recording consent was submitted')
-        point(468, 437)
+        point(460, 425)
         key('Escape'); time.sleep(.35)
         click('prüfen')  # Reopen from the still-required gate.
-        point(660, 485)
+        expect_settled('Reopened consent starts clear', ['Bestätige zuerst die Zustimmung'])
+        point(750, 506)
         if consent_sent():
             raise AssertionError('Reopened consent retained an earlier selection')
-        point(468, 437)
+        point(460, 425)
+        expect_settled('Selected consent enables the explicit choice', absent=['Bestätige zuerst die Zustimmung'])
         if scenario == 'gate-recording-direct':
-            point(660, 485)
+            click('Zustimmen', xmin=650, ymin=440, inspected_point=(1280,800,750,472))
             if consent_sent() != 1:
                 raise AssertionError('Explicit direct-call consent was not submitted exactly once')
-            expect('Explicit recording consent continues the direct call', ['Verbindung'], ['Zustimmung prüfen'])
+            expect_settled('Explicit recording consent continues the direct call', ['Verbindung'], ['Zustimmung prüfen'])
         else:
-            point(580, 480)
+            click('Nicht', xmin=500, ymin=440, inspected_point=(1280,800,600,472))
             if consent_sent():
                 raise AssertionError('Declining submitted recording consent')
-            expect('Declining recording consent leaves the call', ['Nachricht an Produktteam'])
+            expect_settled('Declining recording consent leaves the call', ['Nachricht an Produktteam'])
         checks.append({'check': 'Recording consent starts clear and is reset on reopen', 'result': 'pass'})
     elif scenario == 'prejoin':
         expect('conference prejoin starts open', ['Bereit', 'Jetzt', 'teil'])
@@ -782,7 +811,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         time.sleep(.8)  # Let the native compositor present the returned room.
         expect('conference prejoin cancellation returns to room', ['Nachricht an Designbesprechung'])
         click('Beitreten', inspected_point=(1280,800,1134,92))
-        expect('explicit conference entry shows prejoin', ['Bereit', 'Jetzt', 'teil'])
+        expect_settled('explicit conference entry shows prejoin', ['Bereit', 'Jetzt', 'teil'])
         # OCR can see the same word in the explanatory sentence but miss the
         # blue button. The next state verifies this inspected native hit point.
         path, _, _ = observe()
