@@ -143,7 +143,7 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'poll-settings':
         expect('conversation settings offers poll creation', ['Allgemein', 'Umfrage erstellen'])
         click('erstellen', inspected_point=(1280, 800, 540, 548))
-        expect('settings opens the scoped poll dialog', ['Frage', 'Option hinzufügen'])
+        expect('settings opens the scoped poll dialog', ['Frage', 'Mehrere Antworten erlauben'])
         key('Escape')
         expect('closing the poll dialog restores conversation settings', ['Allgemein', 'Schreibgeschützt'])
     elif scenario == 'chat-polls':

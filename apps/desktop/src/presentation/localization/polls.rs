@@ -31,11 +31,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Aufnahme läuft", "Recording", "Grabando"),
     ("Aufnahme prüfen", "Review recording", "Revisar grabación"),
     (
-        "Danach kann nicht mehr abgestimmt werden; die Ergebnisse sind sichtbar.",
-        "Voting will end and the results will be visible.",
-        "La votación terminará y los resultados serán visibles.",
-    ),
-    (
         "Aufnahme verwerfen",
         "Discard recording",
         "Descartar grabación",
@@ -44,6 +39,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Aufnahme wird abgeschlossen …",
         "Finishing recording…",
         "Finalizando grabación…",
+    ),
+    (
+        "Danach kann nicht mehr abgestimmt werden; die Ergebnisse sind sichtbar.",
+        "Voting will end and the results will be visible.",
+        "La votación terminará y los resultados serán visibles.",
     ),
     (
         "Deine Auswahl bleibt erhalten. Bitte erneut versuchen.",
