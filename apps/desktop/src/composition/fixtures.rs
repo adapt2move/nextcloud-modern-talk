@@ -2259,6 +2259,41 @@ impl NativeDesktopPort for DevelopmentPort {
 mod tests {
     use super::*;
     use talk_core::ui::MediaIntent;
+
+    #[test]
+    fn offline_thread_fixture_projects_the_locally_queued_reply() {
+        use talk_core::ui::messaging::{ComposeTarget, MessageAction};
+        let mut fixture = DevelopmentPort::new(Some("thread-offline"));
+        let context = fixture.snapshot.selected.unwrap();
+        let request = RequestId(70);
+        assert_eq!(
+            fixture.try_submit(UiIntent::Message {
+                request,
+                context,
+                action: MessageAction::Send {
+                    body: text("Offline reply"),
+                    target: ComposeTarget {
+                        thread: Some(1),
+                        ..Default::default()
+                    }
+                },
+            }),
+            Ok(())
+        );
+        let snapshot = fixture.take_snapshot().unwrap();
+        assert_eq!(snapshot.submission.unwrap().result, Completion::Queued);
+        let row = snapshot
+            .message_panel
+            .unwrap()
+            .thread_messages
+            .as_slice()
+            .last()
+            .unwrap()
+            .clone();
+        assert_eq!(row.body.as_str(), "Offline reply");
+        assert_eq!(row.metadata.thread, Some(1));
+        assert_eq!(row.delivery, DeliveryState::Queued);
+    }
     #[test]
     fn reaction_fixture_reconciles_counts_and_keeps_pending_and_denied_distinct() {
         use talk_core::ui::{conversation::RemoteState, messaging::MessageAction};

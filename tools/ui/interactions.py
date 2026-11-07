@@ -236,6 +236,8 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1010,700))
         type_text('OFFLINEREPLY')
         key('Return')
+        time.sleep(1.5)
+        run(['xdotool', 'mousemove', '--window', xid, '1100', '550', 'click', '--repeat', '5', '5'], env)
         expect('offline thread reply is staged and shown immediately', ['OFFLINEREPLY'])
         log = (out / f'{label}.log').read_text()
         if not re.search(r'UI_CHAT_UX send room=\d+ bytes=12 .*thread=Some\(1\)', log):
