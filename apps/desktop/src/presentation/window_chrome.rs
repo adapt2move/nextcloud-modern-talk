@@ -40,16 +40,14 @@ impl Desktop {
         let custom_buttons = cfg!(target_os = "windows")
             || (cfg!(target_os = "linux")
                 && matches!(window.window_decorations(), Decorations::Client { .. }));
-        let call_scrim = if self.incoming_visible() {
-            Some(0x0f172a66)
-        } else if matches!(
-            self.overlay,
-            Some(Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent)
-        ) {
-            Some(0x0f172a80)
-        } else {
-            None
-        };
+        let call_scrim = (self.incoming_visible()
+            || matches!(
+                self.overlay,
+                Some(
+                    Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent
+                )
+            ))
+        .then(|| self.modal_scrim_color());
         let drag = div()
             .id("window-drag-region")
             .window_control_area(WindowControlArea::Drag)
@@ -194,7 +192,7 @@ impl Desktop {
                 )
             })
             .when_some(call_scrim, |d, color| {
-                d.child(div().absolute().inset_0().occlude().bg(gpui::rgba(color)))
+                d.child(div().absolute().inset_0().occlude().bg(color))
             })
     }
 

@@ -300,16 +300,6 @@ impl Desktop {
                 .into_any_element()
         };
         self.dialog_scrim()
-            .bg(
-                if matches!(
-                    overlay,
-                    Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent
-                ) {
-                    gpui::rgba(0x0f172a80).into()
-                } else {
-                    t.scrim
-                },
-            )
             .when(side, |d| d.justify_end().p_3())
             .when(!side, |d| d.items_center().justify_center().p_5())
             .child(

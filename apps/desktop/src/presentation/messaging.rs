@@ -3044,7 +3044,7 @@ impl Desktop {
                             .map(|time| format!("{} · {}", self.l("Erinnerung"), time))
                             .unwrap_or_else(|| self.l("Erinnerung").to_owned()),
                         self.button(
-                            ("reminder-cancel", reminder.message as usize),
+                            scoped_id("reminder-cancel", context, reminder.message, 0),
                             "Erinnerung löschen",
                             ButtonStyle::Quiet,
                             self.message_available(MessageFeature::Reminders),

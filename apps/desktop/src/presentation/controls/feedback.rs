@@ -9,6 +9,21 @@ pub(in crate::presentation) enum BannerRole {
     Error,
 }
 
+impl BannerRole {
+    fn colors(self) -> (gpui::Hsla, gpui::Hsla, &'static str) {
+        let (foreground, background, symbol) = match self {
+            Self::Info => (0x315e98, 0xeaf1fb, "info"),
+            Self::Warning => (0x795300, 0xfff4d6, "cloud-off"),
+            Self::Error => (0x9e3e32, 0xfff0ec, "info"),
+        };
+        (rgb(foreground).into(), rgb(background).into(), symbol)
+    }
+
+    pub(in crate::presentation) fn foreground(self) -> gpui::Hsla {
+        self.colors().0
+    }
+}
+
 impl Desktop {
     pub(in crate::presentation) fn banner(&self, role: BannerRole, label: &str) -> Div {
         self.banner_with_icon(role, label, None)
@@ -20,12 +35,21 @@ impl Desktop {
         label: &str,
         icon: Option<&'static str>,
     ) -> Div {
-        let (foreground, background, symbol) = match role {
-            BannerRole::Info => (0x315e98, 0xeaf1fb, "info"),
-            BannerRole::Warning => (0x795300, 0xfff4d6, "cloud-off"),
-            BannerRole::Error => (0x9e3e32, 0xfff0ec, "info"),
-        };
-        let foreground = rgb(foreground);
+        let (foreground, _, symbol) = role.colors();
+        self.banner_with_leading(
+            role,
+            label,
+            self.scaled_icon(icon.unwrap_or(symbol), 16., foreground),
+        )
+    }
+
+    pub(in crate::presentation) fn banner_with_leading(
+        &self,
+        role: BannerRole,
+        label: &str,
+        leading: impl IntoElement,
+    ) -> Div {
+        let (foreground, background, _) = role.colors();
         div()
             .min_h(px(36.))
             .px_3()
@@ -34,11 +58,11 @@ impl Desktop {
             .flex()
             .items_center()
             .gap_2()
-            .bg(rgb(background))
+            .bg(background)
             .text_color(foreground)
             .text_size(self.sp(12.))
             .line_height(self.sp(18.))
-            .child(self.scaled_icon(icon.unwrap_or(symbol), 16., foreground.into()))
+            .child(leading)
             .child(div().flex_1().min_w_0().child(label.to_owned()))
     }
 

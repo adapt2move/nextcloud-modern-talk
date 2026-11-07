@@ -1,7 +1,7 @@
 pub(super) mod consent;
 mod dock;
 pub(super) mod recovery;
-use super::controls::Availability;
+use super::controls::{Availability, BannerRole};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, ImageSource, Window, div, img, prelude::*, px};
@@ -318,63 +318,52 @@ impl Desktop {
             .visible(call.scope, std::time::Instant::now())
         {
             stage = stage.child(
-                div()
-                    .flex_none()
-                    .h(px(36.))
-                    .px_3()
-                    .rounded(px(8.))
-                    .bg(gpui::rgb(0xfff4d6))
-                    .text_color(gpui::rgb(0x795300))
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .text_size(self.sp(12.))
-                    .child(self.l("Ton oder Bild fehlen?"))
-                    .child(self.button(
-                        "recover-call-media",
-                        "Neu beitreten",
-                        ButtonStyle::Secondary,
-                        true,
-                        LocalAction::Intent(UiIntent::RecoverCallMedia(call.scope)),
-                        cx,
-                    )),
+                self.banner_with_icon(
+                    BannerRole::Warning,
+                    self.l("Ton oder Bild fehlen?"),
+                    Some("info"),
+                )
+                .flex_none()
+                .py_0()
+                .gap_3()
+                .child(self.button(
+                    "recover-call-media",
+                    "Neu beitreten",
+                    ButtonStyle::Secondary,
+                    true,
+                    LocalAction::Intent(UiIntent::RecoverCallMedia(call.scope)),
+                    cx,
+                )),
             );
         }
         if call.stage == CallStage::Reconnecting {
             stage = stage.child(
-                div()
-                    .flex_none()
-                    .h(px(32.))
-                    .px_3()
-                    .rounded(px(8.))
-                    .bg(gpui::rgb(0xfff4d6))
-                    .text_color(gpui::rgb(0x795300))
-                    .text_size(self.sp(12.))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(self.call_spinner(
+                self.banner_with_leading(
+                    BannerRole::Warning,
+                    self.l("Verbindung wird wiederhergestellt …"),
+                    self.call_spinner(
                         "call-reconnecting-spinner".into(),
                         16.,
-                        gpui::rgb(0x795300).into(),
-                    ))
-                    .child(self.l("Verbindung wird wiederhergestellt …"))
-                    .when(
-                        self.call_reconnecting_since.is_some_and(|(scope, at)| {
-                            scope == call.scope
-                                && at.elapsed() >= std::time::Duration::from_secs(15)
-                        }),
-                        |d| {
-                            d.child(self.button(
-                                "reconnect-call",
-                                "Erneut verbinden",
-                                ButtonStyle::Secondary,
-                                true,
-                                LocalAction::Intent(UiIntent::ReconnectCall(call.scope)),
-                                cx,
-                            ))
-                        },
+                        BannerRole::Warning.foreground(),
                     ),
+                )
+                .flex_none()
+                .py_0()
+                .when(
+                    self.call_reconnecting_since.is_some_and(|(scope, at)| {
+                        scope == call.scope && at.elapsed() >= std::time::Duration::from_secs(15)
+                    }),
+                    |d| {
+                        d.child(self.button(
+                            "reconnect-call",
+                            "Erneut verbinden",
+                            ButtonStyle::Secondary,
+                            true,
+                            LocalAction::Intent(UiIntent::ReconnectCall(call.scope)),
+                            cx,
+                        ))
+                    },
+                ),
             );
         }
         if let CallStage::Required(gate) = call.stage

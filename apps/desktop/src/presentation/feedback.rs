@@ -1,5 +1,5 @@
 //! A single bounded, scoped result. No implicit retries or invented delivery.
-use super::controls::Availability;
+use super::controls::{Availability, BannerRole};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, state::error_label};
 use gpui::{AnyElement, Context, div, prelude::*, px};
 use std::time::{Duration, Instant};
@@ -11,6 +11,15 @@ enum Tone {
     Info,
     Warning,
     Error,
+}
+impl Tone {
+    fn role(self) -> BannerRole {
+        match self {
+            Self::Info => BannerRole::Info,
+            Self::Warning => BannerRole::Warning,
+            Self::Error => BannerRole::Error,
+        }
+    }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) struct Feedback {
@@ -33,12 +42,7 @@ impl From<Option<Overlay>> for Surface {
 }
 impl Feedback {
     pub(super) fn dismiss_theme(self, theme: super::Theme) -> super::Theme {
-        let foreground: gpui::Hsla = gpui::rgb(match self.tone {
-            Tone::Info => 0x315e98,
-            Tone::Warning => 0x795300,
-            Tone::Error => 0x9e3e32,
-        })
-        .into();
+        let foreground = self.tone.role().foreground();
         super::Theme {
             sidebar_secondary: foreground,
             hover: gpui::Hsla {
@@ -253,11 +257,7 @@ impl Desktop {
         else {
             return div().into_any_element();
         };
-        let role = match f.tone {
-            Tone::Info => super::controls::BannerRole::Info,
-            Tone::Warning => super::controls::BannerRole::Warning,
-            Tone::Error => super::controls::BannerRole::Error,
-        };
+        let role = f.tone.role();
         let banner = self
             .banner_with_icon(role, self.l(f.text), Some("info"))
             .relative()

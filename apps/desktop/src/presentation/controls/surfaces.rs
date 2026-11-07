@@ -1,16 +1,29 @@
 //! Shared elevation and geometry for content surfaces and context menus.
-use crate::presentation::Desktop;
+use crate::presentation::{Desktop, Overlay};
 use gpui::{BoxShadow, Div, div, point, prelude::*, px, rgb};
 
 pub(in crate::presentation) const CONTENT_RADIUS: f32 = 12.;
 
 impl Desktop {
+    pub(in crate::presentation) fn modal_scrim_color(&self) -> gpui::Hsla {
+        if self.incoming_visible() {
+            gpui::rgba(0x0f172a66).into()
+        } else if matches!(
+            self.overlay,
+            Some(Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent)
+        ) {
+            gpui::rgba(0x0f172a80).into()
+        } else {
+            self.theme.scrim
+        }
+    }
+
     pub(in crate::presentation) fn dialog_scrim(&self) -> Div {
         div()
             .absolute()
             .inset_0()
             .occlude()
-            .bg(self.theme.scrim)
+            .bg(self.modal_scrim_color())
             .flex()
     }
 

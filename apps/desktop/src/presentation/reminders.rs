@@ -1,5 +1,5 @@
 //! Account-wide reminder navigation, with only room-scoped opaque message IDs.
-use super::{ButtonStyle, Desktop, LocalAction};
+use super::{ButtonStyle, Desktop, LocalAction, controls::BannerRole};
 use gpui::{Context, Div, FontWeight, div, prelude::*};
 
 impl Desktop {
@@ -11,10 +11,10 @@ impl Desktop {
             .as_ref()
             .filter(|view| Some(view.scope) == self.snapshot.active_account)
         else {
-            return body.child(self.hint(self.l("Erinnerungen werden geladen …")));
+            return body.child(self.loading_row(self.l("Erinnerungen werden geladen …")));
         };
         if view.reminders.as_slice().is_empty() {
-            body = body.child(self.hint(self.l("Keine anstehenden Erinnerungen.")));
+            body = body.child(self.empty_row(self.l("Keine anstehenden Erinnerungen.")));
         }
         for reminder in view.reminders.as_slice() {
             let Some(room) = self
@@ -29,7 +29,7 @@ impl Desktop {
             let time = self
                 .settings_port
                 .local_datetime(reminder.timestamp)
-                .map(|value| value.as_str().to_owned())
+                .and_then(|value| super::localization::local_datetime(self.locale, value.as_str()))
                 .unwrap_or_else(|| self.l("Zeit unbekannt").to_owned());
             body = body.child(
                 self.control(
@@ -81,9 +81,11 @@ impl Desktop {
             );
         }
         if !view.complete {
-            body = body.child(div().pt_2().child(
-                self.hint(self.l("Einige Erinnerungen werden möglicherweise nicht angezeigt.")),
-            ));
+            body = body.child(div().pt_2().child(self.banner_with_icon(
+                BannerRole::Warning,
+                self.l("Einige Erinnerungen werden möglicherweise nicht angezeigt."),
+                Some("info"),
+            )));
         }
         body
     }
