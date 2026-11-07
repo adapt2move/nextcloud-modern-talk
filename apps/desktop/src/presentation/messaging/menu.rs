@@ -963,7 +963,7 @@ impl Desktop {
                             ),
                             cx,
                         ),
-                        super::super::controls::RowSize::Regular,
+                        crate::presentation::controls::RowSize::Regular,
                     )
                     .w_full()
                     .justify_start()
