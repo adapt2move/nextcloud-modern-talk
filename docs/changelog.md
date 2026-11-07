@@ -1,27 +1,19 @@
-# v0.0.11 alpha
+# v0.0.12 alpha
 
-- Keep ordinary user avatars decoded across chat-row changes. Retain eligible
-  avatar bytes and self-profile metadata locally for seven days, revalidate in
-  the background after four hours and keep the previous image on network errors.
-  Unchanged images keep their renderer allocation.
-- Move download progress, cancellation and completion into the application
-  header. Keep the download button separate from the file's drag surface and
-  require deliberate pointer movement before starting a native file drag.
-- Show each account once while restoring saved conversations. Display the
-  automatic connection attempt and retain an explicit retry after failure.
-- Request and check macOS microphone, camera, screen and notification permission
-  in the running application. Keep callback admission bounded across cancellation
-  and never interpret an opened System Settings page as permission.
-- Show outgoing files and images immediately in the chat, with subtle upload
-  progress below the file. Clear the admitted caption and allow further text
-  while uploading. Reconcile missing share acknowledgements using exact message
-  references; keep the local preview until the server thumbnail arrives.
-- Require a persistent macOS signing identity for publication. Support an internal
-  alpha certificate pinned to the app identifier as well as Developer ID with
-  team verification. Sign bundled code consistently and remove temporary CI
-  keychains after building. Internal signatures provide no Apple publisher trust
-  or notarization; switching from an older ad-hoc app can require new OS approval.
-- Keep the light/dark badge inside the selected appearance swatch's ring.
+- See room typing indicators, contact presence and custom status; manage your
+  availability and status message.
+- Browse and share NextCloud files, with clearer attachment previews and downloads.
+- Follow threads, reply in a dedicated pane and manage thread subscriptions.
+- Create and vote in polls, inspect results, and record or play voice messages.
+- Share screens in supported calls, with a dedicated screen stage, participant
+  controls, a compact call dock and clearer join, consent and recovery feedback.
+- Find messages across conversations and switch quickly between rooms and people.
+- Set message reminders and schedule sends with a shared calendar picker.
+- Reopen retained conversations and drafts offline, queue supported outgoing
+  actions and reconcile them after reconnecting. Improve startup, scrolling and
+  repeated navigation with bounded caches and background loading.
+- Refine light and dark appearance with subtle grain, frosted surfaces, layered
+  shadows, consistent controls and Lucide icons, while keeping the brand palette.
 
-[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.11/docs/install.md)
-· [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.11/docs/limitations.md)
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.12/docs/install.md)
+· [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.12/docs/limitations.md)

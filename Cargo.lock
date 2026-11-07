@@ -4359,7 +4359,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nextcloud-talk-api"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "cookie",
  "futures-lite 2.6.1",
@@ -7226,7 +7226,7 @@ checksum = "8bdb6fa0dfa67b38c1e66b7041ba9dcf23b99d8121907cd31c807a332f7a0bbb"
 
 [[package]]
 name = "talk-adapters"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "apple-native-keyring-store",
  "ashpd 0.13.13",
@@ -7275,7 +7275,7 @@ dependencies = [
 
 [[package]]
 name = "talk-bootstrap"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "talk-adapters",
  "talk-core",
@@ -7283,7 +7283,7 @@ dependencies = [
 
 [[package]]
 name = "talk-core"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "pulldown-cmark",
  "url",
@@ -7291,7 +7291,7 @@ dependencies = [
 
 [[package]]
 name = "talk-desktop"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "ashpd 0.13.13",
  "async-io",
