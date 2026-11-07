@@ -225,7 +225,11 @@ def notifications(n):
  n.synthetic_audio();n.app('notification-settings');notification_checks(n);n.close_app()
 
 def call_chat(n):
- n.a.width=720;n.a.height=580;n.app('call-chat',scenario='call-controls');n.click(438,535);n.frame('narrow-call-chat-open')
+ n.a.width=720;n.a.height=580;n.app('call-chat',scenario='call-controls')
+ # At this width chat is in the call actions popover. These points are for
+ # the fixed native fixture; the modal and editor assertions below verify the
+ # actual resulting state rather than treating a click as success.
+ n.click(402,535);n.frame('narrow-call-actions-open');n.click(390,472);n.frame('narrow-call-chat-open')
  # Keyboard-only entry from the real modal close control into its history/editor.
  for _ in range(16):
   n.key('shift+Tab');d=n.diag()
