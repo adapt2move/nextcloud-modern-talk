@@ -1,6 +1,6 @@
 # Performance requirements
 
-Status: **provisional targets, not measurements**. No native-client benchmark has been run. A small bootstrap executable or HTML prototype cannot establish the product budgets below. Budget changes require an independent performance review and a recorded rationale, not retroactive reclassification of a failed result.
+Status: **provisional targets, not reference-platform qualification**. The Linux native diagnostics described below do not establish the Mac product budgets. A small bootstrap executable or HTML prototype cannot establish them either. Budget changes require an independent performance review and a recorded rationale, not retroactive reclassification of a failed result.
 
 ## Q.PERF-01 — Reference environment and accounting
 
@@ -127,7 +127,16 @@ an offline send, a 61-second SIGSTOP/SIGCONT interval and duplicate/catch-up che
 corpus containing images, polls, voice and threads, then runs 60-second native scrolling,
 switcher and sidebar frame probes. Scrolling advances 24 pixels per completed frame,
 up for 30 seconds and down for 30 seconds; switcher frames alternate open/closed.
-Each mode has an 18,000-frame hard bound and reports failure if it ends early. The loaded timeline remains bounded to 100 rows.
+Each mode has an 18,000-frame hard bound and reports failure if it ends early.
+The loaded timeline remains bounded to 100 rows; scrolling must demonstrate an
+older-page load beyond its 50 cached messages. The sidebar phase scrolls 24 pixels
+per frame down for 30 seconds and back up for 30 seconds.
+Ordinary sidebar rows build their text, icons and avatars inside the measured scroll
+viewport. Offscreen rows retain their two stable native controls, so Tab/Shift-Tab
+and focus revelation traverse the complete bounded room list. Focused rows, open
+menus and active/joining calls retain their complete presentation. The performance
+runner also checks offscreen focus, keyboard menu activation and revelation at
+100% and 200% text size after the timed intervals.
 
 These are native after-frame callbacks, not physical display presentation. Small
 synthetic Linux/Xvfb/Mesa runs diagnose regressions; they do not establish the longer

@@ -149,6 +149,16 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
             while int((await act("state"))[0]) != 200:
                 if time.monotonic()>deadline: raise RuntimeError("Native room-list workload was truncated")
                 await asyncio.sleep(.1)
+            # Native Home also proves that the restored page can load older
+            # history. Preparation is outside the frame timing intervals.
+            await act("history-focus")
+            await asyncio.to_thread(subprocess.run,["xdotool","key","--clearmodifiers","Home"],check=True,env=env)
+            deadline=time.monotonic()+15
+            while int((await act("state"))[1]) <= 50:
+                if time.monotonic()>deadline:
+                    await act("diagnose")
+                    raise RuntimeError("Native Home did not load beyond the restored page")
+                await asyncio.sleep(.1)
             for work in ("scroll","switcher","sidebar"):
                 await act("perf-"+work)
                 end=time.monotonic()+600
@@ -156,8 +166,41 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
                 if work not in perf_done: raise RuntimeError("Native performance workload timed out: "+work)
                 completed=[s for s in perf if s['work']==work]
                 if not completed or any(s['rooms'] != 200 or s['loaded_messages'] == 0 for s in completed): raise RuntimeError("Native workload lost its loaded room/message projection")
+                if work == 'scroll' and not any(50 < s['loaded_messages'] <= 100 for s in completed): raise RuntimeError("Native scroll workload did not exercise bounded older-page loading")
                 if sum(s['interval_us'] for s in completed)<60_000_000: raise RuntimeError("Native workload ended before its 60-second interval")
                 await act("state")
+            # Real native keyboard traversal across a culled offscreen row.
+            # Preserve both stable controls, reveal, menu activation and scale.
+            keyboard=[]
+            for scale in (100,200):
+                if scale == 200:
+                    await act("sidebar-focus-large")
+                    await asyncio.sleep(.5) # settle drawer layout/focus before targeting a row
+                await act("sidebar-focus-tail")
+                async def expect_focus(main,more,menu=False):
+                    end=time.monotonic()+5
+                    while time.monotonic()<end:
+                        state=await act("sidebar-focus-state")
+                        if state == [str(main).lower(),str(more).lower(),'true',str(menu).lower(),str(scale)]:
+                            keyboard.append(state);return
+                        await asyncio.sleep(.05)
+                    raise RuntimeError("Native sidebar keyboard/reveal invariant failed: "+repr(state))
+                async def key(value):
+                    await asyncio.to_thread(subprocess.run,["xdotool","key", "--clearmodifiers",value],check=True,env=env)
+                await expect_focus(True,False)
+                await key("Tab");await expect_focus(False,True)
+                await key("shift+Tab");await expect_focus(True,False)
+                await key("Tab");await expect_focus(False,True)
+                await key("Return")
+                end=time.monotonic()+5
+                while time.monotonic()<end:
+                    state=await act("sidebar-focus-state")
+                    if state[3]=='true': break
+                    await asyncio.sleep(.05)
+                else: raise RuntimeError("Native sidebar menu did not open")
+                await key("Escape");await expect_focus(False,True)
+                await asyncio.to_thread(subprocess.run,["import","-window",xid,str(output/(mode+f"-sidebar-keyboard-{scale}.png"))],check=True,env=env,timeout=10)
+            save(output/(mode+"-sidebar-keyboard.json"),keyboard)
         if recovery:
             relay,control,lab,rooms=recovery
             await asyncio.sleep(5)

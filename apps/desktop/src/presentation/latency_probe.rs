@@ -8,6 +8,7 @@ pub(super) struct PerfRun {
     last: std::time::Instant,
     started: std::time::Instant,
     build_samples: u8,
+    observed_us: u128,
 }
 impl Desktop {
     pub(super) fn observe_perf_build(&mut self, started: std::time::Instant) {
@@ -29,10 +30,12 @@ impl Desktop {
                 let Some(run) = view.perf_probe.as_mut() else {
                     return;
                 };
+                let interval = run.last.elapsed();
+                run.observed_us += interval.as_micros();
                 println!(
                     "DEV_PERF {} {} {} {} {}",
                     run.mode,
-                    run.last.elapsed().as_micros(),
+                    interval.as_micros(),
                     started.elapsed().as_micros(),
                     view.snapshot.messages.as_slice().len(),
                     view.snapshot.conversations.as_slice().len()
@@ -41,13 +44,22 @@ impl Desktop {
                 run.last = std::time::Instant::now();
                 let mode = run.mode;
                 let remaining = run.remaining;
-                if remaining == 0 || run.started.elapsed() >= std::time::Duration::from_secs(60) {
+                if remaining == 0 || run.observed_us >= 60_000_000 {
                     view.perf_probe = None;
                     println!("DEV_PERF_DONE {mode}");
                     return;
                 }
                 match mode {
-                    "scroll" => view.message_ui.list.scroll_by(px(
+                    "scroll" => {
+                        let upward = view.perf_probe.as_ref().is_some_and(|r| {
+                            r.started.elapsed() < std::time::Duration::from_secs(30)
+                        });
+                        // Match deliberate wheel/key scrolling: geometry alone
+                        // does not authorize older-page I/O.
+                        view.message_ui
+                            .probe_scroll_by(px(if upward { -24. } else { 24. }));
+                    }
+                    "sidebar" => view.navigation.probe_scroll_rooms(px(
                         if view.perf_probe.as_ref().is_some_and(|r| {
                             r.started.elapsed() < std::time::Duration::from_secs(30)
                         }) {
@@ -86,7 +98,62 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> String {
         self.enable_latency_probe();
+        if action == "history-focus" {
+            self.navigation.history_focus().focus(window);
+        }
+        if action.starts_with("sidebar-focus-") {
+            let Some(context) = self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .rev()
+                .find(|r| r.title.as_str().starts_with("Native performance room"))
+                .map(|r| r.context)
+            else {
+                return "missing".into();
+            };
+            let main = controls::scoped_id("room", context, 0, 0);
+            let more = controls::scoped_id("room", context, 1, 1);
+            if action == "sidebar-focus-tail" {
+                if let Some(focus) = self.control_focus.current(&main) {
+                    focus.focus(window);
+                    self.navigation.reveal.request();
+                }
+                cx.notify();
+            }
+            if action == "sidebar-focus-large" {
+                self.handle(LocalAction::Scale(200), window, cx);
+                if self.narrow_navigation(window) && !self.navigation_open {
+                    self.handle(LocalAction::ToggleNavigation, window, cx);
+                }
+            }
+            let area = self.navigation.geometry()[2];
+            let visible = self.navigation.reveal.geometry().is_some_and(|bounds| {
+                bounds.top() >= area.top() && bounds.bottom() <= area.bottom()
+            });
+            return format!(
+                "{} {} {} {} {}",
+                self.control_focus
+                    .current(&main)
+                    .is_some_and(|f| f.is_focused(window)),
+                self.control_focus
+                    .current(&more)
+                    .is_some_and(|f| f.is_focused(window)),
+                visible,
+                self.room_menu == Some((context, "room")),
+                self.scale
+            );
+        }
         if action == "diagnose" {
+            println!(
+                "DEV_HISTORY {} {:?}",
+                self.message_ui.probe_history(),
+                self.snapshot
+                    .message_panel
+                    .as_ref()
+                    .map(|p| (p.older.is_some(), p.history))
+            );
             println!(
                 "DEV_HEALTH {:?} {:?} {:?} {:?}",
                 self.snapshot
@@ -114,6 +181,7 @@ impl Desktop {
                 last: std::time::Instant::now(),
                 started: std::time::Instant::now(),
                 build_samples: 0,
+                observed_us: 0,
             });
             cx.notify();
         }

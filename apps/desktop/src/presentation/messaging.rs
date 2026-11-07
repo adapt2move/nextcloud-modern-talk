@@ -252,6 +252,24 @@ fn preserved_row_offset(
 }
 
 impl MessageUi {
+    #[cfg(feature = "dev-probes")]
+    pub(super) fn probe_history(&self) -> String {
+        format!(
+            "{:?} {:?} {}",
+            self.history.borrow().diagnostic(),
+            self.list.logical_scroll_top(),
+            self.list.item_count()
+        )
+    }
+    #[cfg(feature = "dev-probes")]
+    pub(super) fn probe_scroll_by(&self, delta: gpui::Pixels) {
+        (self.pins.cancellation())();
+        self.arrival.borrow_mut().manual_scroll();
+        if delta < px(0.) {
+            self.history.borrow_mut().upward();
+        }
+        self.list.scroll_by(delta);
+    }
     fn visible_bounds(&self) -> gpui::Bounds<gpui::Pixels> {
         let bounds = self.list.viewport_bounds();
         let inset = self.geometry.borrow().header_inset.min(bounds.size.height);
