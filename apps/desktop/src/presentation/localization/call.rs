@@ -18,11 +18,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Anruf öffnen", "Open call", "Abrir llamada"),
     (
-        "Aufzeichnung auf dem Server starten?",
-        "Start recording on the server?",
-        "¿Iniciar la grabación en el servidor?",
-    ),
-    (
         "Aufzeichnung fehlgeschlagen",
         "Recording failed",
         "La grabación ha fallado",
@@ -41,6 +36,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Aufzeichnung starten",
         "Start recording",
         "Iniciar grabación",
+    ),
+    (
+        "Aufzeichnung starten?",
+        "Start recording?",
+        "¿Iniciar la grabación?",
     ),
     (
         "Aufzeichnung startet …",
