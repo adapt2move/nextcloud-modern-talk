@@ -290,7 +290,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                 println!("NATIVE_MONOSPACE_FONT family=GoogleSansCode digit={sample} id={id:?} ascent={:?} descent={:?} width={:?}",cx.text_system().ascent(id,px(12.)),cx.text_system().descent(id,px(12.)),line.width);
             }
         }
-            cx.new(|cx|Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx))
+            cx.new(|cx|Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent(),sidebar_menu_fixture:options.scenario.as_deref()==Some("sidebar-room-menu")},bridge,window,cx))
         });
     match window {
         Ok(window) => {

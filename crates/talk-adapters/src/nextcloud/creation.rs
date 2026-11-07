@@ -95,6 +95,11 @@ impl NextcloudClient {
             .find(|p| p.identifier == "forced")
             .and_then(|p| p.parameters.iter().find(|(k, _)| k == "listable"))
             .map(|(_, v)| *v);
+        let forced_type = presets
+            .iter()
+            .find(|p| p.identifier == "forced")
+            .and_then(|p| p.parameters.iter().find(|(k, _)| k == "roomType"))
+            .map(|(_, v)| *v);
         let options = Options {
             group: caps.can_create,
             extended: caps.feature("conversation-creation-all"),
@@ -103,8 +108,10 @@ impl NextcloudClient {
             } else {
                 FeatureSupport::Unsupported
             },
-            private_allowed: forced_listable.is_none_or(|value| value == 0),
-            public_allowed: forced_listable.is_none_or(|value| value > 0),
+            private_allowed: forced_listable.is_none_or(|value| value == 0)
+                && forced_type.is_none_or(|value| value == 2),
+            public_allowed: forced_listable.is_none_or(|value| value > 0)
+                && forced_type.is_none_or(|value| value == 3),
             presets: shown,
         };
         self.creation_presets = Some(presets);
@@ -179,8 +186,13 @@ impl NextcloudClient {
             .iter()
             .find(|(k, _)| k == "listable")
             .map(|(_, v)| *v);
+        let room_type = parameters
+            .iter()
+            .find(|(key, _)| key == "roomType")
+            .map(|(_, value)| *value);
         if room.public && (listable == Some(0) || !caps.has("listable-rooms"))
             || !room.public && listable.is_some_and(|v| v != 0)
+            || room_type != Some(if room.public { 3 } else { 2 })
         {
             return Err(self.error(ErrorKind::PermissionDenied));
         }

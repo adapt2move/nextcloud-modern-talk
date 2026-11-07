@@ -818,6 +818,11 @@ impl Accounts {
             Err(error) => Err(content_error(error)),
             _ => Err(ContentState::Failed),
         };
+        let cached_rooms = self
+            .cache
+            .loaded(scope.account)
+            .map(|snapshot| snapshot.rooms.clone())
+            .unwrap_or_else(Page::empty);
         let Some(cache) = self.background.account_mut(scope) else {
             return;
         };
@@ -826,6 +831,31 @@ impl Accounts {
                 let retired = cache.metadata.reconcile(scope, &list);
                 let rows = page(list.rooms.as_slice().iter().map(|r| {
                     let mut row = conversation(r, scope);
+                    if r.actions.read_messages == Decision::Allowed
+                        && !r.sensitive
+                        && !r.classified
+                        && !r.unknown_restrictions
+                    {
+                        let live = cache
+                            .rooms
+                            .as_slice()
+                            .iter()
+                            .find(|old| old.context == row.context && old.unread_mention.is_some())
+                            .map(|old| (old.unread_mention, old.unread, old.last_activity));
+                        let disk = r
+                            .navigation_key
+                            .as_ref()
+                            .and_then(|key| {
+                                cached_rooms.as_slice().iter().find(|old| &old.key == key)
+                            })
+                            .map(|old| (old.unread_mention, old.unread, old.last_activity));
+                        row.unread_mention = super::cache::mentions::merge(
+                            r.unread_mention,
+                            r.unread_messages,
+                            r.last_activity,
+                            live.or(disk),
+                        );
+                    }
                     if r.actions.read_messages == Decision::Allowed {
                         row.participants = cache
                             .member_counts
@@ -963,6 +993,7 @@ impl Accounts {
                     }
                     self.snapshot.conversations = rows;
                     self.snapshot.conversation_list = state;
+                    self.restore_pending_notifications(scope);
                     self.restore_cache_selection();
                     if list
                         .rooms

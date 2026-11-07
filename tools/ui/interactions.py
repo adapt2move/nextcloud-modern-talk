@@ -171,10 +171,29 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('Enter opens the selected message in context', ['Nachricht an Produktteam'], ['Weitere Ergebnisse'])
     elif scenario == 'discover':
         expect('open conversations show descriptions and counts', ['Designrunde', 'Kaffeepause', '18 Teilnehmende'])
+        click('discovery-search-input', inspected_point=(1280, 800, 500, 320))
+        time.sleep(.25)
         type_text('Design')
         expect('typing narrows the loaded rooms immediately', ['Designrunde'], ['Kaffeepause'])
         key('Escape')
         expect('Escape closes open conversation browsing', ['Nachricht an Produktteam'], ['Designrunde'])
+    elif scenario == 'reference-preview':
+        expect('resolved reference card is shown with its source message', ['Ein ruhiger Ort', 'Studiokonzept'])
+        click('Vorschau verbergen', inspected_point=(1280, 800, 826, 400))
+        expect('reference card can be collapsed locally', ['Vorschau anzeigen'], ['Ein ruhiger Ort'])
+        click('Vorschau', xmin=300, ymin=250)
+        expect('collapsed reference card can be restored', ['Ein ruhiger Ort', 'Studiokonzept'])
+    elif scenario in ('create34', 'create35'):
+        expect('creation form shows the inline invitations and presets', ['Projekt Atlas', 'Mara Fischer', 'Jonas Weber', 'Webinar'])
+        click('Offenes', xmin=300)
+        expect('open conversation choice describes link access', ['Personen mit Link'])
+        click('Webinar', xmin=300)
+        expect('a preset explains its purpose', ['moderierte Veranstaltungen'])
+    elif scenario == 'sidebar-room-menu':
+        expect('conversation actions expose notification settings', ['Benachrichtigungen', 'Archivieren'])
+        click('Benachrichtigungen')
+        time.sleep(1)
+        expect('sidebar action opens the selected room notification controls', ['Alle Nachrichten', 'Nur Erwähnungen', 'Anrufbenachrichtigungen'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])

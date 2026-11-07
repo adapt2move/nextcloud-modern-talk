@@ -52,6 +52,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Private conversation",
         "Conversación privada",
     ),
+    ("Standard", "Standard", "Estándar"),
     (
         "Suche erneut nach dieser Person.",
         "Search for this person again.",

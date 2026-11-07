@@ -100,18 +100,24 @@ impl Desktop {
                         .when(overlay == Overlay::Create, |d| {
                             d.h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
-                                - 66.)
-                                .min(632.)))
+                                - 40.)
+                                .min(720.)))
                         })
                         .when(!side, |d| {
                             d.max_h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
-                                - if overlay == Overlay::Search { 40. } else { 66. })
-                                .min(if overlay == Overlay::Search {
+                                - if matches!(overlay, Overlay::Search | Overlay::Create) {
+                                    40.
+                                } else {
+                                    66.
+                                })
+                            .min(
+                                if matches!(overlay, Overlay::Search | Overlay::Create) {
                                     720.
                                 } else {
                                     632.
-                                })))
+                                },
+                            )))
                         })
                         .flex()
                         .flex_col()

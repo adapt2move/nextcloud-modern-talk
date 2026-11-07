@@ -67,6 +67,9 @@ pub struct CacheRoom {
     pub favorite: Option<bool>,
     pub archived: Option<bool>,
     pub unread: u32,
+    /// Last server-reported mention state; absent in older cache records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unread_mention: Option<bool>,
     pub participant_count: Option<u32>,
     pub participant_count_at: Option<u64>,
     pub last_activity: Option<u64>,

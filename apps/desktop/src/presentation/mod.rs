@@ -113,6 +113,8 @@ pub enum LocalAction {
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
     SidebarFilter(talk_core::preferences::navigation::SidebarFilter),
+    ToggleSidebarRoomMenu(ConversationRef),
+    SidebarRoomNotifications(ConversationRef),
     Favorite(ConversationRef, bool),
     Archive(ConversationRef, bool),
     Send,
@@ -220,6 +222,7 @@ pub struct InitialView {
     pub prejoin: bool,
     pub onboarding: bool,
     pub scale: u16,
+    pub sidebar_menu_fixture: bool,
 }
 
 use crate::presentation::feedback::Feedback;
@@ -233,6 +236,7 @@ pub struct Desktop {
     // never cleared by an error snapshot; composition owns restart/quit.
     update_restart_pending: bool,
     room_ui: conversation_dialog::RoomUi,
+    sidebar_room_menu: Option<ConversationRef>,
     account_search_ui: account_search::AccountSearchUi,
     discovery_search: Entity<TextInput>,
     discovery_request: u64,
@@ -373,6 +377,7 @@ impl Desktop {
             prejoin,
             onboarding,
             scale,
+            sidebar_menu_fixture,
         } = initial;
         let snapshot = port
             .take_snapshot()
@@ -480,6 +485,11 @@ impl Desktop {
             _text_selection_observer: text_selection_observer,
             _text_link_subscription: text_link_subscription,
             room_ui,
+            sidebar_room_menu: if sidebar_menu_fixture {
+                snapshot.selected
+            } else {
+                None
+            },
             account_search_ui,
             discovery_search,
             discovery_request: 0,
@@ -812,6 +822,7 @@ impl Desktop {
             self.stop_device_preview(cx);
         }
         if previous_account != self.snapshot.active_account {
+            self.sidebar_room_menu = None;
             self.permission_ui.microphone_ready = false;
             self.destination = SidebarDestination::Conversations;
             self.collapsed_sections = [false; 5];
@@ -1188,6 +1199,7 @@ impl Desktop {
                 }
             }
             LocalAction::Open(overlay) => {
+                self.sidebar_room_menu = None;
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
@@ -1452,6 +1464,7 @@ impl Desktop {
                 }
             }
             LocalAction::Navigate(context) => {
+                self.sidebar_room_menu = None;
                 if self.save_draft(cx) && self.submit(UiIntent::OpenConversation(context)) {
                     self.retire_emoji_picker();
                     self.navigation_open = false;
@@ -1471,6 +1484,31 @@ impl Desktop {
                 talk_core::preferences::navigation::NavigationEdit::SetFilter(filter),
                 cx,
             ),
+            LocalAction::ToggleSidebarRoomMenu(context) => {
+                if self.snapshot.active_account == Some(context.account)
+                    && self
+                        .snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .any(|r| r.context == context)
+                {
+                    self.sidebar_room_menu = if self.sidebar_room_menu == Some(context) {
+                        None
+                    } else {
+                        Some(context)
+                    };
+                }
+            }
+            LocalAction::SidebarRoomNotifications(context) => {
+                self.sidebar_room_menu = None;
+                if self.save_draft(cx) && self.submit(UiIntent::OpenConversation(context)) {
+                    self.refresh(cx);
+                    if self.snapshot.selected == Some(context) {
+                        self.handle(LocalAction::OpenRoomNotifications, window, cx);
+                    }
+                }
+            }
             LocalAction::Favorite(context, favorite) => {
                 if let Some(row) = self
                     .snapshot
@@ -1497,6 +1535,7 @@ impl Desktop {
                 }
             }
             LocalAction::Archive(context, archived) => {
+                self.sidebar_room_menu = None;
                 if self.snapshot.conversation_list.content == ContentState::Ready
                     && self.snapshot.conversations.as_slice().iter().any(|r| {
                         r.context == context
@@ -1987,6 +2026,11 @@ impl Desktop {
             }
             cx.stop_propagation();
         } else if action == Some(ActionId::Close) {
+            if self.overlay.is_none() && self.sidebar_room_menu.take().is_some() {
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
             if self.conversation_search_open() && self.composer_available() {
                 self.handle(
                     LocalAction::Message(messaging::Action::CloseSearch),

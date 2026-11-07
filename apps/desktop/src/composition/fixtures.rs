@@ -74,6 +74,7 @@ pub const SCENARIOS: &[&str] = &[
     "account-search",
     "reference-preview",
     "search-filter",
+    "sidebar-room-menu",
     "create34",
     "create35",
     "discover",
@@ -200,6 +201,9 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("sidebar-room-menu") {
+        return snapshot(Some("details-ready"));
+    }
     if scenario == Some("reference-preview") {
         let mut state = snapshot(Some("chat"));
         let context = state.selected.expect("fictional room");

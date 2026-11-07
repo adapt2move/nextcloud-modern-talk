@@ -6,6 +6,7 @@ use gpui::{Context, Div, FontWeight, div, prelude::*, px};
 use talk_core::preferences::navigation::{
     AccountNavigation, NavigationEdit, NavigationSection, RemoteNavigationSupport, SidebarFilter,
 };
+use talk_core::ui::Decision;
 use talk_core::ui::presentation::{
     ContentState, ConversationCategory, ConversationKind, ConversationView, FeatureSupport,
     TagEdit, TagKind,
@@ -320,14 +321,34 @@ impl Desktop {
                     ),
             );
 
-        let discovery_support = self.snapshot.discover_panel.as_ref().map_or(talk_core::ui::presentation::FeatureSupport::Unknown, |panel| panel.support);
-        let discovery_supported = discovery_support == talk_core::ui::presentation::FeatureSupport::Supported;
-        sidebar = sidebar.child(self.button_with_leading_icon(
-            "open-discovery", ("Offene Gespräche", "compass"), ButtonStyle::Quiet,
-            Availability::when(self.active_account_connected() && discovery_supported,
-                if !self.active_account_connected() { "Das Verzeichnis benötigt eine Verbindung." } else if discovery_support == talk_core::ui::presentation::FeatureSupport::Unknown { "Das Verzeichnis wird geprüft." } else { "Das Gesprächsverzeichnis ist auf diesem Server nicht verfügbar." }),
-            LocalAction::Open(Overlay::Discover), cx,
-        ).w_full());
+        let discovery_support = self.snapshot.discover_panel.as_ref().map_or(
+            talk_core::ui::presentation::FeatureSupport::Unknown,
+            |panel| panel.support,
+        );
+        let discovery_supported =
+            discovery_support == talk_core::ui::presentation::FeatureSupport::Supported;
+        sidebar = sidebar.child(
+            self.button_with_leading_icon(
+                "open-discovery",
+                ("Offene Gespräche", "compass"),
+                ButtonStyle::Quiet,
+                Availability::when(
+                    self.active_account_connected() && discovery_supported,
+                    if !self.active_account_connected() {
+                        "Das Verzeichnis benötigt eine Verbindung."
+                    } else if discovery_support
+                        == talk_core::ui::presentation::FeatureSupport::Unknown
+                    {
+                        "Das Verzeichnis wird geprüft."
+                    } else {
+                        "Das Gesprächsverzeichnis ist auf diesem Server nicht verfügbar."
+                    },
+                ),
+                LocalAction::Open(Overlay::Discover),
+                cx,
+            )
+            .w_full(),
+        );
 
         let filter = self
             .account_layout()
@@ -891,10 +912,69 @@ impl Desktop {
             });
         // One small indent is enough to show group membership. The list shares
         // the top-level gutter; stacked container/row insets waste that space.
+        let menu_open = self.sidebar_room_menu == Some(context);
         div()
             .flex_none()
             .when(namespace == "room", |d| d.pl(px(4.)))
+            .group("sidebar-room")
+            .relative()
             .child(control)
+            .child(
+                div().absolute().right_1().top_0().child(
+                    self.icon_button(
+                        scoped_id("sidebar-room-actions", context, 0, 0),
+                        ("more", "Gesprächsaktionen"),
+                        ButtonStyle::Quiet,
+                        Availability::available(),
+                        LocalAction::ToggleSidebarRoomMenu(context),
+                        cx,
+                    )
+                    .bg(if selected { t.selected } else { t.sidebar })
+                    .opacity(if menu_open { 1. } else { 0. })
+                    .group_hover("sidebar-room", |s| s.opacity(1.))
+                    .focus(|s| s.opacity(1.)),
+                ),
+            )
+            .when(menu_open, |d| {
+                d.child(
+                    self.context_menu_surface()
+                        .ml_3()
+                        .mr_1()
+                        .my_1()
+                        .child(
+                            self.button_with_leading_icon(
+                                scoped_id("sidebar-room-notifications", context, 0, 0),
+                                ("Benachrichtigungen", "bell"),
+                                ButtonStyle::Quiet,
+                                Availability::available(),
+                                LocalAction::SidebarRoomNotifications(context),
+                                cx,
+                            )
+                            .w_full(),
+                        )
+                        .child(
+                            self.button_with_leading_icon(
+                                scoped_id("sidebar-room-archive", context, 0, 0),
+                                (
+                                    if row.archived == Some(true) {
+                                        "Aus Archiv holen"
+                                    } else {
+                                        "Archivieren"
+                                    },
+                                    "inbox",
+                                ),
+                                ButtonStyle::Quiet,
+                                Availability::when(
+                                    row.archive == Decision::Allowed && row.archived.is_some(),
+                                    "Der Archivstatus kann derzeit nicht geändert werden.",
+                                ),
+                                LocalAction::Archive(context, row.archived != Some(true)),
+                                cx,
+                            )
+                            .w_full(),
+                        ),
+                )
+            })
     }
 
     pub(super) fn inbox(&self, cx: &Context<Self>) -> Div {

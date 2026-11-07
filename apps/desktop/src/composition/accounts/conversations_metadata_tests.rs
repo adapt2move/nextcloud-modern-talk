@@ -103,6 +103,102 @@ fn known(now: Instant) -> (Accounts, ConversationRef, protocol::Conversation) {
 }
 
 #[test]
+fn notification_edits_project_immediately_and_restore_the_previous_room_on_failure() {
+    let (mut model, context, _) = known(Instant::now());
+    let before = model
+        .snapshot
+        .conversations
+        .as_slice()
+        .iter()
+        .find(|r| r.context == context)
+        .unwrap()
+        .notification_muted;
+    let change = NotificationChange::Messages {
+        desired: view::NotificationLevel::Never,
+        previous: Some(view::NotificationLevel::Mention),
+        previous_muted: before,
+    };
+    model.project_notification_change(context, change, true);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .notifications,
+        Some(view::NotificationLevel::Never)
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .notification_muted,
+        Some(true)
+    );
+    model.project_notification_change(context, change, false);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .notifications,
+        Some(view::NotificationLevel::Mention)
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .notification_muted,
+        before
+    );
+    let call = NotificationChange::Calls {
+        desired: false,
+        previous: Some(true),
+    };
+    model.project_notification_change(context, call, true);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .call_notifications,
+        Some(false)
+    );
+    model.project_notification_change(context, call, false);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .call_notifications,
+        Some(true)
+    );
+}
+
+#[test]
 fn participant_index_tickets_retire_on_hints_permission_changes_and_removal() {
     let now = Instant::now();
     let (mut model, context, mut room) = known(now);

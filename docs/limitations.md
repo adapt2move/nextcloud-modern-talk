@@ -27,11 +27,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - The quick switcher searches loaded conversation names, up to 16 observed
   participant names per eligible room, and the server's user directory. Its
   participant index is session-only and is filled gradually when permitted.
-  Sidebar unread and
-  mention filters are stored per durable account; mention state is unavailable
-  for cached rooms until a capable server supplies it. Conversation notification
-  changes use server-confirmed room settings; optimistic changes and a sidebar
-  notification menu are not yet implemented.
+  Sidebar unread and mention filters are stored per durable account. Eligible
+  cached rooms retain previously reported mention flags; missing or changed
+  observations remain unknown. Room notification edits are optimistic and
+  reconciled with the server. An uncertain write requires a fresh room read.
 - Open-conversation browsing requires `listable-rooms`. The Talk v4 listing
   does not expose a reliable member count before joining; protected or unknown
   password states cannot yet be joined through the directory.
@@ -41,6 +40,14 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   history. Search dates are UTC. Typing indicators, voice messages, complete
   document viewers and parts of moderation remain incomplete. Documents can open
   in the Cloud web view; poll drafts remain server-managed.
+- Link cards resolve at most two HTTP(S) links per eligible message using the
+  NextCloud references endpoint. Up to 64 URLs are held in a session cache for
+  fifteen minutes; negative results expire sooner. Only installation-owned
+  reference-preview image routes are fetched, with bounded decoded image sizes.
+  Provider selection and arbitrary embedded web content are not implemented.
+- Conversation creation supports local-directory invitations and the returned
+  webinar, presentation and voice-room presets. Other special-purpose presets
+  and non-user invitation sources are not offered in the creation flow.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms

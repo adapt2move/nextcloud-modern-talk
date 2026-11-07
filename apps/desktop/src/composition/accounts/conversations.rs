@@ -1,4 +1,4 @@
-//! Account-owned settings bridge. No speculative mutation is projected as confirmed state.
+//! Account-owned settings bridge. Pending notification edits are reconciled after writes.
 use super::*;
 use talk_core::protocol::conversation as wire;
 use talk_core::ui::conversation as view;
@@ -229,6 +229,19 @@ pub(super) enum Work {
     Csv,
     Bots,
     BotChange { bot: view::PersonRef, enabled: bool },
+    Notification(NotificationChange),
+}
+#[derive(Clone, Copy)]
+pub(super) enum NotificationChange {
+    Messages {
+        desired: view::NotificationLevel,
+        previous: Option<view::NotificationLevel>,
+        previous_muted: Option<bool>,
+    },
+    Calls {
+        desired: bool,
+        previous: Option<bool>,
+    },
 }
 impl Work {
     fn for_action(action: &view::ConversationAction) -> Self {
@@ -479,6 +492,36 @@ impl Accounts {
             return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
         }
         let mut work = Work::for_action(&action);
+        if let Some(details) = self
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .filter(|p| p.context == context)
+            .and_then(|p| p.details.as_ref())
+        {
+            work = match action {
+                view::ConversationAction::SetNotifications(desired) => {
+                    Work::Notification(NotificationChange::Messages {
+                        desired,
+                        previous: details.notifications,
+                        previous_muted: self
+                            .snapshot
+                            .conversations
+                            .as_slice()
+                            .iter()
+                            .find(|r| r.context == context)
+                            .and_then(|r| r.notification_muted),
+                    })
+                }
+                view::ConversationAction::SetCallNotifications(desired) => {
+                    Work::Notification(NotificationChange::Calls {
+                        desired,
+                        previous: details.call_notifications,
+                    })
+                }
+                _ => work,
+            };
+        }
         if automatic && matches!(action, view::ConversationAction::Members) {
             work = Work::MemberCount;
         }
@@ -547,6 +590,9 @@ impl Accounts {
             .conversation_panel
             .get_or_insert_with(|| view::ConversationPanel::new(context));
         begin_room(panel, request, work);
+        if let Work::Notification(change) = work {
+            self.project_notification_change(context, change, true);
+        }
         self.touch();
         Ok(())
     }
@@ -562,10 +608,7 @@ impl Accounts {
             .background
             .account_mut(context.account)
             .is_some_and(|a| a.metadata.complete(context, operation));
-        if !current
-            || self.snapshot.selected != Some(context)
-            || self.current(context.account).is_err()
-        {
+        if !current || self.current(context.account).is_err() {
             return;
         }
         let result = match reply {
@@ -577,6 +620,14 @@ impl Accounts {
             Err(error) => Err(completion_error(error)),
             _ => Err(Completion::Failed(UnavailableReason::PolicyStale)),
         };
+        if self.snapshot.selected != Some(context) {
+            if let Work::Notification(change) = work {
+                self.project_notification_change(context, change, result.is_ok());
+                self.load_rooms = Some(context.account);
+                self.touch();
+            }
+            return;
+        }
         self.apply_room_result(request, context, work, result);
     }
     /// Projects an already scoped operation result, including explicit read
@@ -588,6 +639,18 @@ impl Accounts {
         work: Work,
         result: Result<wire::ConversationResult, Completion>,
     ) {
+        if let Work::Notification(change) = work
+            && result.is_err()
+            && self
+                .snapshot
+                .conversation_panel
+                .as_ref()
+                .is_some_and(|panel| {
+                    panel.context == context && panel.state == view::RemoteState::Saving(request)
+                })
+        {
+            self.project_notification_change(context, change, false);
+        }
         let read = work.read();
         let Some(panel) = self
             .snapshot
@@ -959,6 +1022,80 @@ impl Accounts {
                 self.room_action_inner(request, context, view::ConversationAction::Members, true);
         }
         self.touch();
+    }
+    fn project_notification_change(
+        &mut self,
+        context: ConversationRef,
+        change: NotificationChange,
+        pending_or_accepted: bool,
+    ) {
+        if let Some(details) = self
+            .snapshot
+            .conversation_panel
+            .as_mut()
+            .filter(|p| p.context == context)
+            .and_then(|p| p.details.as_mut())
+        {
+            match change {
+                NotificationChange::Messages {
+                    desired, previous, ..
+                } => {
+                    details.notifications = if pending_or_accepted {
+                        Some(desired)
+                    } else {
+                        previous
+                    }
+                }
+                NotificationChange::Calls { desired, previous } => {
+                    details.call_notifications = if pending_or_accepted {
+                        Some(desired)
+                    } else {
+                        previous
+                    }
+                }
+            }
+        }
+        if let NotificationChange::Messages {
+            desired,
+            previous_muted,
+            ..
+        } = change
+        {
+            self.snapshot.conversations = page(
+                self.snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .cloned()
+                    .map(|mut row| {
+                        if row.context == context {
+                            row.notification_muted = if pending_or_accepted {
+                                Some(desired == view::NotificationLevel::Never)
+                            } else {
+                                previous_muted
+                            };
+                        }
+                        row
+                    }),
+            );
+        }
+    }
+    pub(super) fn restore_pending_notifications(&mut self, account: AccountScope) {
+        let pending: Vec<_> = self
+            .pending
+            .iter()
+            .filter_map(|p| match p.purpose {
+                Purpose::Room(_, context, _, Work::Notification(change))
+                    if context.account == account =>
+                {
+                    Some((context, change))
+                }
+                _ => None,
+            })
+            .collect();
+        for (context, change) in pending {
+            self.project_notification_change(context, change, true);
+        }
     }
 }
 fn begin_room(panel: &mut view::ConversationPanel, request: RequestId, work: Work) {

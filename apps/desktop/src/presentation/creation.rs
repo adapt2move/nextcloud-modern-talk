@@ -3,7 +3,7 @@ use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
     controls::{Availability, Skeleton},
 };
-use gpui::{Context, Div, div, prelude::*, px};
+use gpui::{Context, Div, FontWeight, div, prelude::*, px};
 use talk_core::ui::{
     AccountScope, Decision,
     conversation::{CreateAction, CreatePanel, RemoteState},
@@ -43,6 +43,12 @@ impl PeopleRequest {
 }
 
 impl Desktop {
+    fn creation_label(&self, text: &str) -> Div {
+        div()
+            .text_size(self.sp(14.))
+            .font_weight(FontWeight::MEDIUM)
+            .child(self.l(text).to_owned())
+    }
     pub(super) fn find_search_people(&mut self, cx: &Context<Self>) {
         let Some(account) = self.snapshot.active_account else {
             return;
@@ -191,7 +197,7 @@ impl Desktop {
                 "Die Verfügbarkeit ist nicht bekannt. Bitte neu laden.",
             ),
         };
-        let mut body = div().flex().flex_col().gap_4().child(
+        let mut body = div().flex().flex_col().gap_3().child(
             div()
                 .flex()
                 .gap_2()
@@ -305,7 +311,7 @@ impl Desktop {
                     .child(self.button("create-public", "Offenes Gespräch", if self.room_ui.create_public { ButtonStyle::Primary } else { ButtonStyle::Secondary },
                         Availability::when(panel.is_some_and(|p| p.public == FeatureSupport::Supported && p.public_allowed), "Offene Gespräche sind auf diesem Server nicht verfügbar."), LocalAction::CreatePublic(true), cx)))
                 .child(self.hint(self.l(if self.room_ui.create_public { "Auf dem Server auffindbar; Personen mit Link können je nach Servereinstellung beitreten." } else { "Nur eingeladene Personen können dieses Gespräch finden." })))
-                .child(self.title(self.l("Name des Gesprächs")))
+                .child(self.creation_label("Name des Gesprächs"))
                 .child(
                     self.input_surface(&self.conversation_name, cx)
                         .min_h(px(48.))
@@ -313,7 +319,7 @@ impl Desktop {
                 );
             if let Some(panel) = panel.filter(|p| p.extended == FeatureSupport::Supported) {
                 body = body
-                    .child(self.title(self.l("Beschreibung (optional)")))
+                    .child(self.creation_label("Beschreibung (optional)"))
                     .child(
                         self.input_surface(&self.room_ui.description, cx)
                             .min_h(px(48.))
@@ -346,7 +352,7 @@ impl Desktop {
                             cx,
                         ));
                     }
-                    body = body.child(self.title(self.l("Vorlage"))).child(presets);
+                    body = body.child(self.creation_label("Vorlage")).child(presets);
                     if let Some(preset) = panel
                         .presets
                         .as_slice()
@@ -356,7 +362,7 @@ impl Desktop {
                         body = body.child(self.hint(preset.description.as_str()));
                     }
                 }
-                body = body.child(self.title(self.l("Personen einladen (optional)")));
+                body = body.child(self.creation_label("Personen einladen (optional)"));
                 if !panel.invites.as_slice().is_empty() {
                     let mut invited = div().flex().flex_wrap().gap_2();
                     for person in panel.invites.as_slice() {

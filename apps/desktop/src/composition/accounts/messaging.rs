@@ -1136,6 +1136,7 @@ impl Accounts {
             return;
         };
         let mut reload = false;
+        let mut confirmed_read_state = None;
         let completion = match result {
             Ok(result) => {
                 let mut completion = Completion::ServerAccepted;
@@ -1307,10 +1308,12 @@ impl Accounts {
                                         let mut row = row.clone();
                                         if row.context == context {
                                             row.unread = 0;
+                                            row.unread_mention = Some(false);
                                         }
                                         row
                                     }),
                                 );
+                                confirmed_read_state = Some(true);
                             }
                         } else if work == Work::Unread {
                             self.snapshot.conversations =
@@ -1318,9 +1321,11 @@ impl Accounts {
                                     let mut row = row.clone();
                                     if row.context == context {
                                         row.unread = row.unread.max(1);
+                                        row.unread_mention = None;
                                     }
                                     row
                                 }));
+                            confirmed_read_state = Some(false);
                         }
                         if work == Work::Share {
                             panel.uploaded = None;
@@ -1411,6 +1416,9 @@ impl Accounts {
                         })
                     };
             }
+        }
+        if let Some(read) = confirmed_read_state {
+            self.remember_cached_unread_state(context, read);
         }
         self.reconcile_content_assets();
         if reload && let Ok((command, work)) = self.live_message_request(context) {

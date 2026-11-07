@@ -12,6 +12,7 @@ mod recovery;
 mod reference;
 mod resources;
 mod search_navigation;
+mod sidebar_notifications;
 mod updates;
 use super::Desktop;
 use talk_core::preferences::Locale;
@@ -30,6 +31,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         discovery::MESSAGES,
         reference::MESSAGES,
         search_navigation::MESSAGES,
+        sidebar_notifications::MESSAGES,
         resources::MESSAGES,
         recovery::MESSAGES,
         updates::MESSAGES,
@@ -89,6 +91,7 @@ mod tests {
         for catalog in [
             account_search::MESSAGES,
             search_navigation::MESSAGES,
+            sidebar_notifications::MESSAGES,
             resources::MESSAGES,
             recovery::MESSAGES,
             conversation::MESSAGES,

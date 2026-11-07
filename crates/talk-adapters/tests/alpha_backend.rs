@@ -2,7 +2,7 @@
 #![cfg(feature = "backend-test")]
 use std::path::Path;
 use talk_adapters::nextcloud::{NetworkRuntime, NextcloudClient, test_support};
-use talk_core::bounded::Text;
+use talk_core::bounded::{Page, Text};
 use talk_core::ids::{
     AccountId, AccountScope, ClockEpoch, ConversationId, HostId, OperationId, RuntimeGeneration,
 };
@@ -1110,6 +1110,152 @@ async fn released_server_messaging_and_room_controls() {
         C::Delete,
     )
     .await;
+    let ProtocolReply::CreationOptions(options) = client
+        .request(context(&runtime), ProtocolRequest::InspectCreation)
+        .await
+        .expect("creation presets")
+    else {
+        panic!("creation options")
+    };
+    assert_eq!(options.extended, FeatureSupport::Supported);
+    assert!(options.private_allowed);
+    let preset = options
+        .presets
+        .as_slice()
+        .iter()
+        .find(|p| p.id.as_str() == "presentation")
+        .expect("presentation preset")
+        .id
+        .clone();
+    let ProtocolReply::People(found) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::FindPeople {
+                query: text("lab_bob"),
+            },
+        )
+        .await
+        .expect("creation directory")
+    else {
+        panic!("directory")
+    };
+    let bob = found
+        .as_slice()
+        .iter()
+        .find(|p| p.name.as_str().contains("bob"))
+        .expect("fixture member")
+        .id;
+    client
+        .request(context(&runtime), ProtocolRequest::StageCreationPerson(bob))
+        .await
+        .expect("stage member");
+    let mut participants = Page::empty();
+    participants.try_push(bob).unwrap();
+    let ProtocolReply::CreatedConversation {
+        room: created,
+        incomplete_invitations: false,
+    } = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::CreateConversation(talk_core::protocol::creation::Room {
+                name: text("Disposable preset fixture"),
+                description: text("Synthetic creation description"),
+                public: false,
+                preset: Some(preset),
+                participants,
+            }),
+        )
+        .await
+        .expect("preset conversation")
+    else {
+        panic!("created conversation")
+    };
+    let details = settings(
+        &mut client,
+        &runtime,
+        created.id,
+        311,
+        "created-room-details",
+        C::Read,
+    )
+    .await;
+    let CR::Details(details) = details else {
+        panic!("created room details")
+    };
+    assert_eq!(
+        details.description.as_ref().map(Text::as_str),
+        Some("Synthetic creation description")
+    );
+    let ProtocolReply::Participants(people) = client
+        .request(context(&runtime), ProtocolRequest::Participants(created.id))
+        .await
+        .expect("created members")
+    else {
+        panic!("created participants")
+    };
+    assert!(
+        people
+            .people
+            .as_slice()
+            .iter()
+            .any(|p| p.display_name.as_str().contains("bob"))
+    );
+    settings(
+        &mut client,
+        &runtime,
+        created.id,
+        312,
+        "delete-created-preset-room",
+        C::Delete,
+    )
+    .await;
+    assert_eq!(options.public, FeatureSupport::Supported);
+    assert!(options.public_allowed);
+    let ProtocolReply::CreatedConversation {
+        room: public,
+        incomplete_invitations: false,
+    } = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::CreateConversation(talk_core::protocol::creation::Room {
+                name: text("Disposable public fixture"),
+                description: text("Public fixture description"),
+                public: true,
+                preset: None,
+                participants: Page::empty(),
+            }),
+        )
+        .await
+        .expect("public conversation")
+    else {
+        panic!("public room")
+    };
+    let CR::Details(details) = settings(
+        &mut client,
+        &runtime,
+        public.id,
+        313,
+        "created-public-details",
+        C::Read,
+    )
+    .await
+    else {
+        panic!("public details")
+    };
+    assert_eq!(
+        details.listable,
+        Some(talk_core::protocol::conversation::Discoverability::Users)
+    );
+    settings(
+        &mut client,
+        &runtime,
+        public.id,
+        314,
+        "delete-created-public-room",
+        C::Delete,
+    )
+    .await;
+    println!("alpha-backend creation presets, inline invite and public room: pass");
     settings(
         &mut client,
         &runtime,
