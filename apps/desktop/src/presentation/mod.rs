@@ -849,14 +849,15 @@ impl Desktop {
         {
             self.call_started = Some((call.scope, std::time::Instant::now()));
         }
-        if self
-            .recent_call_reaction
+        if next
+            .call
             .as_ref()
-            .is_some_and(|(scope, _, _)| Some(*scope) != live_scope)
+            .is_none_or(|call| call.stage != CallStage::Active || call.latest_reaction.is_none())
         {
             self.recent_call_reaction = None;
         }
         if let Some(call) = next.call.as_ref()
+            && call.stage == CallStage::Active
             && let Some(reaction) = call.latest_reaction.as_ref()
             && self
                 .recent_call_reaction

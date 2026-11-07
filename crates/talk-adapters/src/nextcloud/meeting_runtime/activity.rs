@@ -14,6 +14,52 @@ impl RaisedHand {
     }
 }
 
+/// Re-announce the last deliberate state after membership/policy refreshes.
+/// The lower state matters too: a peer may have missed the earlier signal.
+pub(super) fn refresh_hand(
+    raised: bool,
+    timestamp: u64,
+) -> Option<nextcloud_talk_api::signaling::activity::Activity> {
+    (timestamp != 0).then_some(
+        nextcloud_talk_api::signaling::activity::Activity::RaisedHand {
+            state: raised,
+            timestamp,
+        },
+    )
+}
+
+/// Existing web clients announce every received raised-hand message. Send an
+/// already raised hand only to newly observed peers, while repeating a lowered
+/// state to all peers so a missed lower can converge without repeated notices.
+#[derive(Default)]
+pub(super) struct HandAnnouncements(Vec<nextcloud_talk_api::signaling::PeerSession>);
+
+impl HandAnnouncements {
+    pub(super) fn changed(&mut self, peers: &[nextcloud_talk_api::signaling::PeerSession]) {
+        self.0 = peers.to_vec();
+    }
+
+    pub(super) fn refresh(
+        &mut self,
+        peers: &[nextcloud_talk_api::signaling::PeerSession],
+        raised: bool,
+        timestamp: u64,
+    ) -> Option<(
+        nextcloud_talk_api::signaling::activity::Activity,
+        Vec<nextcloud_talk_api::signaling::PeerSession>,
+    )> {
+        let activity = refresh_hand(raised, timestamp)?;
+        self.0.retain(|peer| peers.contains(peer));
+        let targets = peers
+            .iter()
+            .filter(|peer| !raised || !self.0.contains(peer))
+            .cloned()
+            .collect::<Vec<_>>();
+        self.0 = peers.to_vec();
+        (!targets.is_empty()).then_some((activity, targets))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -27,6 +73,52 @@ mod tests {
         assert!(!hand.raised());
         hand.update(true, 12);
         assert!(hand.raised());
+    }
+
+    #[test]
+    fn refresh_reannounces_the_latest_lowered_state_without_inventing_one() {
+        use nextcloud_talk_api::signaling::activity::Activity;
+        assert_eq!(refresh_hand(false, 0), None);
+        assert_eq!(
+            refresh_hand(true, 10),
+            Some(Activity::RaisedHand {
+                state: true,
+                timestamp: 10
+            })
+        );
+        assert_eq!(
+            refresh_hand(false, 11),
+            Some(Activity::RaisedHand {
+                state: false,
+                timestamp: 11
+            })
+        );
+        let mut remote = RaisedHand::default();
+        remote.update(true, 10);
+        if let Some(Activity::RaisedHand { state, timestamp }) = refresh_hand(false, 11) {
+            remote.update(state, timestamp);
+        }
+        assert!(!remote.raised());
+    }
+
+    #[test]
+    fn raised_refresh_targets_new_peers_but_lowered_refresh_repairs_all() {
+        use nextcloud_talk_api::signaling::PeerSession;
+        let first = PeerSession::parse("first").unwrap();
+        let second = PeerSession::parse("second").unwrap();
+        let mut announcements = HandAnnouncements::default();
+        announcements.changed(std::slice::from_ref(&first));
+        assert!(
+            announcements
+                .refresh(std::slice::from_ref(&first), true, 10)
+                .is_none()
+        );
+        let peers = [first.clone(), second.clone()];
+        assert_eq!(
+            announcements.refresh(&peers, true, 10).unwrap().1,
+            vec![second]
+        );
+        assert_eq!(announcements.refresh(&peers, false, 11).unwrap().1, peers);
     }
 }
 

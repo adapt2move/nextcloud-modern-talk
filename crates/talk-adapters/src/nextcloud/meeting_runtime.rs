@@ -684,6 +684,7 @@ async fn media_loop(
     let mut hand_raised = false;
     let mut hand_timestamp = 0u64;
     let mut announced_refresh = 0u64;
+    let mut hand_announcements = activity::HandAnnouncements::default();
     let mut reaction_sequence = 0u64;
     let mut latest_reaction: Option<calls::CallReaction> = None;
     let mut last_reaction: Option<Instant> = None;
@@ -761,7 +762,9 @@ async fn media_loop(
                         if let Some(next) = hand_timestamp.checked_add(1) {
                             hand_timestamp = now.max(next);
                             hand_raised = raised;
-                            let message = outgoing::Message { peers: bundle.peers.iter().map(|p| p.session.clone()).collect(),
+                            let peers: Vec<_> = bundle.peers.iter().map(|p| p.session.clone()).collect();
+                            hand_announcements.changed(&peers);
+                            let message = outgoing::Message { peers,
                                 activity: api::signaling::activity::Activity::RaisedHand { state: raised, timestamp: hand_timestamp }, created: Instant::now() };
                             let _ = hand_tx.send(Some(message));
                         }
@@ -875,6 +878,7 @@ async fn media_loop(
                         }
                         SignalEvent::TransportInterrupted => {
                             transport_ready = false;
+                            latest_reaction = None;
                             call.disconnected(scope).map_err(|_| ())?;
                             refresh_needed = true;
                         }
@@ -955,10 +959,12 @@ async fn media_loop(
                     }
                 }
             }
-            if policy_ready && hand_raised && bundle.hand_supported && announced_refresh != refreshes {
+            if policy_ready && bundle.hand_supported && announced_refresh != refreshes {
                 announced_refresh = refreshes;
-                let _ = hand_tx.send(Some(outgoing::Message { peers: bundle.peers.iter().map(|p| p.session.clone()).collect(),
-                    activity: api::signaling::activity::Activity::RaisedHand { state: true, timestamp: hand_timestamp }, created: Instant::now() }));
+                let peers: Vec<_> = bundle.peers.iter().map(|p| p.session.clone()).collect();
+                if let Some((activity, targets)) = hand_announcements.refresh(&peers, hand_raised, hand_timestamp) {
+                    let _ = hand_tx.send(Some(outgoing::Message { peers: targets, activity, created: Instant::now() }));
+                }
             }
             let clear_hand = !policy_ready && { hand_tx.borrow().is_some() };
             if clear_hand { let _ = hand_tx.send(None); }
@@ -1073,7 +1079,7 @@ async fn media_loop(
             let mut participant_snapshot = talk_core::bounded::Page::empty();
             for person in &participants.0 {
                 if let Some(source) = bundle.peers.iter().find(|p| p.session == person.session) {
-                    let speaking = peers.iter().find(|peer| peer.role != Role::Publisher && peer.session == person.session)
+                    let speaking = policy_ready && peers.iter().find(|peer| peer.role != Role::Publisher && peer.session == person.session)
                         .is_some_and(|peer| peer.speaking.active(Instant::now()));
                     participant_snapshot.try_push(calls::Participant {
                         local: person.local, name: source.name.clone(), microphone: source.microphone, camera: source.camera, raised_hand: person.hand.raised(), speaking,

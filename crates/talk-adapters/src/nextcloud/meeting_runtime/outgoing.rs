@@ -19,6 +19,18 @@ pub(super) struct Message {
     pub created: Instant,
 }
 
+fn merge_hands(previous: Option<Message>, next: Option<Message>) -> Option<Message> {
+    let mut next = next?;
+    if let Some(previous) = previous.filter(|previous| previous.activity == next.activity) {
+        for peer in previous.peers {
+            if next.peers.len() < 16 && !next.peers.contains(&peer) {
+                next.peers.push(peer);
+            }
+        }
+    }
+    Some(next)
+}
+
 /// Hand changes are latest-value state; reactions are a small, lossy queue.
 /// No send task survives the call, and stale transient reactions are discarded.
 pub(super) async fn run(
@@ -38,7 +50,7 @@ pub(super) async fn run(
         tokio::select! {
             changed = hands.changed() => {
                 if changed.is_err() { break; }
-                pending_hand = hands.borrow_and_update().clone();
+                pending_hand = merge_hands(pending_hand, hands.borrow_and_update().clone());
                 retry_at = Instant::now();
                 backoff = Duration::from_millis(300);
             }
@@ -62,7 +74,7 @@ pub(super) async fn run(
                 }
                 changed = hands.changed() => {
                     if changed.is_err() { break; }
-                    pending_hand = hands.borrow_and_update().clone();
+                    pending_hand = merge_hands(pending_hand, hands.borrow_and_update().clone());
                     retry_at = Instant::now();
                     backoff = Duration::from_millis(300);
                 }
@@ -73,5 +85,35 @@ pub(super) async fn run(
             let ctx = context(session.scope, &network, &cancel, 1500);
             let _ = writer.send(&ctx, &message.peers, &message.activity).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn coalescing_keeps_pending_targets_but_never_replays_an_older_state() {
+        let first = PeerSession::parse("first").unwrap();
+        let second = PeerSession::parse("second").unwrap();
+        let message = |state, timestamp, peers| Message {
+            peers,
+            activity: Activity::RaisedHand { state, timestamp },
+            created: Instant::now(),
+        };
+        let pending = message(true, 1, vec![first.clone()]);
+        let joined = message(true, 1, vec![second.clone()]);
+        let merged = merge_hands(Some(pending), Some(joined)).unwrap();
+        assert_eq!(merged.peers, vec![second.clone(), first.clone()]);
+        let lower = message(false, 2, vec![first, second]);
+        let latest = merge_hands(Some(merged), Some(lower)).unwrap();
+        assert_eq!(
+            latest.activity,
+            Activity::RaisedHand {
+                state: false,
+                timestamp: 2
+            }
+        );
+        assert!(merge_hands(Some(latest), None).is_none());
     }
 }
