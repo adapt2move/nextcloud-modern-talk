@@ -55,6 +55,15 @@ def exercise(scenario, env, xid, out, label, large=False):
     def key(value):
         run(['xdotool', 'key', '--clearmodifiers', value], env)
 
+    def expect_eventually(name, required=(), absent=()):
+        # Software rendering can deliver an older frame after a native event.
+        for attempt in range(3):
+            try:
+                return expect(name, required, absent)
+            except AssertionError:
+                if attempt == 2: raise
+                time.sleep(.75)
+
     def type_text(value):
         run(['xdotool', 'type', '--clearmodifiers', '--delay', '4', '--', value], env)
 
@@ -158,7 +167,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('ctrl+a'); key('BackSpace')
         expect('empty switcher shows recent rooms', ['Mara Fischer', 'Jonas Weber'])
         key('Down'); key('Down'); key('Return')
-        expect('arrows and Enter open the selected conversation', ['Nachricht an Mara Fischer'], ['Mit Pfeiltasten auswählen'])
+        expect_eventually('arrows and Enter open the selected conversation', ['Nachricht an Mara Fischer'], ['Mit Pfeiltasten auswählen'])
         key('ctrl+k')
         expect('keyboard shortcut reopens switcher', ['Mit Pfeiltasten auswählen'])
         type_text('Jonas')
@@ -174,15 +183,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('discovery-search-input', inspected_point=(1280, 800, 340, 320))
         time.sleep(.25)
         type_text('Design')
-        # Lavapipe can present the previous frame after the input event. The
-        # assertion still requires the native result, with a finite render wait.
-        for attempt in range(3):
-            try:
-                expect('typing narrows the loaded rooms immediately', ['Designrunde'], ['Kaffeepause'])
-                break
-            except AssertionError:
-                if attempt == 2: raise
-                time.sleep(.75)
+        expect_eventually('typing narrows the loaded rooms immediately', ['Designrunde'], ['Kaffeepause'])
         key('Escape')
         expect('Escape closes open conversation browsing', ['Nachricht an Produktteam'], ['Designrunde'])
     elif scenario == 'reference-preview':
@@ -204,9 +205,9 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('sidebar action opens the selected room notification controls', ['Alle Nachrichten', 'Nur Erwähnungen', 'Anrufbenachrichtigungen'])
     elif scenario == 'search-filter':
         click('Alle', ymin=190)
-        expect('sidebar filters start with the loaded rooms', ['Produktteam', 'Teamküche', 'Erwähnungen'])
+        expect_eventually('sidebar filters start with the loaded rooms', ['Produktteam', 'Designbesprechung', 'Erwähnungen'])
         click('Erwähnungen')
-        expect('mention filter keeps known mentions and explains unknown state', ['Produktteam', 'Erwähnungen sind noch nicht bekannt'], ['Teamküche'])
+        expect_eventually('mention filter keeps known mentions and explains unknown state', ['Produktteam', 'Erwähnungen sind noch nicht bekannt'], ['Designbesprechung'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])

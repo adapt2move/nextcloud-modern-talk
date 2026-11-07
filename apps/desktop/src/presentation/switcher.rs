@@ -26,6 +26,25 @@ pub(super) struct Switcher {
     last_failure: Option<talk_core::ui::presentation::RequestId>,
     failure_reason: Option<talk_core::ui::UnavailableReason>,
 }
+impl Switcher {
+    fn record_failure(
+        &mut self,
+        request: talk_core::ui::presentation::RequestId,
+        reason: talk_core::ui::UnavailableReason,
+    ) -> bool {
+        if self.last_failure == Some(request) {
+            return false;
+        }
+        self.last_failure = Some(request);
+        self.failure_reason = Some(reason);
+        if retryable(reason) && self.failures < 2 {
+            self.failures += 1;
+            true
+        } else {
+            false
+        }
+    }
+}
 
 // Match subsequences, favoring contiguous prefixes while retaining source order
 // for ties. The source is the bounded, recency-ordered conversation snapshot.
@@ -140,12 +159,8 @@ impl Desktop {
             && self.directory_query.as_ref().is_some_and(|(account, q)| {
                 Some(*account) == self.snapshot.active_account && q == &self.switcher.query
             })
-            && self.switcher.last_failure != Some(request)
         {
-            self.switcher.last_failure = Some(request);
-            self.switcher.failure_reason = Some(reason);
-            if retryable(reason) && self.switcher.failures < 2 {
-                self.switcher.failures += 1;
+            if self.switcher.record_failure(request, reason) {
                 self.directory_query = None;
             }
         }
@@ -392,8 +407,19 @@ impl Desktop {
                 })
             && let Some(reason) = self.switcher.failure_reason
         {
-            body =
-                body.child(self.hint(self.l("Personensuche ist vorübergehend nicht verfügbar.")));
+            let message = match reason {
+                talk_core::ui::UnavailableReason::Unsupported => {
+                    "Personensuche wird auf diesem Server nicht unterstützt."
+                }
+                talk_core::ui::UnavailableReason::PermissionDenied => {
+                    "Du darfst das Personenverzeichnis nicht durchsuchen."
+                }
+                talk_core::ui::UnavailableReason::ReauthenticationRequired => {
+                    "Verbinde dein Konto erneut, um Personen zu suchen."
+                }
+                _ => "Personensuche ist vorübergehend nicht verfügbar.",
+            };
+            body = body.child(self.hint(self.l(message)));
             if retryable(reason) && self.switcher.failures >= 2 {
                 body = body.child(self.button(
                     "switcher-retry",
@@ -417,7 +443,20 @@ impl Desktop {
 
 #[cfg(test)]
 mod tests {
-    use super::{room_score, score};
+    use super::{Switcher, room_score, score};
+    use talk_core::ui::{UnavailableReason, presentation::RequestId};
+    #[test]
+    fn rejected_directory_admission_retries_twice_and_deduplicates_completions() {
+        let mut state = Switcher::default();
+        assert!(state.record_failure(RequestId(1), UnavailableReason::Busy));
+        assert!(!state.record_failure(RequestId(1), UnavailableReason::Busy));
+        assert!(state.record_failure(RequestId(2), UnavailableReason::Busy));
+        assert!(!state.record_failure(RequestId(3), UnavailableReason::Busy));
+        assert_eq!(state.failures, 2);
+        let mut unsupported = Switcher::default();
+        assert!(!unsupported.record_failure(RequestId(1), UnavailableReason::Unsupported));
+        assert_eq!(unsupported.failures, 0);
+    }
     #[test]
     fn fuzzy_matching_prefers_prefix_and_preserves_unicode() {
         assert!(score("Navigation Team", "nav") < score("Team Navigation", "nav"));

@@ -49,7 +49,7 @@ impl Desktop {
             .font_weight(FontWeight::MEDIUM)
             .child(self.l(text).to_owned())
     }
-    pub(super) fn find_search_people(&mut self, cx: &Context<Self>) {
+    pub(super) fn find_search_people(&mut self, cx: &mut Context<Self>) {
         let Some(account) = self.snapshot.active_account else {
             return;
         };
@@ -57,13 +57,7 @@ impl Desktop {
         let Ok(bounded) = talk_core::ui::Text::new(query) else {
             return;
         };
-        if query.is_empty()
-            || self
-                .snapshot
-                .create_panel
-                .as_ref()
-                .is_some_and(|p| p.state.pending())
-        {
+        if query.is_empty() {
             return;
         }
         let requested = query.to_lowercase();
@@ -71,14 +65,41 @@ impl Desktop {
             return;
         };
         self.room_ui.request = request;
+        self.directory_query = Some((account, requested));
+        if self
+            .snapshot
+            .create_panel
+            .as_ref()
+            .is_some_and(|p| p.state.pending())
+        {
+            // A superseding query cannot reuse the prior search's confirmed rows,
+            // even when its own admission must wait for that request to settle.
+            self.room_ui.create_people_request = None;
+            self.switcher_directory_failed(
+                RequestId(request),
+                talk_core::ui::UnavailableReason::Busy,
+            );
+            self.schedule_switcher_directory(cx);
+            return;
+        }
         self.room_ui.create_people_request = Some(PeopleRequest::new(account, RequestId(request)));
-        if self.submit(UiIntent::Create {
+        match self.port.try_submit(UiIntent::Create {
             account,
             request: RequestId(request),
             action: CreateAction::FindPeople(bounded),
         }) {
-            self.directory_query = Some((account, requested));
-            self.switcher_request_admitted();
+            Ok(()) => self.switcher_request_admitted(),
+            Err(error) => {
+                let reason = match error {
+                    talk_core::ui::SubmitError::Busy => talk_core::ui::UnavailableReason::Busy,
+                    talk_core::ui::SubmitError::StaleScope => {
+                        talk_core::ui::UnavailableReason::PolicyStale
+                    }
+                    talk_core::ui::SubmitError::Unavailable(reason) => reason,
+                };
+                self.switcher_directory_failed(RequestId(request), reason);
+                self.schedule_switcher_directory(cx);
+            }
         }
     }
     pub(super) fn open_creation(&mut self, cx: &mut Context<Self>) {

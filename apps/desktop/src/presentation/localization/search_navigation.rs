@@ -2,6 +2,11 @@
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Direktnachricht", "Direct message", "Mensaje directo"),
     (
+        "Du darfst das Personenverzeichnis nicht durchsuchen.",
+        "You cannot search the people directory.",
+        "No tienes permiso para buscar en el directorio de personas.",
+    ),
+    (
         "Einige Erwähnungen sind noch nicht bekannt.",
         "Some mention states are not known yet.",
         "Aún se desconoce el estado de algunas menciones.",
@@ -49,7 +54,17 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "People search is temporarily unavailable.",
         "La búsqueda de personas no está disponible temporalmente.",
     ),
+    (
+        "Personensuche wird auf diesem Server nicht unterstützt.",
+        "This server does not support people search.",
+        "Este servidor no admite la búsqueda de personas.",
+    ),
     ("Ungelesen", "Unread", "Sin leer"),
+    (
+        "Verbinde dein Konto erneut, um Personen zu suchen.",
+        "Reconnect your account to search for people.",
+        "Vuelve a conectar tu cuenta para buscar personas.",
+    ),
     (
         "Öffentliches Gespräch",
         "Public conversation",
