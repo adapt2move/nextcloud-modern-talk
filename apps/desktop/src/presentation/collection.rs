@@ -1,7 +1,7 @@
 //! Shared loading/recovery presentation. Retained data never establishes authority.
 use super::controls::Skeleton;
 use super::{ButtonStyle, Desktop, LocalAction};
-use gpui::{Context, Div, div, prelude::*, px};
+use gpui::{Context, Div, div, prelude::*};
 use talk_core::ui::presentation::ContentState;
 
 #[derive(Clone, Copy)]
