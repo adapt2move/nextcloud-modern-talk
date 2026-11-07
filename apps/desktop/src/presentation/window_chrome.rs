@@ -40,6 +40,16 @@ impl Desktop {
         let custom_buttons = cfg!(target_os = "windows")
             || (cfg!(target_os = "linux")
                 && matches!(window.window_decorations(), Decorations::Client { .. }));
+        let call_scrim = if self.incoming_visible() {
+            Some(0x0f172a66)
+        } else if matches!(
+            self.overlay,
+            Some(Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent)
+        ) {
+            Some(0x0f172a80)
+        } else {
+            None
+        };
         let drag = div()
             .id("window-drag-region")
             .window_control_area(WindowControlArea::Drag)
@@ -74,6 +84,7 @@ impl Desktop {
             });
         div()
             .id("application-titlebar")
+            .relative()
             .h(px(HEIGHT))
             .flex_none()
             .w_full()
@@ -181,6 +192,9 @@ impl Desktop {
                             cx,
                         )),
                 )
+            })
+            .when_some(call_scrim, |d, color| {
+                d.child(div().absolute().inset_0().occlude().bg(gpui::rgba(color)))
             })
     }
 
