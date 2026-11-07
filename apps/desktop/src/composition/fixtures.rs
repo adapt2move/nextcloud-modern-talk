@@ -282,25 +282,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         return state;
     }
     if scenario == Some("thread-list") {
-        let mut state = snapshot(Some("thread"));
-        if let Some(context) = state.selected {
-            state.threads.account = Some(context.account);
-            state.threads.support = talk_core::ui::presentation::FeatureSupport::Supported;
-            state.threads.content = ContentState::Ready;
-            state.threads.entries = page([talk_core::ui::presentation::ThreadView {
-                context,
-                root: state
-                    .messages
-                    .as_slice()
-                    .iter()
-                    .find(|message| message.reply_count > 0)
-                    .map_or(3, |message| message.local_id),
-                title: text("Design review"),
-                replies: 2,
-                last_message: Some(41),
-            }]);
-        }
-        return state;
+        return snapshot(Some("thread"));
     }
     if matches!(
         scenario,
@@ -446,6 +428,18 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     }
     if scenario == Some("thread") {
         let mut state = snapshot(Some("chat-edit"));
+        if let Some(context) = state.selected {
+            state.threads.account = Some(context.account);
+            state.threads.support = talk_core::ui::presentation::FeatureSupport::Supported;
+            state.threads.content = ContentState::Ready;
+            state.threads.entries = page([talk_core::ui::presentation::ThreadView {
+                context,
+                root: 1,
+                title: text("Design review"),
+                replies: 2,
+                last_message: Some(41),
+            }]);
+        }
         state.messages = page(
             state
                 .messages
