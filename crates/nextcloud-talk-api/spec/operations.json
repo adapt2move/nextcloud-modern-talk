@@ -33,6 +33,56 @@
       "api": "Request::ResolveReference",
       "source": "https://docs.nextcloud.com/server/35/developer_manual/digging_deeper/reference.html#api-to-resolve-links",
       "scope": "Single bounded reference resolution; only installation-owned preview routes may supply image bytes."
+    },
+    {
+      "method": "WEBSOCKET",
+      "path": "/spreed",
+      "api": "typing::Watch / hpb::Owner",
+      "capability": "typing-privacy and current room membership/permissions",
+      "source": "https://github.com/strukturag/nextcloud-spreed-signaling/blob/e7a8fb7aa9b99ad9f41e0e1793ce147ed36ecc62/docs/standalone-signaling-api-v1.md",
+      "behavior_source": "https://github.com/nextcloud/spreed/blob/eed360d176edcb6888dad60965cb694e6bf62ae3/src/utils/SignalingTypingHandler.js"
+    },
+    {
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/predefined_statuses/",
+      "api": "Client::predefined_statuses",
+      "capability": "user_status.enabled",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/PredefinedStatusController.php"
+    },
+    {
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/user_status/message/custom",
+      "api": "Client::set_status_message",
+      "capability": "user_status.enabled; supports_emoji for custom icon",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/UserStatusController.php"
+    },
+    {
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/user_status/message/predefined",
+      "api": "Client::set_status_message",
+      "capability": "user_status.enabled",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/UserStatusController.php"
+    },
+    {
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/user_status/message",
+      "api": "Client::set_status_message",
+      "capability": "user_status.enabled",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/UserStatusController.php"
+    },
+    {
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/user_status",
+      "api": "Client::own_user_status",
+      "capability": "user_status.enabled",
+      "source": "https://github.com/nextcloud/server/blob/v34.0.5/apps/user_status/lib/Controller/UserStatusController.php"
+    },
+    {
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/user_status/status",
+      "api": "Client::set_own_user_status",
+      "capability": "user_status.enabled",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/UserStatusController.php"
     }
   ],
   "operations": [
