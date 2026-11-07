@@ -36,8 +36,9 @@ impl Desktop {
         let resize_focus = self
             .control_focus
             .get("thread-resize-handle".into(), cx)
-            .tab_stop(true);
+            .map(|focus| focus.tab_stop(true));
         let keyboard_focus = resize_focus.clone();
+        let mouse_focus = resize_focus.clone();
         div()
             .relative()
             .flex_none()
@@ -102,14 +103,19 @@ impl Desktop {
                     .top_3()
                     .bottom_3()
                     .w(px(8.))
-                    .track_focus(&resize_focus)
+                    .when_some(resize_focus, |handle, focus| handle.track_focus(&focus))
                     .cursor(gpui::CursorStyle::ResizeLeftRight)
                     .on_mouse_down(gpui::MouseButton::Left, move |_, window, _| {
-                        resize_focus.focus(window)
+                        if let Some(focus) = &mouse_focus {
+                            focus.focus(window);
+                        }
                     })
                     .on_key_down(cx.listener(
                         move |this, event: &gpui::KeyDownEvent, window, cx| {
-                            if !keyboard_focus.is_focused(window) {
+                            if !keyboard_focus
+                                .as_ref()
+                                .is_some_and(|focus| focus.is_focused(window))
+                            {
                                 return;
                             }
                             let change = match event.keystroke.key.as_str() {
