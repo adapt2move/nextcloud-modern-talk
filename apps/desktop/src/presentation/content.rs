@@ -1337,6 +1337,17 @@ impl Desktop {
         if cx.has_active_drag() && matches!(action, Action::Preview(_) | Action::Download(_)) {
             return;
         }
+        // Poll controls can change a variable-height message without changing
+        // its snapshot. Invalidate cached row heights while retaining the anchor.
+        let poll_layout_changed = matches!(
+            &action,
+            Action::TogglePollMenu(_)
+                | Action::ConfirmClosePoll(_)
+                | Action::CancelClosePoll
+                | Action::SelectPollOption { .. }
+                | Action::SubmitVote(_)
+                | Action::ClosePoll(_)
+        );
         match action {
             Action::OpenCloudBrowser => {
                 self.content_ui.return_overlay = self.overlay;
@@ -1911,6 +1922,12 @@ impl Desktop {
                     self.composer.focus_handle(cx).focus(window);
                 }
             }
+        }
+        if poll_layout_changed {
+            let anchor = self.message_ui.list.logical_scroll_top();
+            let count = self.message_ui.list.item_count();
+            self.message_ui.list.splice(0..count, count);
+            self.message_ui.list.scroll_to(anchor);
         }
         cx.notify();
     }

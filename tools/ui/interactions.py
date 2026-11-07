@@ -315,10 +315,10 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('Direct recording send did not settle exactly once')
         expect('direct send retires the fictional recording', ['Nachricht an Designteam'])
     elif scenario in ('chat', 'busy'):
-        # Search is local to bounded room rows. Focus shortcut works from root.
-        key('ctrl+k'); type_text('NO MATCH UI')
-        expect('local search filter reports no matching rows', ['Keine lokalen Treffer'])
-        key('ctrl+a'); key('BackSpace')
+        # The current shortcut opens the unified search surface.
+        key('ctrl+k')
+        expect('search shortcut opens the search surface', ['Suchen', 'Personen'])
+        key('Escape')
         click('schreiben')
         type_text('DRAFTALPHA'); key('Return')
         expect('draft retained after busy rejection' if scenario == 'busy' else 'draft retained after asynchronous failure',
