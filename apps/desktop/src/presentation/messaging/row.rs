@@ -236,9 +236,13 @@ impl Desktop {
                             self.button(
                                 gpui::ElementId::Name(
                                     format!(
-                                        "{}:{}",
+                                        "{}:{}:{}",
                                         scoped_id("location-map", context, m.local_id, 0),
-                                        object.placeholder.as_str()
+                                        object.placeholder.as_str(),
+                                        self.message_ui.thread_load.as_ref().map_or_else(
+                                            || "timeline".to_owned(),
+                                            |thread| format!("thread:{:032x}", thread.root),
+                                        )
                                     )
                                     .into(),
                                 ),

@@ -51,6 +51,8 @@ pub const SCENARIOS: &[&str] = &[
     "chat-edit",
     "chat-message-tools",
     "chat-reminder-time",
+    "chat-reminder-menu",
+    "chat-schedule-time",
     "lobby-settings",
     "thread-error",
     "chat-content",
@@ -229,7 +231,15 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }));
         return state;
     }
-    if matches!(scenario, Some("chat-message-tools" | "chat-reminder-time")) {
+    if matches!(
+        scenario,
+        Some(
+            "chat-message-tools"
+                | "chat-reminder-time"
+                | "chat-reminder-menu"
+                | "chat-schedule-time"
+        )
+    ) {
         let mut state = snapshot(Some("chat-ux"));
         let mut rows = state.messages.as_slice().to_vec();
         let mut location = message(
@@ -268,7 +278,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 ));
             }
             panel.reminders = page([Reminder {
-                message: 1,
+                message: 45,
                 timestamp: 1_800_003_600,
             }]);
             panel.scheduled = page([
@@ -908,6 +918,17 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 participants().to_vec()
             }),
         });
+    }
+    if scenario == "gate-lobby" {
+        dialog::configure(&mut s);
+        if let Some(details) = s
+            .conversation_panel
+            .as_mut()
+            .and_then(|panel| panel.details.as_mut())
+        {
+            details.lobby = Some(true);
+            details.lobby_timer = Some(1_800_003_600);
+        }
     }
     if scenario == "call-error-unknown" {
         let mut rows = s.conversations.as_slice().to_vec();

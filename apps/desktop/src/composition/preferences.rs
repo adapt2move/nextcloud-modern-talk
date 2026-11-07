@@ -250,6 +250,18 @@ impl ComputerSettingsPort for Bridge {
         talk_adapters::system_time::deadline(choice)
     }
     fn local_datetime(&self, timestamp: u64) -> Option<talk_core::ui::Text<32>> {
+        if self.services.accounts.is_none() {
+            // Disconnected fictional scenarios have no identity worker to
+            // observe a system zone; use fixed authored dates for those fixtures.
+            let label = match timestamp {
+                1_800_003_600 => Some("2027-01-15 09:00"),
+                1_800_090_000 => Some("2027-01-16 09:00"),
+                _ => None,
+            };
+            if let Some(label) = label {
+                return talk_core::ui::Text::new(label).ok();
+            }
+        }
         talk_adapters::system_time::local_datetime(timestamp)
     }
     fn same_local_day(&self, first: u64, second: u64) -> bool {

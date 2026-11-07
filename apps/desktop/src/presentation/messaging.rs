@@ -275,17 +275,24 @@ impl MessageUi {
 impl Desktop {
     pub(crate) fn fixture_message_tools(
         &mut self,
-        reminder: bool,
+        surface: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if !self.development {
             return;
         }
-        if reminder {
-            self.open_message_deadline(Some(1), window, cx);
-        } else {
-            self.message_ui.show_scheduled = true;
+        match surface {
+            "chat-reminder-time" => self.open_message_deadline(Some(45), window, cx),
+            "chat-reminder-menu" => self.message_action(Action::Menu(45), window, cx),
+            "chat-schedule-time" => {
+                self.composer.update(cx, |input, cx| {
+                    input.set_context_value("Fiktive Nachricht für morgen.");
+                    cx.notify();
+                });
+                self.open_message_deadline(None, window, cx);
+            }
+            _ => self.message_ui.show_scheduled = true,
         }
     }
     /// Reuse the composition owner's finite refresh tick for one debounced

@@ -142,8 +142,9 @@ destination and expose storage actions instead of a browser-login retry. These
 fixtures never reopen or repair an actual profile.
 
 Use `chat-message-tools` for fictional location, reminder and scheduled-message
-rows; `chat-reminder-time` shows the reminder chooser; `lobby-settings` shows
-the moderator lobby timer. These scenarios do not contact a server.
+rows; `chat-reminder-menu`, `chat-reminder-time` and `chat-schedule-time`
+show the message menu and date/time choosers; `lobby-settings` shows the
+moderator lobby timer. These scenarios do not contact a server.
 
 Use `chat-send-pending` for the fictional pending-send presentation, repeated Enter and aligned delivery indicators on grouped, edited and wrapped messages. It deliberately leaves the send unconfirmed and does not qualify transport admission.
 

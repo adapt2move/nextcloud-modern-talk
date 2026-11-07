@@ -116,7 +116,10 @@ impl Desktop {
                 message,
                 timestamp: Some(moment.timestamp),
             })
-        } else if !self.composer.read(cx).composing() {
+        } else if !self.composer.read(cx).composing()
+            && !self.has_staged_attachments()
+            && self.message_ui.editing.is_none()
+        {
             self.composer_submission(cx)
                 .filter(|body| !body.as_str().trim().is_empty())
                 .map(|body| MessageAction::Schedule {
@@ -152,6 +155,21 @@ impl Desktop {
         } else {
             MessageFeature::Schedules
         });
+        let available = if !reminder
+            && available.is_enabled()
+            && (self.has_staged_attachments()
+                || self.message_ui.editing.is_some()
+                || self.message_ui.composer_load_failed == Some(context)
+                || self
+                    .composer
+                    .read(cx)
+                    .submitted_value()
+                    .is_none_or(|body| body.trim().is_empty()))
+        {
+            Availability::when(false, "Zum Planen eine Nachricht ohne Dateien verfassen.")
+        } else {
+            available
+        };
         Some(
             self.composer_card()
                 .p_3()
