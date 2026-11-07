@@ -486,7 +486,7 @@ async fn connected(
                                 if room.generation != generation || !room.joined || room.cancellation.is_cancelled() || reply.is_closed() {
                                     let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
                                 }
-                                if matches!(signal, Some(Signal::SendOffer)) && stream == StreamKind::Screen {
+                                if matches!(signal, Some(Signal::SendOffer)) && room.purpose == RoomPurpose::Call {
                                     let Some(member) = room.members.iter().find(|m| m.talk == peer && m.talk != room.own) else {
                                         let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
                                     };

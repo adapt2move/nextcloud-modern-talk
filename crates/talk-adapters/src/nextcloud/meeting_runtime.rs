@@ -63,7 +63,7 @@ pub(crate) const DEVICES: DevicePermissions = DevicePermissions {
 
 enum Write {
     Subscribe(PeerSession, StreamKind),
-    SendScreenOffer(PeerSession),
+    SendStreamOffer(PeerSession, StreamKind),
     RestartSubscription(PeerSession, StreamKind),
     Refresh(u64),
     Select(PeerSession, Negotiation, StreamKind),
@@ -452,9 +452,9 @@ async fn write_loop(
                         )
                         .await
                 }
-                Write::SendScreenOffer(peer) => {
+                Write::SendStreamOffer(peer, stream) => {
                     writer
-                        .send_screen_offer(&context(scope, &network, &cancel, 3000), &peer)
+                        .send_stream_offer(&context(scope, &network, &cancel, 3000), &peer, stream)
                         .await
                 }
                 Write::Subscribe(peer, stream) => {
@@ -810,6 +810,7 @@ async fn media_loop(
     let mut tick = tokio::time::interval(Duration::from_millis(10));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_flags = call.wishes();
+    let mut camera_offer_pending = !last_flags.microphone && !last_flags.camera;
     let mut local_speaking = speaking::Speaking::default();
     let mut hand_raised = false;
     let mut hand_timestamp = 0u64;
@@ -1129,6 +1130,9 @@ async fn media_loop(
                 }
             }
             let policy_ready = transport_ready && received_policy >= required_policy;
+            if !call.wishes().microphone && !call.wishes().camera {
+                camera_offer_pending = true;
+            }
             let recording = moderation::current_recording(
                 match bundle.inputs.room {
                     Observed::Known { value, lease } => Observed::Known { value: value.recording, lease },
@@ -1351,10 +1355,22 @@ async fn media_loop(
                 }
                 if !peer.engine.is_open() && peer.stream == StreamKind::Screen { continue; }
                 if publishes && peer.connected {
+                    // Web peers do not request a publisher that joined receive-only.
+                    // Once publication is connected, use HPB's existing sendoffer
+                    // handshake, as for a newly shared screen. A status message on
+                    // SCTP cannot reach a subscriber that has not been created yet.
+                    if peer.role == Role::Publisher && peer.stream == StreamKind::Camera
+                        && topology == Topology::Sfu && policy_ready && camera_offer_pending
+                        && (wishes.microphone || wishes.camera) {
+                        for target in bundle.peers.iter().filter(|target| sfu_members.contains(&target.session)).take(16) {
+                            send(&writes, Write::SendStreamOffer(target.session.clone(), StreamKind::Camera))?;
+                        }
+                        camera_offer_pending = false;
+                    }
                     if peer.stream == StreamKind::Screen && topology == Topology::Sfu {
                         for target in &bundle.peers {
                             if sfu_members.contains(&target.session) && !peer.screen_announced.contains(&target.session) && peer.screen_announced.len() < 16 {
-                                send(&writes, Write::SendScreenOffer(target.session.clone()))?;
+                                send(&writes, Write::SendStreamOffer(target.session.clone(), StreamKind::Screen))?;
                                 peer.screen_announced.push(target.session.clone());
                             }
                         }

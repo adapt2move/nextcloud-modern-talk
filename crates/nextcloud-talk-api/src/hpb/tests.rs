@@ -747,6 +747,16 @@ async fn authenticated_session_routes_subscriber_answer_and_confirms_retirement(
             force_mute["message"]["data"]["payload"]["peerId"],
             "hpb-other"
         );
+        for stream in ["video", "screen"] {
+            let publication = receive(&mut socket).await;
+            assert_eq!(
+                publication["message"]["recipient"]["sessionid"],
+                "hpb-other"
+            );
+            assert_eq!(publication["message"]["data"]["type"], "sendoffer");
+            assert_eq!(publication["message"]["data"]["roomType"], stream);
+            assert!(publication["message"]["data"].get("sid").is_none());
+        }
         let bye = receive(&mut socket).await;
         assert_eq!(bye["type"], "bye");
         send(&mut socket, json!({"id":bye["id"],"type":"bye","bye":{}})).await;
@@ -820,11 +830,49 @@ async fn authenticated_session_routes_subscriber_answer_and_confirms_retirement(
         )
         .await
         .unwrap();
+    for stream in [StreamKind::Camera, StreamKind::Screen] {
+        route
+            .send_stream(
+                &context(&runtime, &handle.shared),
+                &peer("talk-other"),
+                None,
+                Some(Signal::SendOffer),
+                stream,
+            )
+            .await
+            .unwrap();
+    }
+    // Rejected media mutations retire the route, so test membership rejection
+    // only after both valid publications have reached the socket.
+    assert_eq!(
+        route
+            .send_stream(
+                &context(&runtime, &handle.shared),
+                &peer("unknown"),
+                None,
+                Some(Signal::SendOffer),
+                StreamKind::Camera,
+            )
+            .await,
+        Err(ErrorKind::WrongScope)
+    );
     route.close();
     assert!(route.is_closed());
     server.await.unwrap();
     wait_for(&handle.shared, |s| s.room.is_none()).await;
     assert!(!owner.retirement_pending());
+    assert_eq!(
+        route
+            .send_stream(
+                &context(&runtime, &handle.shared),
+                &peer("talk-other"),
+                None,
+                Some(Signal::SendOffer),
+                StreamKind::Camera,
+            )
+            .await,
+        Err(ErrorKind::Cancelled)
+    );
     assert!(matches!(
         route.poll(&context(&runtime, &handle.shared)).await,
         Err(ErrorKind::Cancelled)
