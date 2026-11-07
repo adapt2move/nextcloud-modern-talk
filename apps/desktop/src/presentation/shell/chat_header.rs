@@ -93,9 +93,8 @@ impl Element for ScrollUnderHeader {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let header_height = window.layout_bounds(*header_layout).size.height;
-        // Prepaint in reading order. Only the timeline's hitboxes are
-        // clipped below the measured header; it still paints underneath.
-        // No cached toolbar height or extra frame is needed after wrapping.
+        // Clip timeline hitboxes and paint below the measured header, without
+        // caching its height or needing another frame after wrapping.
         self.header.prepaint(window, cx);
         let mut history =
             (self.history.take().expect("one prepaint per element"))(header_height, window, cx)
@@ -135,7 +134,7 @@ impl Element for ScrollUnderHeader {
         let (history, visible) = prepaint;
         // GPUI registers tab stops while painting. Explicit sibling groups
         // retain header -> history -> composer navigation despite paint order.
-        // The live list uses the enclosing panel's clip, including the header.
+        // Apply the same timeline clip used for prepaint and hit testing.
         window.with_content_mask(Some(ContentMask { bounds: *visible }), |window| {
             window.with_tab_group(Some(1), |window| history.paint(window, cx));
         });

@@ -2095,7 +2095,10 @@ impl Desktop {
                     self.composer_list_row(
                         self.settings_port
                             .local_datetime(scheduled.timestamp)
-                            .map(|time| format!("{} · {}", super::localization::local_datetime(self.locale, time.as_str()).unwrap_or_default(), scheduled.body.as_str()))
+                            .and_then(|time| {
+                                super::localization::local_datetime(self.locale, time.as_str())
+                            })
+                            .map(|time| format!("{} · {}", time, scheduled.body.as_str()))
                             .unwrap_or_else(|| scheduled.body.as_str().to_owned()),
                         self.button(
                             ("schedule-cancel", scheduled.id as usize),
@@ -2122,7 +2125,10 @@ impl Desktop {
                     self.composer_list_row(
                         self.settings_port
                             .local_datetime(reminder.timestamp)
-                            .map(|time| format!("{} · {}", self.l("Erinnerung"), super::localization::local_datetime(self.locale, time.as_str()).unwrap_or_default()))
+                            .and_then(|time| {
+                                super::localization::local_datetime(self.locale, time.as_str())
+                            })
+                            .map(|time| format!("{} · {}", self.l("Erinnerung"), time))
                             .unwrap_or_else(|| self.l("Erinnerung").to_owned()),
                         self.button(
                             ("reminder-cancel", reminder.message as usize),

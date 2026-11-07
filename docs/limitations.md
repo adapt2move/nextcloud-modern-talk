@@ -125,8 +125,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   are not available offline. Playback accepts WAV PCM, Ogg Opus/Vorbis and supported
   MP4/WebM audio codecs up to 32 MiB. AAC playback uses a native decoder on
   Linux and macOS; other platforms and unavailable codecs offer download. The
-  deterministic waveform placeholder supports pointer scrubbing and five-second
-  arrow-key seeking; it is not derived from the audio. Native microphone, speaker,
+  deterministic incoming waveform placeholder supports pointer scrubbing and five-second
+  arrow-key seeking; it is not derived from the audio. Recording review retains up to
+  32 time buckets of live level peaks across the recording in memory, not a full decoded waveform. Once playback
+  has started, review supports pointer and five-second arrow-key seeking. Native microphone, speaker,
   permission and mobile interoperability have not yet been qualified.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document

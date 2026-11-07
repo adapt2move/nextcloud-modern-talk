@@ -647,7 +647,7 @@ impl Desktop {
                     .child(self.avatar_with_presence(
                         self.person_avatar(&initials, 48.),
                         state,
-                        12.,
+                        48.,
                         self.theme.surface,
                     ))
                     .child(

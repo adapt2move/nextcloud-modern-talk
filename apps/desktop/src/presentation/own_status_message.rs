@@ -392,17 +392,13 @@ impl Desktop {
                     ))
                 }),
         );
-        div()
+        self.context_menu_surface()
             .absolute()
             .bottom(px(58.))
             .left_0()
             .right_0()
             .occlude()
             .rounded(px(12.))
-            .border_1()
-            .border_color(t.border)
-            .bg(t.surface)
-            .shadow_lg()
             .child(
                 self.scroll_area(super::navigation::Region::Overlay)
                     .max_h(px(480.))

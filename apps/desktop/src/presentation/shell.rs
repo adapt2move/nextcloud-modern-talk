@@ -54,7 +54,7 @@ impl Desktop {
                 }
             });
         if row.kind == ConversationKind::Direct {
-            self.avatar_with_presence(avatar, row.presence, 12., t.surface)
+            self.avatar_with_presence(avatar, row.presence, 36., t.surface)
         } else {
             avatar
         }
@@ -65,7 +65,7 @@ impl Desktop {
         &self,
         avatar: Div,
         presence: Presence,
-        dot_size: f32,
+        avatar_size: f32,
         background: gpui::Hsla,
     ) -> Div {
         if presence == Presence::Unknown {
@@ -73,7 +73,7 @@ impl Desktop {
         }
         // The requested diameter excludes the two-point surface ring. Half of
         // the footprint sits outside on each axis, keeping initials unobscured.
-        let diameter = if dot_size < 10. { 8. } else { 10. };
+        let diameter = if avatar_size < 32. { 8. } else { 10. };
         let footprint = diameter + 4.;
         div().flex_none().relative().child(avatar).child(
             div()

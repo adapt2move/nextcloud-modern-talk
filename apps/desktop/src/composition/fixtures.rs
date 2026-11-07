@@ -1997,6 +1997,10 @@ impl NativeDesktopPort for DevelopmentPort {
                 action: talk_core::ui::messaging::MessageAction::Send { .. },
             } => {
                 if self.busy || self.snapshot.submission.is_some() {
+                    if self.busy && self.chat_ux_send_diagnostics < 4 {
+                        self.chat_ux_send_diagnostics += 1;
+                        println!("UI_BUSY send_rejected=true no_backend=true");
+                    }
                     return Err(SubmitError::Busy);
                 }
                 if self.snapshot.selected != Some(context) {

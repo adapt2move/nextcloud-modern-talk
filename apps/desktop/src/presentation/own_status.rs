@@ -185,17 +185,14 @@ impl Desktop {
                 _ => None,
             })
         });
-        let mut menu = div()
+        let mut menu = self
+            .context_menu_surface()
             .absolute()
             .bottom(px(58.))
             .left_0()
             .right_0()
             .occlude()
             .rounded(px(12.))
-            .border_1()
-            .border_color(t.border)
-            .bg(t.surface)
-            .shadow_lg()
             .p_2()
             .flex()
             .flex_col()

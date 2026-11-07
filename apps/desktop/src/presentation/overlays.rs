@@ -261,16 +261,7 @@ impl Desktop {
                         .tab_group()
                         .occlude()
                         .child(
-                            div()
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap_3()
-                                .px_4()
-                                .py_4()
-                                .border_b_1()
-                                .border_color(t.border)
+                            self.dialog_header()
                                 .child(
                                     div()
                                         .min_w_0()
@@ -309,9 +300,10 @@ impl Desktop {
                         .when(overlay == Overlay::Create, |d| {
                             d.child(self.creation_footer(cx))
                         })
-                        .when(overlay == Overlay::CreatePoll && !self.poll_drafts_open(), |d| {
-                            d.child(self.poll_creation_footer(cx))
-                        })
+                        .when(
+                            overlay == Overlay::CreatePoll && !self.poll_drafts_open(),
+                            |d| d.child(self.poll_creation_footer(cx)),
+                        )
                         .when(overlay == Overlay::CloudFiles, |d| {
                             d.child(self.cloud_files_footer(cx))
                         })

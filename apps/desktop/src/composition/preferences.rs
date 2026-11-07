@@ -249,6 +249,8 @@ pub struct Bridge {
     pub cursor: u64,
     pub device_cursor: u64,
     pub fixture_voice: std::cell::RefCell<Option<talk_core::ui::content::VoiceSnapshot>>,
+    pub fixture_voice_playback:
+        std::cell::RefCell<Option<talk_core::ui::content::VoiceReviewPlayback>>,
     pub fixture_call_devices: bool,
     pub permission_cursor: u64,
     pub notification_request: Option<RequestId>,
@@ -256,6 +258,7 @@ pub struct Bridge {
 }
 impl ComputerSettingsPort for Bridge {
     fn stop_voice_review_playback(&self) {
+        *self.fixture_voice_playback.borrow_mut() = None;
         if let Some((_, player, _)) = self.services.voice_player.borrow().as_ref() {
             player.stop();
         }
@@ -263,6 +266,9 @@ impl ComputerSettingsPort for Bridge {
     fn voice_review_playback(&self) -> Option<talk_core::ui::content::VoiceReviewPlayback> {
         use super::content_video::Phase;
         use talk_core::ui::content::{PlaybackState, VoiceReviewPlayback};
+        if self.fixture_voice.borrow().is_some() {
+            return *self.fixture_voice_playback.borrow();
+        }
         let slot = self.services.voice_player.borrow();
         let (context, player, speed) = slot.as_ref()?;
         if self.services.media.capture().is_some() {
@@ -305,6 +311,26 @@ impl ComputerSettingsPort for Bridge {
         context: talk_core::ui::presentation::ConversationRef,
         play: bool,
     ) -> Result<(), DeviceError> {
+        if let Some(voice) = *self.fixture_voice.borrow() {
+            if voice.context != context || voice.phase != talk_core::ui::content::VoicePhase::Review
+            {
+                return Err(DeviceError::Stale);
+            }
+            let mut playback = self.fixture_voice_playback.borrow_mut();
+            let current = playback.get_or_insert(talk_core::ui::content::VoiceReviewPlayback {
+                context,
+                state: talk_core::ui::content::PlaybackState::Paused,
+                position_ms: 0,
+                duration_ms: Some(voice.elapsed_ms),
+                speed_half_steps: 2,
+            });
+            current.state = if play {
+                talk_core::ui::content::PlaybackState::Playing
+            } else {
+                talk_core::ui::content::PlaybackState::Paused
+            };
+            return Ok(());
+        }
         if self.services.media.capture().is_some() {
             return Err(DeviceError::Busy);
         }
@@ -342,22 +368,59 @@ impl ComputerSettingsPort for Bridge {
         Ok(())
     }
     fn voice_review_seek(
-        &self, context: talk_core::ui::presentation::ConversationRef, position_ms: u64,
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        position_ms: u64,
     ) -> Result<(), DeviceError> {
-        if self.services.media.capture().is_some() { return Err(DeviceError::Busy); }
+        if let Some(voice) = *self.fixture_voice.borrow() {
+            if voice.context != context || voice.phase != talk_core::ui::content::VoicePhase::Review
+            {
+                return Err(DeviceError::Stale);
+            }
+            let mut playback = self.fixture_voice_playback.borrow_mut();
+            let current = playback
+                .as_mut()
+                .filter(|p| p.context == context)
+                .ok_or(DeviceError::Stale)?;
+            current.position_ms = position_ms.min(current.duration_ms.unwrap_or(0));
+            println!(
+                "UI_VOICE_REVIEW_FIXTURE seek_ms={} no_backend=true",
+                current.position_ms
+            );
+            return Ok(());
+        }
+        if self.services.media.capture().is_some() {
+            return Err(DeviceError::Busy);
+        }
         let devices = self.services.devices.as_ref().map_err(|e| *e)?;
-        if !devices.voice_snapshot().is_some_and(|voice| voice.context == context && voice.phase == talk_core::ui::content::VoicePhase::Review) {
+        if !devices.voice_snapshot().is_some_and(|voice| {
+            voice.context == context && voice.phase == talk_core::ui::content::VoicePhase::Review
+        }) {
             return Err(DeviceError::Stale);
         }
         let slot = self.services.voice_player.borrow();
-        let (_, player, _) = slot.as_ref().filter(|(scope, _, _)| *scope == context).ok_or(DeviceError::Stale)?;
-        player.seek_ms(position_ms).map_err(|_| DeviceError::Unavailable)
+        let (_, player, _) = slot
+            .as_ref()
+            .filter(|(scope, _, _)| *scope == context)
+            .ok_or(DeviceError::Stale)?;
+        player
+            .seek_ms(position_ms)
+            .map_err(|_| DeviceError::Unavailable)
     }
     fn voice_review_speed(
         &self,
         context: talk_core::ui::presentation::ConversationRef,
         speed: u8,
     ) -> Result<(), DeviceError> {
+        if self.fixture_voice.borrow().is_some() {
+            let mut playback = self.fixture_voice_playback.borrow_mut();
+            let current = playback
+                .as_mut()
+                .filter(|p| p.context == context)
+                .ok_or(DeviceError::Stale)?;
+            current.speed_half_steps = speed;
+            return Ok(());
+        }
         let mut slot = self.services.voice_player.borrow_mut();
         let (_, player, current) = slot
             .as_mut()
@@ -406,6 +469,7 @@ impl ComputerSettingsPort for Bridge {
                 }
                 if cancel {
                     *fixture = None;
+                    *self.fixture_voice_playback.borrow_mut() = None;
                 } else {
                     voice.phase = talk_core::ui::content::VoicePhase::Review;
                 }
@@ -439,6 +503,7 @@ impl ComputerSettingsPort for Bridge {
                 return Err(DeviceError::Stale);
             }
             *self.fixture_voice.borrow_mut() = None;
+            *self.fixture_voice_playback.borrow_mut() = None;
             println!("UI_VOICE_FIXTURE send no_backend=true");
             return Ok(());
         }

@@ -182,6 +182,7 @@ impl Desktop {
         };
         self.dismiss_room_feedback();
         self.room_ui.confirmation = None;
+        self.room_ui.avatar_picker_open = false;
         self.room_ui.members.reset();
         self.room_ui.pending_member_focus = None;
         if self.room_ui.context != Some(context) {
@@ -468,13 +469,25 @@ impl Desktop {
                     self.restore_member_page_focus();
                 }
             }
-            Action::ToggleAvatarPicker => self.room_ui.avatar_picker_open = !self.room_ui.avatar_picker_open,
+            Action::ToggleAvatarPicker => {
+                if self.room_available(RoomSetting::Avatar).is_enabled() {
+                    self.room_ui.avatar_picker_open = !self.room_ui.avatar_picker_open;
+                }
+            }
             Action::SelectAvatar(emoji) => {
-                self.room_ui.avatar.update(cx, |input, _| input.set_context_value(emoji));
-                self.room_ui.avatar_picker_open = false;
+                if self.room_ui.avatar_picker_open
+                    && self.room_available(RoomSetting::Avatar).is_enabled()
+                {
+                    self.room_ui
+                        .avatar
+                        .update(cx, |input, _| input.set_context_value(emoji));
+                    self.room_ui.avatar_picker_open = false;
+                }
             }
             Action::Avatar => {
-                if let Ok(emoji) = Text::new(self.room_ui.avatar.read(cx).content.as_str()) {
+                if self.room_available(RoomSetting::Avatar).is_enabled()
+                    && let Ok(emoji) = Text::new(self.room_ui.avatar.read(cx).content.as_str())
+                {
                     self.submit_room(ConversationAction::SetEmojiAvatar(emoji));
                 }
             }
@@ -862,16 +875,57 @@ impl Desktop {
                         != d.description.as_ref().map_or("", |v| v.as_str());
                     let avatar_changed = !self.room_ui.avatar.read(cx).content.trim().is_empty();
                     about = about
-                        .child(div().flex().items_center().gap_3()
-                            .child(self.conversation_avatar(row))
-                            .child(self.button("room-avatar-picker", "Emoji auswählen", ButtonStyle::Secondary,
-                                self.room_available(RoomSetting::Avatar), LocalAction::Room(Action::ToggleAvatarPicker), cx))
-                            .when(avatar_changed, |d| d.child(self.button("room-avatar", "Emoji als Avatar setzen",
-                                ButtonStyle::Primary, self.room_available(RoomSetting::Avatar), LocalAction::Room(Action::Avatar), cx))))
-                        .when(self.room_ui.avatar_picker_open, |d| d.child(div().flex().flex_wrap().gap_1().children(
-                            ["💬", "🎨", "👥", "🚀", "🌱", "☕", "🎯", "💡"].into_iter().enumerate().map(|(i, emoji)|
-                                self.button(("room-avatar-emoji", i), emoji, ButtonStyle::Quiet,
-                                    self.room_available(RoomSetting::Avatar), LocalAction::Room(Action::SelectAvatar(emoji)), cx)))))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .child(self.conversation_avatar(row))
+                                .child(self.button(
+                                    "room-avatar-picker",
+                                    "Emoji auswählen",
+                                    ButtonStyle::Secondary,
+                                    self.room_available(RoomSetting::Avatar),
+                                    LocalAction::Room(Action::ToggleAvatarPicker),
+                                    cx,
+                                ))
+                                .when(avatar_changed, |d| {
+                                    d.child(
+                                        div()
+                                            .text_size(self.sp(20.))
+                                            .child(self.room_ui.avatar.read(cx).content.clone()),
+                                    )
+                                })
+                                .when(avatar_changed, |d| {
+                                    d.child(self.button(
+                                        "room-avatar",
+                                        "Emoji als Avatar setzen",
+                                        ButtonStyle::Primary,
+                                        self.room_available(RoomSetting::Avatar),
+                                        LocalAction::Room(Action::Avatar),
+                                        cx,
+                                    ))
+                                }),
+                        )
+                        .when(self.room_ui.avatar_picker_open, |d| {
+                            d.child(
+                                div().flex().flex_wrap().gap_1().children(
+                                    ["💬", "🎨", "👥", "🚀", "🌱", "☕", "🎯", "💡"]
+                                        .into_iter()
+                                        .enumerate()
+                                        .map(|(i, emoji)| {
+                                            self.button(
+                                                ("room-avatar-emoji", i),
+                                                emoji,
+                                                ButtonStyle::Quiet,
+                                                self.room_available(RoomSetting::Avatar),
+                                                LocalAction::Room(Action::SelectAvatar(emoji)),
+                                                cx,
+                                            )
+                                        }),
+                                ),
+                            )
+                        })
                         .child(self.room_field(
                             "Name",
                             &self.room_ui.name,
@@ -905,27 +959,29 @@ impl Desktop {
                 }
                 let personal = self
                     .dialog_section(Some("Für dich"))
-                    .when(row.archive == Decision::Allowed, |d| d.child(
-                        self.button_with_leading_icon(
-                            "room-archive",
-                            (
-                                if row.archived == Some(true) {
-                                    "Aus Archiv holen"
-                                } else {
-                                    "Archivieren"
-                                },
-                                "inbox",
-                            ),
-                            ButtonStyle::Quiet,
-                            Availability::when(
-                                row.archive == Decision::Allowed,
-                                "Du hast dafür keine Berechtigung.",
-                            ),
-                            LocalAction::Archive(row.context, row.archived != Some(true)),
-                            cx,
+                    .when(row.archive == Decision::Allowed, |d| {
+                        d.child(
+                            self.button_with_leading_icon(
+                                "room-archive",
+                                (
+                                    if row.archived == Some(true) {
+                                        "Aus Archiv holen"
+                                    } else {
+                                        "Archivieren"
+                                    },
+                                    "inbox",
+                                ),
+                                ButtonStyle::Quiet,
+                                Availability::when(
+                                    row.archive == Decision::Allowed,
+                                    "Du hast dafür keine Berechtigung.",
+                                ),
+                                LocalAction::Archive(row.context, row.archived != Some(true)),
+                                cx,
+                            )
+                            .w_full(),
                         )
-                        .w_full(),
-                    ))
+                    })
                     .child(
                         self.button_with_leading_icon(
                             "room-local-groups",

@@ -606,7 +606,7 @@ impl Desktop {
                     a.initials.as_str(),
                     32.,
                 );
-                d.child(self.avatar_with_presence(avatar, self.own_presence(), 10., t.sidebar))
+                d.child(self.avatar_with_presence(avatar, self.own_presence(), 32., t.sidebar))
             })
             .child(
                 div()
@@ -764,7 +764,7 @@ impl Desktop {
             self.avatar_with_presence(
                 avatar,
                 row.presence,
-                9.,
+                22.,
                 if selected { t.selected } else { t.sidebar },
             )
         } else {

@@ -334,7 +334,7 @@ impl Desktop {
                                         && row.title.as_str() == m.author.as_str()
                                 }).map(|row| row.presence))
                                 .unwrap_or(talk_core::ui::presentation::Presence::Unknown),
-                            10., t.surface,
+                            36., t.surface,
                         ), cx,
                     ).into_any_element()
                 })

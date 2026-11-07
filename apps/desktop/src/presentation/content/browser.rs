@@ -349,58 +349,89 @@ impl Desktop {
             talk_core::ui::content::FileSort::Size => "Größe",
         };
         body = body.child(
-            div().flex().flex_wrap().items_center().justify_between().gap_2()
-            .child(self.segmented()
-                .when(!self.content_ui.browser_history.is_empty(), |row| {
-                    row.child(self.icon_button(
-                        "cloud-history-back",
-                        ("arrow-left", "Zurück"),
-                        ButtonStyle::Quiet,
-                        Availability::available(),
-                        LocalAction::Content(Action::BrowserBack),
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    self.segmented()
+                        .when(!self.content_ui.browser_history.is_empty(), |row| {
+                            row.child(self.icon_button(
+                                "cloud-history-back",
+                                ("arrow-left", "Zurück"),
+                                ButtonStyle::Quiet,
+                                Availability::available(),
+                                LocalAction::Content(Action::BrowserBack),
+                                cx,
+                            ))
+                        })
+                        .child(self.chip(
+                            "cloud-all",
+                            "Alle Dateien",
+                            (browser.section == FileSection::All, 0, 3),
+                            LocalAction::Content(Action::BrowseDirectory(
+                                Text::new("/").expect("constant"),
+                            )),
+                            cx,
+                        ))
+                        .when(browser.search_available, |row| {
+                            row.child(self.chip(
+                                "cloud-recent",
+                                "Zuletzt",
+                                (browser.section == FileSection::Recent, 1, 3),
+                                LocalAction::Content(Action::BrowserRecent),
+                                cx,
+                            ))
+                        })
+                        .when(browser.favorites_available, |row| {
+                            row.child(self.chip(
+                                "cloud-favorites",
+                                "Favoriten",
+                                (browser.section == FileSection::Favorites, 2, 3),
+                                LocalAction::Content(Action::BrowserFavorites),
+                                cx,
+                            ))
+                        }),
+                )
+                .child(
+                    self.button(
+                        "cloud-sort-toggle",
+                        self.lf("Sortieren: {name}", &[("name", self.l(sort_label))]),
+                        ButtonStyle::Secondary,
+                        true,
+                        LocalAction::Content(Action::ToggleBrowserSort),
                         cx,
-                    ))
-                })
-                .child(self.chip(
-                    "cloud-all",
-                    "Alle Dateien",
-                    (browser.section == FileSection::All, 0, 3),
-                    LocalAction::Content(Action::BrowseDirectory(
-                        Text::new("/").expect("constant"),
+                    )
+                    .child(self.scaled_icon(
+                        "chevron-down",
+                        16.,
+                        self.theme.muted,
                     )),
-                    cx,
-                ))
-                .when(browser.search_available, |row| {
-                    row.child(self.chip(
-                        "cloud-recent",
-                        "Zuletzt",
-                        (browser.section == FileSection::Recent, 1, 3),
-                        LocalAction::Content(Action::BrowserRecent),
-                        cx,
-                    ))
-                })
-                .when(browser.favorites_available, |row| {
-                    row.child(self.chip(
-                        "cloud-favorites",
-                        "Favoriten",
-                        (browser.section == FileSection::Favorites, 2, 3),
-                        LocalAction::Content(Action::BrowserFavorites),
-                        cx,
-                    ))
-                }))
-            .child(self.button("cloud-sort-toggle", self.lf("Sortieren: {name}", &[("name", self.l(sort_label))]),
-                ButtonStyle::Secondary, true, LocalAction::Content(Action::ToggleBrowserSort), cx)
-                .child(self.scaled_icon("chevron-down", 16., self.theme.muted))),
+                ),
         );
         if self.content_ui.browser_sort_open {
-            body = body.child(self.segmented().children([
-                (talk_core::ui::content::FileSort::Name, "Name"),
-                (talk_core::ui::content::FileSort::Modified, "Änderungsdatum"),
-                (talk_core::ui::content::FileSort::Size, "Größe"),
-            ].into_iter().enumerate().map(|(i, (sort, label))| self.chip(
-                ("cloud-sort", i), label, (browser.sort == sort, i, 3),
-                LocalAction::Content(Action::BrowserSort(sort)), cx,
-            ))));
+            body = body.child(
+                self.segmented().children(
+                    [
+                        (talk_core::ui::content::FileSort::Name, "Name"),
+                        (talk_core::ui::content::FileSort::Modified, "Änderungsdatum"),
+                        (talk_core::ui::content::FileSort::Size, "Größe"),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (sort, label))| {
+                        self.chip(
+                            ("cloud-sort", i),
+                            label,
+                            (browser.sort == sort, i, 3),
+                            LocalAction::Content(Action::BrowserSort(sort)),
+                            cx,
+                        )
+                    }),
+                ),
+            );
         }
         let parent = parent_path(path);
         let root = Text::new("/").expect("constant");
@@ -451,10 +482,7 @@ impl Desktop {
                 self.l("Offline · gespeicherte Dateien"),
             ));
         } else if browser.loading {
-            body = body.child(self.banner(
-                crate::presentation::controls::BannerRole::Info,
-                self.l("Dateien werden geladen …"),
-            ));
+            body = body.child(self.loading_row(self.l("Dateien werden geladen …")));
         }
         if self.content_ui.browser_folder_picker && browser.section == FileSection::All {
             body = body.child(self.button(
@@ -561,7 +589,7 @@ impl Desktop {
             } else {
                 "Dieser Ordner ist leer."
             };
-            body = body.child(self.hint(self.l(label)));
+            body = body.child(self.empty_row(self.l(label)));
         }
         let start = self
             .content_ui
@@ -667,7 +695,8 @@ impl Desktop {
                         )
                         .flex_1()
                         .min_w_0()
-                        .justify_start().px_0()
+                        .justify_start()
+                        .px_0()
                         .child(
                             div()
                                 .min_w_0()
@@ -874,16 +903,7 @@ impl Desktop {
             .file_browser
             .as_ref()
             .is_some_and(|browser| self.cloud_can_stage(browser));
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_end()
-            .gap_2()
-            .px_4()
-            .py_3()
-            .border_t_1()
-            .border_color(self.theme.border)
+        self.dialog_footer()
             .when(count > 0, |d| {
                 d.child(self.hint(&self.lf("{n} ausgewählt", &[("n", &count.to_string())])))
             })

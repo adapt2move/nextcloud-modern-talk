@@ -198,30 +198,48 @@ impl Desktop {
                 .child(self.pin_header_anchor(context, selected))
                 .child(self.scaled_icon("pin", 15., theme.accent))
                 .child(self.hint(self.l("Angeheftet")))
-                .when(!pins.collapsed, |d| d.child(
-                    self.control(
-                        scoped_id("pin-banner-open", context, selected, 0),
+                .when(!pins.collapsed, |d| {
+                    d.child(
+                        self.control(
+                            scoped_id("pin-banner-open", context, selected, 0),
+                            ButtonStyle::Quiet,
+                            Availability::available(),
+                            LocalAction::MessageIn(context, Action::Locate(selected)),
+                            cx,
+                        )
+                        .flex_1()
+                        .min_w_0()
+                        .justify_start()
+                        .min_h(px(32.))
+                        .px_1()
+                        .py_0()
+                        .child(animated),
+                    )
+                })
+                .when(pins.collapsed, |d| d.child(div().flex_1()))
+                .child(
+                    self.icon_button(
+                        scoped_id("pin-banner-collapse", context, 0, 0),
+                        (
+                            if pins.collapsed {
+                                "chevron-down"
+                            } else {
+                                "chevron-up"
+                            },
+                            if pins.collapsed {
+                                "Angeheftete Nachricht anzeigen"
+                            } else {
+                                "Angeheftete Nachricht einklappen"
+                            },
+                        ),
                         ButtonStyle::Quiet,
                         Availability::available(),
-                        LocalAction::MessageIn(context, Action::Locate(selected)),
+                        LocalAction::MessageIn(context, Action::TogglePinStrip),
                         cx,
                     )
-                    .flex_1()
-                    .min_w_0()
-                    .justify_start()
-                    .min_h(px(32.))
-                    .px_1()
-                    .py_0()
-                    .child(animated),
-                ))
-                .when(pins.collapsed, |d| d.child(div().flex_1()))
-                .child(self.icon_button(
-                    scoped_id("pin-banner-collapse", context, 0, 0),
-                    (if pins.collapsed { "chevron-down" } else { "chevron-up" },
-                     if pins.collapsed { "Angeheftete Nachricht anzeigen" } else { "Angeheftete Nachricht einklappen" }),
-                    ButtonStyle::Quiet, Availability::available(),
-                    LocalAction::MessageIn(context, Action::TogglePinStrip), cx,
-                ).size(px(32.)).min_h(px(32.)))
+                    .size(px(32.))
+                    .min_h(px(32.)),
+                )
                 .when(!pins.collapsed && rows.len() > 1, |banner| {
                     banner
                         .child(

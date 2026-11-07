@@ -140,7 +140,7 @@ pub(super) struct DialogFrame {
 const DIALOG_WIDTH: f32 = 842.;
 const DIALOG_HEIGHT: f32 = 632.;
 const DIALOG_RAIL: f32 = 211.;
-const DIALOG_PADDING: f32 = 24.;
+const DIALOG_PADDING: f32 = 16.;
 impl Desktop {
     pub(super) fn dialog_narrow(&self, window: &Window) -> bool {
         window.viewport_size().width < px(900.) || self.scale >= 150
@@ -173,7 +173,7 @@ impl Desktop {
                     .flex_1()
                     .min_h_0()
                     .px(px(DIALOG_PADDING))
-                    .pt(px(20.))
+                    .pt(px(DIALOG_PADDING))
                     .pb(px(DIALOG_PADDING))
                     .child(frame.page),
             )
@@ -293,7 +293,7 @@ impl Desktop {
     }
     pub(super) fn dialog_title(&self, title: &str) -> Div {
         div()
-            .text_size(self.sp(16.))
+            .text_size(self.sp(20.))
             .font_weight(FontWeight::MEDIUM)
             .child(self.l(title).to_owned())
     }

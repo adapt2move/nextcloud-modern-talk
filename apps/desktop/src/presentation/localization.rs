@@ -108,9 +108,19 @@ pub(super) fn local_datetime(locale: Locale, value: &str) -> Option<String> {
     let (date, time) = value.split_once(' ')?;
     let mut parts = date.split('-');
     let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
-    if parts.next().is_some() || year.len() != 4 || month.len() != 2 || day.len() != 2
+    if parts.next().is_some()
+        || year.len() != 4
+        || month.len() != 2
+        || day.len() != 2
         || !date.chars().all(|c| c.is_ascii_digit() || c == '-')
-        || time.len() != 5 || !time.chars().enumerate().all(|(i,c)| if i == 2 { c == ':' } else { c.is_ascii_digit() }) { return None; }
+        || time.len() != 5
+        || !time
+            .chars()
+            .enumerate()
+            .all(|(i, c)| if i == 2 { c == ':' } else { c.is_ascii_digit() })
+    {
+        return None;
+    }
     Some(match locale {
         Locale::German => format!("{day}.{month}.{year} {time}"),
         Locale::Spanish => format!("{day}/{month}/{year} {time}"),
@@ -182,9 +192,18 @@ mod tests {
             Some("04/11/2026")
         );
         assert!(file_date(Locale::German, "unrecognized").is_none());
-        assert_eq!(local_datetime(Locale::German, "2026-11-04 09:41").as_deref(), Some("04.11.2026 09:41"));
-        assert_eq!(local_datetime(Locale::Spanish, "2026-11-04 09:41").as_deref(), Some("04/11/2026 09:41"));
-        assert_eq!(local_datetime(Locale::English, "2026-11-04 09:41").as_deref(), Some("11/04/2026 09:41"));
+        assert_eq!(
+            local_datetime(Locale::German, "2026-11-04 09:41").as_deref(),
+            Some("04.11.2026 09:41")
+        );
+        assert_eq!(
+            local_datetime(Locale::Spanish, "2026-11-04 09:41").as_deref(),
+            Some("04/11/2026 09:41")
+        );
+        assert_eq!(
+            local_datetime(Locale::English, "2026-11-04 09:41").as_deref(),
+            Some("11/04/2026 09:41")
+        );
         assert!(local_datetime(Locale::English, "bad input").is_none());
     }
     #[test]

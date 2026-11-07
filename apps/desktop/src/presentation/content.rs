@@ -26,6 +26,25 @@ use talk_core::ui::{AccountScope, Page, Text, conversation::RemoteState};
 
 const MAX_IMAGES: usize = 128;
 const MAX_POLL_OPTIONS: usize = 100;
+const MAX_VOICE_LEVELS: usize = 32;
+const INITIAL_VOICE_BUCKET_MS: u64 = 250;
+
+// Preserve peaks across the whole recording, coarsening time buckets instead of
+// discarding older samples. This keeps both memory and review rendering bounded.
+fn record_voice_level(levels: &mut Vec<u16>, bucket_ms: &mut u64, elapsed_ms: u64, level: u16) {
+    let mut index = elapsed_ms / *bucket_ms;
+    while index >= MAX_VOICE_LEVELS as u64 {
+        *levels = levels
+            .chunks(2)
+            .map(|pair| pair.iter().copied().max().unwrap_or(0))
+            .collect();
+        *bucket_ms = bucket_ms.saturating_mul(2);
+        index = elapsed_ms / *bucket_ms;
+    }
+    let index = index as usize;
+    levels.resize(levels.len().max(index + 1), 0);
+    levels[index] = levels[index].max(level.min(1000));
+}
 
 #[derive(Clone)]
 pub(crate) enum Action {
@@ -59,7 +78,11 @@ pub(crate) enum Action {
     SubmitPoll,
     SaveDraft,
     ToggleDrafts,
-    TogglePollVoters { poll: u64, option: u16 },
+    ToggleDraftMenu(u64),
+    TogglePollVoters {
+        poll: u64,
+        option: u16,
+    },
     LoadDraft {
         id: u64,
         edit: bool,
@@ -132,6 +155,7 @@ pub(super) struct ContentUi {
     hidden_results: bool,
     drafts_open: bool,
     editing_draft: Option<u64>,
+    draft_menu: Option<u64>,
     delete_draft: Option<u64>,
     pending_poll: Option<(ConversationRef, RequestId)>,
     acknowledged_result: Option<RequestId>,
@@ -147,6 +171,7 @@ pub(super) struct ContentUi {
     expanded_voters: Option<(u64, u16)>,
     pub(super) voice: Option<talk_core::ui::content::VoiceSnapshot>,
     pub(super) voice_levels: Vec<u16>,
+    voice_level_bucket_ms: u64,
     voice_epoch: u64,
     pub(super) voice_error: Option<&'static str>,
     voice_auto_send: Option<ConversationRef>,
@@ -197,6 +222,7 @@ impl ContentUi {
             hidden_results: false,
             drafts_open: false,
             editing_draft: None,
+            draft_menu: None,
             delete_draft: None,
             pending_poll: None,
             acknowledged_result: None,
@@ -212,6 +238,7 @@ impl ContentUi {
             expanded_voters: None,
             voice: None,
             voice_levels: Vec::new(),
+            voice_level_bucket_ms: INITIAL_VOICE_BUCKET_MS,
             voice_epoch: 0,
             voice_error: None,
             voice_auto_send: None,
@@ -240,7 +267,10 @@ impl Desktop {
             Some("poll-drafts") => self.content_ui.drafts_open = true,
             Some("poll-details") => self.content_ui.details_poll = Some(9001),
             Some("poll-settings") => self.open_room_dialog(Overlay::RoomInfo, cx),
-            Some("voice-recording") => {
+            // Explicit UI fixtures use sample data; real sessions use recorder levels.
+            Some("voice-recording" | "voice-review") => {
+                self.content_ui.voice = self.settings_port.voice_snapshot();
+                self.content_ui.voice_epoch = self.content_ui.voice_epoch.saturating_add(1);
                 self.content_ui.voice_levels = vec![
                     90, 200, 360, 580, 370, 170, 220, 460, 710, 490, 240, 120, 280, 540, 680, 390,
                     180, 130, 310, 620, 450, 200, 90, 150,
@@ -452,18 +482,24 @@ impl Desktop {
         let voice = voice.filter(|voice| Some(voice.context) == self.snapshot.selected);
         if self.content_ui.voice != voice {
             if self.content_ui.voice.map(|v| v.context) != voice.map(|v| v.context)
-                || voice.is_some_and(|v| v.phase == talk_core::ui::content::VoicePhase::Starting
-                    && self.content_ui.voice.is_none_or(|old| old.phase != v.phase)) {
+                || voice.is_some_and(|v| {
+                    v.phase == talk_core::ui::content::VoicePhase::Starting
+                        && self.content_ui.voice.is_none_or(|old| old.phase != v.phase)
+                })
+            {
                 self.content_ui.voice_levels.clear();
+                self.content_ui.voice_level_bucket_ms = INITIAL_VOICE_BUCKET_MS;
                 self.content_ui.voice_epoch = self.content_ui.voice_epoch.saturating_add(1);
             }
             if let Some(voice) = voice
                 && voice.phase == talk_core::ui::content::VoicePhase::Recording
             {
-                if self.content_ui.voice_levels.len() == 32 {
-                    self.content_ui.voice_levels.remove(0);
-                }
-                self.content_ui.voice_levels.push(voice.level);
+                record_voice_level(
+                    &mut self.content_ui.voice_levels,
+                    &mut self.content_ui.voice_level_bucket_ms,
+                    voice.elapsed_ms,
+                    voice.level,
+                );
             }
             if voice.is_none() {
                 self.content_ui.voice_levels.clear();
@@ -498,6 +534,7 @@ impl Desktop {
             self.content_ui.hidden_results = false;
             self.content_ui.drafts_open = false;
             self.content_ui.editing_draft = None;
+            self.content_ui.draft_menu = None;
             self.content_ui.delete_draft = None;
             self.content_ui.selections.clear();
             self.content_ui.pending_vote = None;
@@ -507,6 +544,7 @@ impl Desktop {
             self.content_ui.confirm_close = None;
             self.content_ui.poll_menu = None;
             self.content_ui.details_poll = None;
+            self.content_ui.expanded_voters = None;
             self.content_ui.return_overlay = None;
             self.content_ui.browser_history.clear();
             self.content_ui.voice_scrub = None;
@@ -1073,57 +1111,146 @@ impl Desktop {
             )
     }
     fn voice_review_wave(
-        &self, context: ConversationRef, review: bool,
-        playback: Option<talk_core::ui::content::VoiceReviewPlayback>, cx: &Context<Self>,
+        &self,
+        context: ConversationRef,
+        review: bool,
+        playback: Option<talk_core::ui::content::VoiceReviewPlayback>,
+        cx: &Context<Self>,
     ) -> impl IntoElement {
         let duration = playback.and_then(|p| p.duration_ms).unwrap_or(0);
         let epoch = self.content_ui.voice_epoch;
         let position = playback.map_or(0, |p| p.position_ms);
-        let enabled = epoch < u64::MAX && review && duration > 0 && playback.is_some_and(|p| matches!(p.state,
-            talk_core::ui::content::PlaybackState::Paused | talk_core::ui::content::PlaybackState::Playing | talk_core::ui::content::PlaybackState::Ended));
+        let enabled = !self.background_inert
+            && epoch < u64::MAX
+            && review
+            && duration > 0
+            && playback.is_some_and(|p| {
+                matches!(
+                    p.state,
+                    talk_core::ui::content::PlaybackState::Paused
+                        | talk_core::ui::content::PlaybackState::Playing
+                        | talk_core::ui::content::PlaybackState::Ended
+                )
+            });
         let id = scoped_id("voice-review-wave", context, 0, 0);
         let focus = self.control_focus(id.clone(), cx);
         let pointer_focus = focus.clone();
         let owner = cx.entity().downgrade();
         let surface = gpui::canvas(
-            |bounds, window, _| (bounds.intersect(&window.content_mask().bounds), window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal)),
+            |bounds, window, _| {
+                (
+                    bounds.intersect(&window.content_mask().bounds),
+                    window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal),
+                )
+            },
             move |bounds, (clip, hitbox), window, _| {
-                if !enabled { return; }
+                if !enabled {
+                    return;
+                }
                 let owner = owner.clone();
                 let focus = pointer_focus.clone();
                 window.on_mouse_event(move |event: &gpui::MouseDownEvent, phase, window, cx| {
-                    if phase != gpui::DispatchPhase::Bubble || event.button != gpui::MouseButton::Left || !hitbox.is_hovered(window) || !clip.contains(&event.position) { return; }
+                    if phase != gpui::DispatchPhase::Bubble
+                        || event.button != gpui::MouseButton::Left
+                        || !hitbox.is_hovered(window)
+                        || !clip.contains(&event.position)
+                    {
+                        return;
+                    }
                     let position = voice_scrub::seek_position(bounds, event.position.x, duration);
                     let _ = owner.update(cx, |this, cx| {
-                        if this.content_ui.voice_epoch == epoch && this.snapshot.selected == Some(context) && this.content_ui.voice.is_some_and(|v| v.context == context && v.phase == talk_core::ui::content::VoicePhase::Review) {
-                            if let Err(error) = this.settings_port.voice_review_seek(context, position) { this.content_ui.voice_error = Some(voice_error(error)); }
+                        if this.content_ui.voice_epoch == epoch
+                            && this.snapshot.selected == Some(context)
+                            && this.content_ui.voice.is_some_and(|v| {
+                                v.context == context
+                                    && v.phase == talk_core::ui::content::VoicePhase::Review
+                            })
+                        {
+                            if let Err(error) =
+                                this.settings_port.voice_review_seek(context, position)
+                            {
+                                this.content_ui.voice_error = Some(voice_error(error));
+                            }
                             cx.notify();
                         }
                     });
-                    if let Some(focus) = &focus { focus.focus(window); }
-                    window.prevent_default(); cx.stop_propagation();
+                    if let Some(focus) = &focus {
+                        focus.focus(window);
+                    }
+                    window.prevent_default();
+                    cx.stop_propagation();
                 });
             },
-        ).absolute().inset_0();
-        div().id(id).relative().flex_1().min_w_0().h(px(32.)).flex().items_center().gap(px(2.))
-            .when_some(focus, |d, focus| d.track_focus(&focus.tab_stop(enabled)))
-            .when(review && self.content_ui.voice_levels.is_empty(), |d| d.child(self.hint(self.l("Aufnahme bereit zum Senden"))))
-            .children(self.content_ui.voice_levels.iter().enumerate().map(|(index, level)| {
-                let played = duration > 0 && (index as f32 / self.content_ui.voice_levels.len().max(1) as f32) <= position as f32 / duration as f32;
-                div().w(px(3.)).h(px(3. + f32::from(*level) / 1000. * 25.)).rounded(px(2.))
-                    .bg(if !review || played { self.theme.accent } else { self.theme.muted })
-            }))
+        )
+        .absolute()
+        .inset_0();
+        div()
+            .id(id)
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .h(px(32.))
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .when_some(focus, |d, focus| {
+                d.track_focus(&focus.clone().tab_stop(enabled))
+                    .child(self.field_ring(focus, 5.))
+            })
+            .when(review && self.content_ui.voice_levels.is_empty(), |d| {
+                d.child(self.hint(self.l("Aufnahme bereit zum Senden")))
+            })
+            .children(
+                self.content_ui
+                    .voice_levels
+                    .iter()
+                    .enumerate()
+                    .map(|(index, level)| {
+                        let played = duration > 0
+                            && (index as f32 / self.content_ui.voice_levels.len().max(1) as f32)
+                                <= position as f32 / duration as f32;
+                        div()
+                            .flex_1()
+                            .min_w(px(1.))
+                            .h(px(3. + f32::from(*level) / 1000. * 25.))
+                            .rounded(px(2.))
+                            .bg(if !review || played {
+                                self.theme.accent
+                            } else {
+                                self.theme.muted
+                            })
+                    }),
+            )
             .child(surface)
-            .when(enabled, |d| d.on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, _, cx| {
-                let direction = match event.keystroke.key.as_str() { "left" => -1, "right" => 1, _ => return };
-                if !event.keystroke.modifiers.modified() && this.content_ui.voice_epoch == epoch && this.snapshot.selected == Some(context) {
-                    if let Some(p) = this.content_ui.voice_playback.filter(|p| p.context == context) {
-                        let target = voice_scrub::keyboard_position(p.position_ms, duration, direction);
-                        if let Err(error) = this.settings_port.voice_review_seek(context, target) { this.content_ui.voice_error = Some(voice_error(error)); }
-                        cx.notify(); cx.stop_propagation();
+            .when(enabled, |d| {
+                d.on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, _, cx| {
+                    let direction = match event.keystroke.key.as_str() {
+                        "left" => -1,
+                        "right" => 1,
+                        _ => return,
+                    };
+                    if !event.keystroke.modifiers.modified()
+                        && this.content_ui.voice_epoch == epoch
+                        && this.snapshot.selected == Some(context)
+                    {
+                        if let Some(p) = this
+                            .content_ui
+                            .voice_playback
+                            .filter(|p| p.context == context)
+                        {
+                            let target =
+                                voice_scrub::keyboard_position(p.position_ms, duration, direction);
+                            if let Err(error) =
+                                this.settings_port.voice_review_seek(context, target)
+                            {
+                                this.content_ui.voice_error = Some(voice_error(error));
+                            }
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
                     }
-                }
-            })))
+                }))
+            })
     }
     fn poll_submission_blocked(&self) -> bool {
         self.snapshot.content_panel.poll_state.pending()
@@ -1718,12 +1845,21 @@ impl Desktop {
             }
             Action::ToggleDrafts => {
                 self.content_ui.drafts_open = !self.content_ui.drafts_open;
+                self.content_ui.draft_menu = None;
+                self.content_ui.delete_draft = None;
                 if self.content_ui.drafts_open
                     && self.snapshot.content_panel.poll_drafts_manage.enabled()
                     && self.snapshot.content == ContentState::Ready
                     && !self.media_offline()
                 {
                     self.submit_content(ContentAction::RefreshPollDrafts);
+                }
+            }
+            Action::ToggleDraftMenu(id) => {
+                if self.content_scope_current() && self.content_ui.drafts_open {
+                    self.content_ui.draft_menu =
+                        (self.content_ui.draft_menu != Some(id)).then_some(id);
+                    self.content_ui.delete_draft = None;
                 }
             }
             Action::LoadDraft { id, edit } => {
@@ -1766,7 +1902,12 @@ impl Desktop {
                     self.content_ui.question.focus_handle(cx).focus(window);
                 }
             }
-            Action::ConfirmDeleteDraft(id) => self.content_ui.delete_draft = Some(id),
+            Action::ConfirmDeleteDraft(id) => {
+                if self.content_ui.draft_menu == Some(id) {
+                    self.content_ui.draft_menu = None;
+                    self.content_ui.delete_draft = Some(id);
+                }
+            }
             Action::DeleteDraft(id) => {
                 if self.content_ui.delete_draft == Some(id)
                     && self.snapshot.content_panel.poll_drafts_manage.enabled()
@@ -1775,6 +1916,7 @@ impl Desktop {
                 {
                     self.submit_content(ContentAction::DeletePollDraft(id));
                     self.content_ui.delete_draft = None;
+                    self.content_ui.draft_menu = None;
                 }
             }
             Action::SelectPollOption { poll, option } => {
@@ -1841,8 +1983,11 @@ impl Desktop {
                     (self.content_ui.poll_menu != Some(poll)).then_some(poll);
             }
             Action::TogglePollVoters { poll, option } => {
-                let target = (poll, option);
-                self.content_ui.expanded_voters = (self.content_ui.expanded_voters != Some(target)).then_some(target);
+                if self.content_scope_current() && self.content_ui.details_poll == Some(poll) {
+                    let target = (poll, option);
+                    self.content_ui.expanded_voters =
+                        (self.content_ui.expanded_voters != Some(target)).then_some(target);
+                }
             }
             Action::ConfirmClosePoll(poll) => {
                 self.content_ui.poll_menu = None;
@@ -1888,7 +2033,13 @@ impl Desktop {
                 {
                     self.stop_local_typing();
                     match self.settings_port.start_voice(context) {
-                        Ok(()) => self.content_ui.voice = self.settings_port.voice_snapshot(),
+                        Ok(()) => {
+                            self.content_ui.voice_levels.clear();
+                            self.content_ui.voice_level_bucket_ms = INITIAL_VOICE_BUCKET_MS;
+                            self.content_ui.voice_epoch =
+                                self.content_ui.voice_epoch.saturating_add(1);
+                            self.content_ui.voice = self.settings_port.voice_snapshot();
+                        }
                         Err(error) => self.content_ui.voice_error = Some(voice_error(error)),
                     }
                 }
@@ -2006,6 +2157,7 @@ impl Desktop {
             self.submit_content(ContentAction::CloseFileBrowser);
         }
         self.content_ui.details_poll = None;
+        self.content_ui.expanded_voters = None;
         self.overlay = self.content_ui.return_overlay.take();
         self.pending_modal_focus = self.overlay.is_some();
         true
@@ -2118,10 +2270,21 @@ impl Desktop {
                                 .text_color(self.theme.muted)
                                 .child(if active {
                                     match transfer.total {
-                                        Some(total) => format!("{} / {}",
-                                            super::localization::file_size(self.locale, Some(transfer.received)),
-                                            super::localization::file_size(self.locale, Some(total))),
-                                        None => super::localization::file_size(self.locale, Some(transfer.received)),
+                                        Some(total) => format!(
+                                            "{} / {}",
+                                            super::localization::file_size(
+                                                self.locale,
+                                                Some(transfer.received)
+                                            ),
+                                            super::localization::file_size(
+                                                self.locale,
+                                                Some(total)
+                                            )
+                                        ),
+                                        None => super::localization::file_size(
+                                            self.locale,
+                                            Some(transfer.received),
+                                        ),
                                     }
                                 } else {
                                     self.l(label).to_owned()
@@ -2181,7 +2344,9 @@ impl Desktop {
             self.content_ui.hidden_results,
         )
     }
-    pub(super) fn poll_drafts_open(&self) -> bool { self.content_ui.drafts_open }
+    pub(super) fn poll_drafts_open(&self) -> bool {
+        self.content_ui.drafts_open
+    }
     pub(super) fn poll_drafts_header(&self, cx: &Context<Self>) -> Option<gpui::Stateful<Div>> {
         (self.content_scope_current() && self.snapshot.content_panel.poll_drafts_manage.enabled())
             .then(|| {
@@ -2236,7 +2401,11 @@ impl Desktop {
                     }
                     RemoteState::Idle => "Keine Umfrageentwürfe vorhanden.",
                 };
-                body = body.child(self.hint(self.l(label)));
+                body = body.child(if self.snapshot.content_panel.poll_state.pending() {
+                    self.loading_row(self.l(label))
+                } else {
+                    self.empty_row(self.l(label))
+                });
                 if matches!(
                     self.snapshot.content_panel.poll_state,
                     RemoteState::Failed(_, _)
@@ -2289,14 +2458,25 @@ impl Desktop {
                             cx,
                         ))
                 } else {
-                    actions.child(self.button(
-                        ("poll-draft-delete", id as usize),
-                        "Entwurf löschen",
-                        ButtonStyle::Quiet,
-                        !busy,
-                        LocalAction::Content(Action::ConfirmDeleteDraft(id)),
-                        cx,
-                    ))
+                    actions
+                        .child(self.icon_button(
+                            ("poll-draft-menu", id as usize),
+                            ("more", "Weitere Optionen"),
+                            ButtonStyle::Quiet,
+                            Availability::when(!busy, "Die Verbindung ist derzeit nicht bereit."),
+                            LocalAction::Content(Action::ToggleDraftMenu(id)),
+                            cx,
+                        ))
+                        .when(self.content_ui.draft_menu == Some(id), |actions| {
+                            actions.child(self.button(
+                                ("poll-draft-delete", id as usize),
+                                "Entwurf löschen",
+                                ButtonStyle::Quiet,
+                                !busy,
+                                LocalAction::Content(Action::ConfirmDeleteDraft(id)),
+                                cx,
+                            ))
+                        })
                 };
                 body = body.child(
                     div()
@@ -2520,16 +2700,8 @@ impl Desktop {
         let available = self.content_scope_current()
             && online
             && self.snapshot.content_panel.poll_create.enabled();
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
+        self.dialog_footer()
             .justify_between()
-            .gap_3()
-            .px_6()
-            .py_3()
-            .border_t_1()
-            .border_color(self.theme.border)
             .child(div().when(
                 self.snapshot.content_panel.poll_drafts_manage.enabled(),
                 |d| {
@@ -2675,18 +2847,38 @@ impl Desktop {
             .gap_2()
             .when(!full, |d| d.p_4().bg(self.theme.subtle).rounded(px(12.)))
             .child(
-                div().w_full().flex().items_start().justify_between().gap_2()
-                    .child(div().flex_1().min_w_0().text_size(self.sp(15.))
-                        .line_height(self.sp(22.))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(poll.question.as_str().to_owned()))
-                    .when(!full && !poll.closed && poll.close.enabled(), |d| d.child(
-                        self.icon_button(("close-poll", poll.id as usize), ("more", "Umfrage beenden"),
-                            ButtonStyle::Quiet,
-                            Availability::when(!self.poll_submission_blocked() && !self.media_offline(), "Die Verbindung ist derzeit nicht bereit."),
-                            LocalAction::Content(Action::TogglePollMenu(poll.id)), cx,
-                        ).size(px(32.)).min_h(px(32.))
-                    )),
+                div()
+                    .w_full()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(self.sp(15.))
+                            .line_height(self.sp(22.))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(poll.question.as_str().to_owned()),
+                    )
+                    .when(!full && !poll.closed && poll.close.enabled(), |d| {
+                        d.child(
+                            self.icon_button(
+                                ("close-poll", poll.id as usize),
+                                ("more", "Umfrage beenden"),
+                                ButtonStyle::Quiet,
+                                Availability::when(
+                                    !self.poll_submission_blocked() && !self.media_offline(),
+                                    "Die Verbindung ist derzeit nicht bereit.",
+                                ),
+                                LocalAction::Content(Action::TogglePollMenu(poll.id)),
+                                cx,
+                            )
+                            .size(px(32.))
+                            .min_h(px(32.)),
+                        )
+                    }),
             )
             .child(
                 div()
@@ -2782,17 +2974,48 @@ impl Desktop {
                     .child(self.hint(&format!("{percent}% · {votes}")));
             }
             if full && !poll.hidden_results {
-                let voters: Vec<_> = poll.details.as_slice().iter().filter(|v| v.option == option.id).take(100).collect();
+                let voters: Vec<_> = poll
+                    .details
+                    .as_slice()
+                    .iter()
+                    .filter(|v| v.option == option.id)
+                    .take(100)
+                    .collect();
                 if !voters.is_empty() {
                     let expanded = self.content_ui.expanded_voters == Some((poll.id, option.id));
-                    row = row.child(self.button(("poll-voters", ((poll.id as usize) << 8) ^ usize::from(option.id)),
-                        if expanded { "Stimmen ausblenden" } else { "Stimmen anzeigen" }, ButtonStyle::Quiet, true,
-                        LocalAction::Content(Action::TogglePollVoters { poll: poll.id, option: option.id }), cx));
+                    row = row.child(self.button(
+                        (
+                            "poll-voters",
+                            ((poll.id as usize) << 8) ^ usize::from(option.id),
+                        ),
+                        if expanded {
+                            "Stimmen ausblenden"
+                        } else {
+                            "Stimmen anzeigen"
+                        },
+                        ButtonStyle::Quiet,
+                        true,
+                        LocalAction::Content(Action::TogglePollVoters {
+                            poll: poll.id,
+                            option: option.id,
+                        }),
+                        cx,
+                    ));
                     if expanded {
                         row = row.children(voters.into_iter().map(|voter| {
-                            let initials: String = voter.name.as_str().split_whitespace().take(2)
-                                .filter_map(|part| part.chars().next()).flat_map(char::to_uppercase).collect();
-                            div().flex().items_center().gap_2().child(self.person_avatar(&initials, 20.))
+                            let initials: String = voter
+                                .name
+                                .as_str()
+                                .split_whitespace()
+                                .take(2)
+                                .filter_map(|part| part.chars().next())
+                                .flat_map(char::to_uppercase)
+                                .collect();
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(self.person_avatar(&initials, 20.))
                                 .child(self.hint(voter.name.as_str()))
                         }));
                     }
@@ -3083,8 +3306,8 @@ fn poll_draft_values<'a>(
 #[cfg(test)]
 mod tests {
     use super::{
-        message_avatar_alias, poll_creation_pending, poll_draft_values, toggled_poll_votes,
-        voice_session_retired,
+        INITIAL_VOICE_BUCKET_MS, MAX_VOICE_LEVELS, message_avatar_alias, poll_creation_pending,
+        poll_draft_values, record_voice_level, toggled_poll_votes, voice_session_retired,
     };
     use talk_core::ui::content::{AssetState, AssetTarget, AssetView};
     use talk_core::ui::conversation::RemoteState;
@@ -3094,6 +3317,29 @@ mod tests {
     use talk_core::ui::{
         AccountId, AccountScope, ConversationId, HostId, Page, RuntimeGeneration, Text,
     };
+
+    #[test]
+    fn recording_levels_remain_bounded_and_keep_peaks_from_the_entire_timeline() {
+        let mut levels = Vec::new();
+        let mut bucket_ms = INITIAL_VOICE_BUCKET_MS;
+        for i in 0..=480 {
+            let level = if i == 0 {
+                900
+            } else if i == 480 {
+                700
+            } else {
+                100
+            };
+            record_voice_level(&mut levels, &mut bucket_ms, i * 250, level);
+            assert!(levels.len() <= MAX_VOICE_LEVELS);
+        }
+        assert!(bucket_ms > INITIAL_VOICE_BUCKET_MS);
+        assert_eq!(levels.first(), Some(&900));
+        assert_eq!(levels.last(), Some(&700));
+        record_voice_level(&mut levels, &mut bucket_ms, u64::MAX, u16::MAX);
+        assert!(levels.len() <= MAX_VOICE_LEVELS);
+        assert_eq!(levels.last(), Some(&1000));
+    }
 
     #[test]
     fn voice_draft_survives_connection_loss_but_not_scope_or_permission_loss() {

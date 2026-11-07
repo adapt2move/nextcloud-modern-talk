@@ -33,11 +33,12 @@ impl From<Option<Overlay>> for Surface {
 }
 impl Feedback {
     pub(super) fn dismiss_theme(self, theme: super::Theme) -> super::Theme {
-        let foreground = match self.tone {
-            Tone::Info => theme.muted,
-            Tone::Warning => theme.warning,
-            Tone::Error => theme.danger,
-        };
+        let foreground: gpui::Hsla = gpui::rgb(match self.tone {
+            Tone::Info => 0x315e98,
+            Tone::Warning => 0x795300,
+            Tone::Error => 0x9e3e32,
+        })
+        .into();
         super::Theme {
             sidebar_secondary: foreground,
             hover: gpui::Hsla {
@@ -230,45 +231,33 @@ impl Desktop {
             && !self.incoming_visible()
     }
     pub(super) fn feedback_view(&self, cx: &Context<Self>) -> AnyElement {
-        let t = self.theme;
         let Some(f) = self
             .feedback
             .filter(|f| f.visible_in(self.snapshot.selected, self.overlay))
         else {
             return div().into_any_element();
         };
-        let (bg, fg, symbol) = match f.tone {
-            Tone::Info => (t.subtle, t.text, "info"),
-            Tone::Warning => (t.warning_bg, t.warning, "info"),
-            Tone::Error => (t.danger_bg, t.danger, "info"),
+        let role = match f.tone {
+            Tone::Info => super::controls::BannerRole::Info,
+            Tone::Warning => super::controls::BannerRole::Warning,
+            Tone::Error => super::controls::BannerRole::Error,
         };
-        let banner = div()
+        let banner = self
+            .banner_with_icon(role, self.l(f.text), Some("info"))
             .relative()
             .occlude()
-            .rounded(px(8.))
-            .bg(bg)
-            .text_color(fg)
-            .p_3()
-            .flex()
-            .items_start()
-            .gap_3()
-            .child(self.scaled_icon(symbol, 18., fg))
             .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .text_size(self.sp(12.))
-                    .line_height(self.sp(18.))
-                    .child(self.l(f.text)),
+                self.icon_button(
+                    "dismiss-feedback",
+                    ("x", "Meldung schließen"),
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::DismissFeedback,
+                    cx,
+                )
+                .size(px(28.))
+                .min_h(px(28.)),
             )
-            .child(self.icon_button(
-                "dismiss-feedback",
-                ("x", "Meldung schließen"),
-                ButtonStyle::Quiet,
-                Availability::available(),
-                LocalAction::DismissFeedback,
-                cx,
-            ))
             .child(self.reveal_region("dismiss-feedback", cx));
         self.reveal((f.text, f.tone as usize), banner)
     }

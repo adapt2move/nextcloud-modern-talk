@@ -190,8 +190,10 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('keyboard activation resolves the fictional direct call', ['Verbindung wird aufgebaut'])
     elif scenario == 'clipboard-denied':
         key('ctrl+k');type_text('CLIPMARK');key('ctrl+a');key('ctrl+c');key('BackSpace')
-        click('schreiben');type_text('DRAFTSAFE');key('ctrl+a');key('ctrl+x')
-        expect('unknown privacy policy blocks cut without losing draft',['DRAFTSAFE','Ausschneiden ist für diesen Entwurf nicht freigegeben.'])
+        key('Escape')
+        click('Nachricht', xmin=200, ymin=600);time.sleep(.3);type_text('DRAFTSAFE');key('ctrl+a');key('ctrl+x')
+        expect('unknown privacy policy blocks cut without losing draft',
+               ['DRAFTSAFE', 'Ausschneiden', 'diesen Entwurf nicht freigegeben'])
         key('ctrl+c');key('ctrl+v')
         expect('unknown privacy policy blocks export but permits selected-text replacement by paste',['CLIPMARK'],['DRAFTSAFE'])
         key('ctrl+k');key('ctrl+v')
@@ -266,8 +268,15 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('conversation settings omit the composer poll action', ['Allgemein', 'Nachrichten'], ['Umfrage erstellen'])
         key('Escape')
         expect('Escape closes the conversation settings', ['Designteam'], ['Gesprächsdetails'])
+    elif scenario == 'poll-details':
+        expect('public poll offers voter expansion', ['Umfragedetails', 'Stimmen anzeigen'])
+        # The first result's voter list in the fixed 1280x800 fixture.
+        run(['xdotool', 'mousemove', '--window', xid, '640', '334', 'click', '1'], env)
+        expect('public voters expand with names', ['Stimmen ausblenden', 'Alex Sommer'])
+        run(['xdotool', 'mousemove', '--window', xid, '640', '334', 'click', '1'], env)
+        expect('public voters collapse again', ['Stimmen anzeigen'], ['Stimmen ausblenden'])
     elif scenario == 'chat-polls':
-        click('Abstimmen', inspected_point=(1280, 800, 390, 552))
+        click('Abstimmen', inspected_point=(1280, 800, 390, 584))
         expect('accepted fictional vote stays visible', ['Deine Stimme'])
         # The poll's secondary action is behind its inspected ellipsis control.
         run(['xdotool', 'mousemove', '--window', xid, '364', '594', 'click', '1'], env)
@@ -301,6 +310,28 @@ def exercise(scenario, env, xid, out, label, large=False):
         path, _, _ = observe()
         checks.append({'check': 'waveform click and focused arrow seek update the fictional player',
                        'result': 'pass', 'image': path.name, 'sha256': sha(path)})
+    elif scenario == 'voice-review':
+        path, _, _ = observe()
+        width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
+        if (width, height) != (1280, 800):
+            raise AssertionError('Voice review interaction requires the inspected 1280x800 fixture')
+        # Start the fictional review player, then seek by pointer and keyboard.
+        run(['xdotool', 'mousemove', '--window', xid, '355', '724', 'click', '1'], env)
+        time.sleep(.7)
+        run(['xdotool', 'mousemove', '--window', xid, '700', '724', 'click', '1'], env)
+        time.sleep(.4)
+        log = out / f'{label}.log'
+        first = re.findall(r'UI_VOICE_REVIEW_FIXTURE seek_ms=(\d+) no_backend=true', log.read_text())
+        if len(first) != 1 or not 0 < int(first[0]) < 13000:
+            raise AssertionError(f'Review waveform pointer seek did not reach the fictional player: {first}')
+        key('Right')
+        time.sleep(.4)
+        second = re.findall(r'UI_VOICE_REVIEW_FIXTURE seek_ms=(\d+) no_backend=true', log.read_text())
+        if len(second) != 2 or int(second[-1]) != min(int(first[-1]) + 5000, 13000):
+            raise AssertionError(f'Focused review waveform arrow did not advance five seconds: {first}, {second}')
+        path, _, _ = observe()
+        checks.append({'check': 'review waveform pointer and keyboard seek update the fictional player',
+                       'result': 'pass', 'image': path.name, 'sha256': sha(path)})
     elif scenario == 'voice-recording':
         path, _, _ = observe()
         width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
@@ -321,9 +352,12 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         click('Nachricht', xmin=200, ymin=600)
         time.sleep(.3)  # Allow native focus restoration after closing search.
-        type_text('DRAFTALPHA'); key('Return')
+        type_text('DRAFTALPHA'); time.sleep(.4); key('Return')
         expect('draft retained after busy rejection' if scenario == 'busy' else 'draft retained after asynchronous failure',
-               ['DRAFTALPHA', 'ausgelastet' if scenario == 'busy' else 'Nicht gesendet'])
+               ['DRAFTALPHA'] if scenario == 'busy' else ['DRAFTALPHA', 'Nicht gesendet'])
+        if scenario == 'busy' and (out / f'{label}.log').read_text().count(
+                'UI_BUSY send_rejected=true no_backend=true') != 1:
+            raise AssertionError('The fictional busy port did not reject the explicit send exactly once')
         key('ctrl+comma')
         expect('settings shortcut opens modal', ['Einstellungen'])
         click('Darstellung'); click('Salbei'); click('Dunkel')
@@ -340,10 +374,11 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])
-        click('ansehen',xmin=800)
+        click('ansehen')
         expect('dismiss keeps a discoverable incoming call', ['Eingehender Anruf ansehen'], ['Annehmen'])
-        click('ansehen',xmin=800)
-        click('Annehmen',xmin=800,ymin=200,inspected_point=(1200,800,987,244))
+        click('ansehen')
+        # The blue accept icon is distinct from the two adjacent call actions.
+        run(['xdotool', 'mousemove', '--window', xid, '605', '502', 'click', '1'], env)
         expect('direct accept bypasses optional conference prejoin', ['Verbindung wird angefragt'], ['Bereit'])
         key('Escape')
         expect('escape never hangs up a call', ['Verbindung wird angefragt'])
