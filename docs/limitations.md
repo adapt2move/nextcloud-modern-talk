@@ -28,10 +28,13 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Moderator mute, end-for-everyone and local-user re-ring requests check current
   policy and session identity; call-only removal and federated re-ring are not
   offered. A request receipt does not establish that another client acted on it.
-  Recording controls are unavailable. Selecting a different capture device
-  stops its current publication and requires the user to enable it again.
-  These controls and automatic speaker selection require native and server
-  interoperability validation.
+  Server recording controls require a configured backend, a fresh moderator
+  grant and an ordinary room. They start video recording; audio-only selection
+  and recording-file workflows are not implemented. A configured recorder has
+  not been exercised. Selecting a different capture device stops its current
+  publication and requires the user to enable it again. These controls and
+  automatic speaker selection require native and server interoperability
+  validation.
 
 ## Messages and background activity
 

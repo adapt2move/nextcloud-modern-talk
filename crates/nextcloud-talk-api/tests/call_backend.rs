@@ -131,6 +131,23 @@ async fn released_server_accepts_scoped_activity_and_moderation() {
         .take_moderation_writer()
         .expect("moderation lane");
     let mut sender = alice_writer.take_activity_writer().expect("activity lane");
+    let capabilities = alice_writer
+        .observe(
+            &alice.context(),
+            nextcloud_talk_api::meeting::Observation::Capabilities,
+        )
+        .await
+        .expect("capability observation");
+    if let Reply::Capabilities(capabilities) = capabilities.reply
+        && capabilities.recording_enabled == Some(false)
+    {
+        assert!(
+            moderator
+                .set_recording(&alice.context(), true)
+                .await
+                .is_err()
+        );
+    }
     let observation = alice_writer
         .observe(
             &alice.context(),
