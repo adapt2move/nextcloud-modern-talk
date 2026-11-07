@@ -1,8 +1,8 @@
 //! One deliberate selected-room GET awaiting synchronous Busy admission.
 //! No admitted operation or write enters this slot. It retains bounded target
 //! metadata for ten seconds, supersedes older navigation and dies with selection.
-//! One terminal failure projection lives only until the next read or selection;
-//! it never occupies an admission slot or silently retries after that deadline.
+//! One terminal failure projection lives only until the next read or selection.
+//! Admitted thread pages separately retain one scoped, time-bounded retry plan.
 use super::messaging::Work;
 use super::*;
 use talk_core::{
@@ -13,7 +13,12 @@ use talk_core::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Read {
     Thread(u128),
+    ThreadOlder {
+        root: u128,
+        before: u128,
+    },
     Context(u128),
+    UnreadAfter(u128),
     Older(u128),
     Refresh,
     Pins,
@@ -26,6 +31,13 @@ enum Read {
     Scheduled,
 }
 impl Read {
+    fn thread_root(&self) -> Option<u128> {
+        match self {
+            Self::Thread(root) | Self::ThreadOlder { root, .. } => Some(*root),
+            _ => None,
+        }
+    }
+
     fn capture(
         model: &Accounts,
         context: ConversationRef,
@@ -34,7 +46,24 @@ impl Read {
         use view::MessageAction as A;
         Some(Ok(match action {
             A::Thread(root) => Self::Thread(*root),
+            A::ThreadOlder(root) => {
+                let before = match model
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .filter(|panel| panel.context == context && panel.thread_root == Some(*root))
+                    .and_then(|panel| panel.thread_older)
+                {
+                    Some(before) => before,
+                    None => return Some(Err(SubmitError::StaleScope)),
+                };
+                Self::ThreadOlder {
+                    root: *root,
+                    before,
+                }
+            }
             A::Context(target) => Self::Context(*target),
+            A::LocateUnreadAfter(marker) => Self::UnreadAfter(*marker),
             A::Older => Self::Older(
                 match model
                     .snapshot
@@ -73,7 +102,9 @@ impl Read {
     fn work(&self) -> Work {
         match self {
             Self::Thread(_) => Work::Thread,
+            Self::ThreadOlder { root, .. } => Work::ThreadOlder(*root),
             Self::Context(id) => Work::Context(*id),
+            Self::UnreadAfter(marker) => Work::UnreadContext(*marker),
             Self::Older(_) => Work::Older,
             Self::Refresh => Work::History,
             Self::Pins => Work::Pins,
@@ -104,7 +135,14 @@ impl Read {
                 before: None,
                 thread: Some(id(*root)?),
             },
+            Self::ThreadOlder { root, before } => wire::MessagingCommand::History {
+                before: Some(id(*before)?),
+                thread: Some(id(*root)?),
+            },
             Self::Context(target) => wire::MessagingCommand::Context(id(*target)?),
+            Self::UnreadAfter(marker) => {
+                wire::MessagingCommand::UnreadAfter((*marker > 0).then(|| id(*marker)).transpose()?)
+            }
             Self::Older(before) => wire::MessagingCommand::History {
                 before: Some(id(*before)?),
                 thread: None,
@@ -131,6 +169,43 @@ pub(super) struct QueuedRead {
     read: Read,
     deadline: Instant,
 }
+
+struct ThreadRetry {
+    job: QueuedRead,
+    attempts: u8,
+    due: Option<Instant>,
+    expires: Instant,
+    failure: UnavailableReason,
+}
+
+impl ThreadRetry {
+    fn schedule(&mut self, reason: UnavailableReason, now: Instant) -> bool {
+        const DELAYS: [u64; 4] = [2, 4, 8, 16];
+        let Some(delay) = DELAYS.get(usize::from(self.attempts)) else {
+            return false;
+        };
+        if now >= self.expires {
+            return false;
+        }
+        self.failure = reason;
+        self.due = Some(now + Duration::from_secs(*delay));
+        true
+    }
+}
+
+fn transient_thread_error(error: IdentityError) -> Option<UnavailableReason> {
+    let IdentityError::Request(kind) = error else {
+        return None;
+    };
+    match kind {
+        ErrorKind::Transport
+        | ErrorKind::Deadline
+        | ErrorKind::ServerUnavailable
+        | ErrorKind::RateLimited => connection_failure(kind).map(UnavailableReason::Connection),
+        ErrorKind::Busy => Some(UnavailableReason::Busy),
+        _ => None,
+    }
+}
 impl QueuedRead {
     fn attempt(
         &self,
@@ -155,6 +230,7 @@ impl QueuedRead {
 pub(super) struct Reads {
     queued: Option<QueuedRead>,
     failed: Option<(QueuedRead, UnavailableReason)>,
+    thread_retry: Option<ThreadRetry>,
     // Shared list panels have one state slot; preserve a simultaneous write's
     // Saving lease while retaining the exact current read's result identity.
     shared: Option<(ConversationRef, RequestId, Work)>,
@@ -187,7 +263,15 @@ fn project(panel: &mut view::MessagePanel, job: &QueuedRead, state: RemoteState,
         Read::Thread(root) => {
             if initial {
                 if panel.thread_root != Some(*root) {
+                    super::thread_change::cancel(panel);
                     panel.thread_messages = Page::empty();
+                    panel.thread_older = None;
+                    panel.thread_has_newer = false;
+                    panel.thread_root_message = None;
+                    panel.thread_root_state = RemoteState::Idle;
+                    panel.thread_details = None;
+                    panel.thread_details_request = None;
+                    panel.thread_following_intent = None;
                 }
                 panel.thread_root = Some(*root);
             }
@@ -195,7 +279,12 @@ fn project(panel: &mut view::MessagePanel, job: &QueuedRead, state: RemoteState,
                 panel.thread_state = state;
             }
         }
-        Read::Context(target) => {
+        Read::ThreadOlder { root, .. } => {
+            if panel.thread_root == Some(*root) {
+                panel.thread_state = state;
+            }
+        }
+        Read::Context(target) | Read::UnreadAfter(target) => {
             if initial {
                 panel.context_load = Some(view::ContextLoad {
                     target: *target,
@@ -266,8 +355,46 @@ impl Accounts {
                 read,
                 deadline: Instant::now() + Duration::from_secs(10),
             };
+            if job.read.thread_root().is_some() {
+                self.queued_read.thread_retry = None;
+            }
+            self.history.expire(history::now_unix());
+            let cached_thread = match &job.read {
+                Read::Thread(root) => self.history.get(context).and_then(|history| {
+                    history.thread(*root).map(|rows| {
+                        (
+                            *root,
+                            rows.clone(),
+                            history
+                                .open_thread_root(*root)
+                                .or_else(|| history.thread_root(*root))
+                                .cloned(),
+                        )
+                    })
+                }),
+                _ => None,
+            };
             if let Some(panel) = self.snapshot.message_panel.as_mut() {
                 project(panel, &job, RemoteState::Loading(request), true);
+                if let Some((root, rows, root_message)) = cached_thread.as_ref()
+                    && panel.thread_root == Some(*root)
+                {
+                    panel.thread_messages = rows.clone();
+                    panel.thread_root_message = root_message.clone();
+                    // A cached tail is already the latest page; the older
+                    // page's cursor cannot describe this different window.
+                    panel.thread_has_newer = false;
+                    panel.thread_older = None;
+                }
+            }
+            if let Some((root, rows, root_message)) = cached_thread {
+                self.history
+                    .remember_open_thread(context, root, rows, root_message);
+            }
+            if job.read.thread_root().is_some() {
+                // Reopening a retained thread restores its current-session
+                // metadata before any queued settings are projected over it.
+                self.project_history(context);
             }
             // Local acceptance always has a correlated loading/failure result.
             // No operation ticket is created until start_message admits it.
@@ -290,7 +417,17 @@ impl Accounts {
                 job.read.work(),
             )
         }) {
-            Ok(true) => (),
+            Ok(true) => {
+                if job.read.thread_root().is_some() {
+                    self.queued_read.thread_retry = Some(ThreadRetry {
+                        job,
+                        attempts: 0,
+                        due: None,
+                        expires: now + Duration::from_secs(120),
+                        failure: UnavailableReason::Busy,
+                    });
+                }
+            }
             Ok(false) => self.queued_read.queued = Some(job),
             Err(error) => {
                 let failed = reason(error);
@@ -308,14 +445,109 @@ impl Accounts {
         }
     }
     pub(super) fn tick_queued_read(&mut self, now: Instant) {
-        let Some(job) = self.queued_read.queued.take() else {
+        if let Some(job) = self.queued_read.queued.take() {
+            if self.snapshot.selected != Some(job.context) {
+                self.queued_read.clear();
+                return;
+            }
+            self.attempt_deliberate_read(job, now);
+        }
+        self.tick_thread_read_retry(now);
+    }
+
+    /// The same request identity and captured page cursor survive a transient GET
+    /// failure. A different room, root, or request retires this retry immediately.
+    pub(super) fn settle_thread_read(
+        &mut self,
+        context: ConversationRef,
+        request: RequestId,
+        work: Work,
+        error: Option<IdentityError>,
+        now: Instant,
+    ) {
+        let Some(mut retry) = self.queued_read.thread_retry.take() else {
             return;
         };
-        if self.snapshot.selected != Some(job.context) {
-            self.queued_read.clear();
+        if retry.job.context != context
+            || retry.job.request != request
+            || retry.job.read.work() != work
+        {
+            self.queued_read.thread_retry = Some(retry);
             return;
         }
-        self.attempt_deliberate_read(job, now);
+        let Some(reason) = error.and_then(transient_thread_error) else {
+            return;
+        };
+        let current = self.snapshot.selected == Some(context)
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel.thread_root == retry.job.read.thread_root()
+                    && matches!(panel.thread_state, RemoteState::Failed(id, _) if id == request)
+            });
+        if current && retry.schedule(reason, now) {
+            if let Some(panel) = self.snapshot.message_panel.as_mut() {
+                panel.thread_state = RemoteState::Loading(request);
+            }
+            self.queued_read.thread_retry = Some(retry);
+            self.touch();
+        }
+    }
+
+    fn tick_thread_read_retry(&mut self, now: Instant) {
+        let Some(mut retry) = self.queued_read.thread_retry.take() else {
+            return;
+        };
+        let Some(due) = retry.due else {
+            self.queued_read.thread_retry = Some(retry);
+            return;
+        };
+        let job = &retry.job;
+        let current = self.snapshot.selected == Some(job.context)
+            && self.snapshot.content != ContentState::Denied
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == job.context
+                    && panel.thread_root == job.read.thread_root()
+                    && panel.thread_state == RemoteState::Loading(job.request)
+            });
+        if !current {
+            return;
+        }
+        if now >= retry.expires {
+            if let Some(panel) = self.snapshot.message_panel.as_mut() {
+                panel.thread_state = RemoteState::Failed(job.request, retry.failure);
+            }
+            self.touch();
+            return;
+        }
+        if now < due {
+            self.queued_read.thread_retry = Some(retry);
+            return;
+        }
+        if self.queued_read.queued.is_some() {
+            retry.due = Some(now + Duration::from_secs(2));
+            self.queued_read.thread_retry = Some(retry);
+            return;
+        }
+        let result = job.read.command(job.context).and_then(|command| {
+            self.start_message(job.request, job.context, command, job.read.work())
+        });
+        match result {
+            Ok(()) => {
+                retry.attempts += 1;
+                retry.due = None;
+                self.queued_read.thread_retry = Some(retry);
+            }
+            Err(SubmitError::Busy) => {
+                retry.due = Some(now + Duration::from_secs(2));
+                self.queued_read.thread_retry = Some(retry);
+            }
+            Err(error) => {
+                if let Some(panel) = self.snapshot.message_panel.as_mut() {
+                    panel.thread_state = RemoteState::Failed(job.request, reason(error));
+                }
+                self.touch();
+            }
+        }
     }
     pub(super) fn project_queued_read(&mut self, context: ConversationRef) {
         if self.snapshot.selected != Some(context) {

@@ -1,11 +1,192 @@
 use super::collection::CollectionState;
-use super::controls::{Availability, scoped_id};
+use super::controls::{Availability, BannerRole, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SearchKind};
 use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, Window, div, prelude::*, px};
-use talk_core::ui::presentation::{ContentState, ConversationKind, ParticipantView, Presence};
+use talk_core::ui::presentation::{
+    ContentState, ConversationKind, ConversationRef, ParticipantView, Presence,
+};
+
+#[derive(Clone)]
+struct ThreadResize;
+impl gpui::Render for ThreadResize {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size(px(1.)).opacity(0.)
+    }
+}
 
 impl Desktop {
+    pub(super) fn thread_is_docked(&self, window: &Window) -> bool {
+        self.overlay == Some(Overlay::Thread)
+            && self.snapshot.selected.is_some()
+            && self.prejoin.is_none()
+            && !self.onboarding_open
+            && !self.snapshot.call.as_ref().is_some_and(|call| {
+                call.stage != super::CallStage::Incoming
+                    && !(matches!(
+                        call.stage,
+                        super::CallStage::Ended | super::CallStage::Failed
+                    ) && self.dismissed_terminal_call == Some(call.scope))
+            })
+            && window.viewport_size().width >= px(1050.)
+    }
+
+    pub(super) fn thread_pane(&self, window: &Window, cx: &Context<Self>) -> Div {
+        let t = self.theme;
+        let available = (f32::from(window.viewport_size().width) - 600.).max(288.);
+        let width = self.thread_width.min(available);
+        let resize_focus = self
+            .control_focus
+            .get("thread-resize-handle".into(), cx)
+            .map(|focus| focus.tab_stop(true));
+        let keyboard_focus = resize_focus.clone();
+        let mouse_focus = resize_focus.clone();
+        div()
+            .relative()
+            .flex_none()
+            .w(px(width))
+            .h_full()
+            .py_3()
+            .pr_3()
+            .child(
+                self.dialog_panel(
+                    DialogSurface::Overlay(Overlay::Thread),
+                    self.dialog_shell_surface()
+                        .size_full()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .track_focus(&self.modal_focus)
+                        .tab_group()
+                        .child(
+                            self.dialog_header()
+                                .gap_1()
+                                .py_3()
+                                .child(self.thread_heading(cx))
+                                .child(
+                                    self.icon_button(
+                                        "close-overlay",
+                                        ("x", "Schließen"),
+                                        ButtonStyle::Quiet,
+                                        Availability::available(),
+                                        LocalAction::Close,
+                                        cx,
+                                    )
+                                    .size(px(32.)),
+                                ),
+                        )
+                        .when(self.thread_options_open, |pane| {
+                            pane.child(self.thread_options(cx))
+                        })
+                        .child(
+                            self.scroll_area(super::navigation::Region::Overlay)
+                                .flex_1()
+                                .min_h_0()
+                                .child(
+                                    self.thread_body(cx)
+                                        .children(self.message_deadline_card_on(true, cx)),
+                                ),
+                        )
+                        .child(self.thread_composer_view(cx)),
+                ),
+            )
+            .child(
+                div()
+                    .id("thread-resize-handle")
+                    .group("thread-resize")
+                    .absolute()
+                    .left_0()
+                    .top_3()
+                    .bottom_3()
+                    .w(px(8.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .hover(|handle| handle.bg(t.subtle))
+                    .focus(|handle| handle.bg(t.subtle))
+                    .child(
+                        div()
+                            .w(px(2.))
+                            .h(px(36.))
+                            .rounded_full()
+                            .bg(gpui::transparent_black())
+                            .group_hover("thread-resize", |handle| handle.bg(t.border)),
+                    )
+                    .when_some(resize_focus, |handle, focus| handle.track_focus(&focus))
+                    .cursor(gpui::CursorStyle::ResizeLeftRight)
+                    .on_mouse_down(gpui::MouseButton::Left, move |_, window, _| {
+                        if let Some(focus) = &mouse_focus {
+                            focus.focus(window);
+                        }
+                    })
+                    .on_key_down(cx.listener(
+                        move |this, event: &gpui::KeyDownEvent, window, cx| {
+                            if !keyboard_focus
+                                .as_ref()
+                                .is_some_and(|focus| focus.is_focused(window))
+                            {
+                                return;
+                            }
+                            let change = match event.keystroke.key.as_str() {
+                                "left" => 32.,
+                                "right" => -32.,
+                                _ => return,
+                            };
+                            let maximum =
+                                (f32::from(window.viewport_size().width) - 600.).clamp(288., 608.);
+                            this.thread_width = (this.thread_width + change).clamp(288., maximum);
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                    ))
+                    .on_drag(ThreadResize, |_, _, _, cx| cx.new(|_| ThreadResize))
+                    .on_drag_move::<ThreadResize>(cx.listener(
+                        |this, event: &gpui::DragMoveEvent<ThreadResize>, window, cx| {
+                            let max =
+                                (f32::from(window.viewport_size().width) - 600.).clamp(288., 608.);
+                            this.thread_width = (f32::from(window.viewport_size().width)
+                                - f32::from(event.event.position.x))
+                            .clamp(288., max);
+                            cx.notify();
+                        },
+                    )),
+            )
+    }
+
+    fn thread_heading(&self, cx: &Context<Self>) -> Div {
+        let heading = self
+            .current_thread_details()
+            .map(|details| details.title.as_str())
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or(self.l("Thread"));
+        let room = self.selected().map_or("", |room| room.title.as_str());
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .child(if self.current_thread_details().is_some() {
+                self.style_panel_title(self.control(
+                    "thread-options",
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::ToggleThreadOptions,
+                    cx,
+                ))
+                .justify_start()
+                .p_0()
+                .min_h(px(24.))
+                .child(heading.to_owned())
+                .child(self.scaled_icon("chevron-down", 14., self.theme.muted))
+                .into_any_element()
+            } else {
+                self.style_panel_title(div())
+                    .child(heading.to_owned())
+                    .into_any_element()
+            })
+            .child(self.hint(room))
+    }
+
     pub fn overlay_view(&self, window: &Window, cx: &Context<Self>) -> Div {
         if self.overlay == Some(Overlay::Forward) {
             return self.forward_dialog(window, cx);
@@ -23,7 +204,6 @@ impl Desktop {
             return self.settings_view(window, cx);
         }
         let overlay = self.overlay.expect("overlay selected");
-        let t = self.theme;
         let side = matches!(
             overlay,
             Overlay::RoomInfo
@@ -34,32 +214,64 @@ impl Desktop {
         let (title, width) = match overlay {
             Overlay::RoomInfo | Overlay::Participants => ("Gesprächsdetails", 448.),
             Overlay::Files => ("Geteilte Inhalte", 700.),
+            Overlay::CloudFiles => ("NextCloud-Dateien", 760.),
             Overlay::Thread => ("Antworten", 400.),
             Overlay::CallParticipants => ("Im Anruf", 400.),
             Overlay::CallChat => ("Chat im Anruf", 440.),
+            Overlay::ConfirmEndCall => ("Anruf für alle beenden?", 440.),
+            Overlay::ConfirmRecording => ("Aufzeichnung starten?", 440.),
+            Overlay::RecordingConsent => ("Aufzeichnung", 440.),
             Overlay::Search => ("Suchen", 700.),
             Overlay::Create => ("Neues Gespräch", 716.),
             Overlay::Discover => ("Offene Gespräche", 760.),
             Overlay::Organize => ("Eigene Gruppen", 520.),
             Overlay::ContentPreview => ("Dateivorschau", 820.),
             Overlay::CreatePoll => ("Umfrage erstellen", 620.),
+            Overlay::PollDetails => ("Umfragedetails", 620.),
+            Overlay::Reminders => ("Erinnerungen", 560.),
+            Overlay::Federation => ("Föderierte Einladungen", 620.),
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!("settings handled above"),
         };
+        let header_title = if matches!(overlay, Overlay::CallParticipants | Overlay::CallChat) {
+            self.snapshot.call.as_ref().map_or_else(
+                || self.l(title).to_owned(),
+                |call| call.title.as_str().to_owned(),
+            )
+        } else {
+            self.l(title).to_owned()
+        };
         let body = match overlay {
             Overlay::Files => self.shared_contents(cx),
+            Overlay::CloudFiles => self.cloud_files_body(cx),
             Overlay::RoomInfo | Overlay::Participants => self.details_body(overlay, cx),
-            Overlay::CallParticipants => {
-                let mut body = div().flex().flex_col().gap_3();
-                if let Some(call) = &self.snapshot.call {
-                    body = body.child(self.hint(call.title.as_str()));
-                    for p in call.participants.as_slice() {
-                        body = body.child(self.participant_row(p));
-                    }
+            Overlay::CallParticipants => self.call_participants_body(cx),
+            Overlay::CallChat => self.call_chat(cx),
+            Overlay::ConfirmRecording => div().flex().flex_col().gap_4()
+                .child(self.hint(self.l("Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden werden informiert.")))
+                .child(self.dialog_actions().justify_end()
+                    .child(self.button("cancel-recording", "Abbrechen", ButtonStyle::Quiet, true, LocalAction::Close, cx))
+                    .child(self.button("confirm-recording", "Aufzeichnung starten", ButtonStyle::Primary, true, LocalAction::ConfirmRecording, cx))),
+            Overlay::RecordingConsent => {
+                let mut body = div().flex().flex_col().gap_4()
+                    .child(self.hint(self.l("Der Server kann Audio und Video aufzeichnen. Ohne Zustimmung kein Beitritt.")));
+                if let Some(call) = self.snapshot.call.as_ref().filter(|call| call.stage == talk_core::ui::presentation::CallStage::Required(talk_core::ui::presentation::RequiredGate::RecordingConsent)) {
+                    let selected = self.recording_consent.selected(call.scope);
+                    body = body.child(div().flex().items_center().gap_3()
+                        .child(self.switch("recording-consent-switch", "Ich stimme einer Aufzeichnung zu.", Some(selected), Availability::available(), LocalAction::ToggleRecordingConsent(call.scope), cx))
+                        .child(div().flex_1().min_w_0().child(self.l("Ich stimme einer Aufzeichnung zu."))))
+                        .when(!selected, |d| d.child(self.hint(self.l("Bestätige zuerst die Zustimmung."))))
+                        .child(self.dialog_actions().justify_end()
+                            .child(self.button("decline-recording-consent", "Nicht beitreten", ButtonStyle::Quiet, true, LocalAction::DeclineRecordingConsent(call.scope), cx))
+                            .child(self.button("confirm-recording-consent", "Zustimmen und beitreten", ButtonStyle::Primary, Availability::when(selected, "Bestätige zuerst die Zustimmung."), LocalAction::ConfirmRecordingConsent(call.scope), cx)));
                 }
                 body
             }
-            Overlay::CallChat => self.call_chat(cx),
+            Overlay::ConfirmEndCall => div().flex().flex_col().gap_4()
+                .child(self.hint(self.l("Alle Teilnehmenden verlassen den Anruf. Das Gespräch und seine Nachrichten bleiben bestehen.")))
+                .child(self.dialog_actions().justify_end()
+                    .child(self.button("cancel-end-everyone", "Abbrechen", ButtonStyle::Quiet, true, LocalAction::Close, cx))
+                    .child(self.button("confirm-end-everyone", "Für alle beenden", ButtonStyle::Danger, true, LocalAction::ConfirmEndCall, cx))),
             Overlay::Thread => self.thread_body(cx),
             Overlay::Search => self.search_body(cx),
             Overlay::Create => self.creation_body(cx),
@@ -67,6 +279,9 @@ impl Desktop {
             Overlay::Organize => self.organization_body(cx),
             Overlay::ContentPreview => unreachable!("media viewer handled above"),
             Overlay::CreatePoll => self.poll_creation_body(cx),
+            Overlay::PollDetails => self.poll_details_body(cx),
+            Overlay::Reminders => self.account_reminders_body(cx),
+            Overlay::Federation => self.federation_body(cx),
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!(),
         };
@@ -76,82 +291,143 @@ impl Desktop {
             self.scroll_area(super::navigation::Region::Overlay)
                 .min_h_0()
                 .flex_1()
-                .p_6()
+                .p_4()
                 .child(body)
                 .into_any_element()
         };
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(t.scrim)
-            .flex()
+        let preferred_height = match overlay {
+            Overlay::CreatePoll => self.poll_dialog_preferred_height(cx),
+            Overlay::CloudFiles => {
+                let rows = self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .map_or(2, |browser| browser.entries.as_slice().len().clamp(2, 7));
+                (320. + rows as f32 * 48.).min(632.)
+            }
+            _ => 632.,
+        };
+        self.dialog_scrim()
             .when(side, |d| d.justify_end().p_3())
             .when(!side, |d| d.items_center().justify_center().p_5())
             .child(
                 self.dialog_panel(
                     DialogSurface::Overlay(overlay),
-                    div()
+                    self.dialog_shell_surface()
                         .w_full()
                         .max_w(px(width))
                         .max_h_full()
                         .min_h_0()
                         .when(side, |d| d.h_full())
-                        .when(overlay == Overlay::Create, |d| {
-                            d.h(px((f32::from(window.viewport_size().height)
-                                - super::window_chrome::HEIGHT
-                                - 66.)
-                                .min(632.)))
-                        })
+                        // Reserve space for wrapped titles and action rows;
+                        // content can still scroll at larger text scales.
+                        .when(overlay == Overlay::ConfirmRecording, |d| d.h(self.sp(210.)))
+                        .when(overlay == Overlay::ConfirmEndCall, |d| d.h(self.sp(210.)))
+                        .when(overlay == Overlay::RecordingConsent, |d| d.h(self.sp(280.)))
+                        .when(
+                            matches!(
+                                overlay,
+                                Overlay::Create
+                                    | Overlay::CloudFiles
+                                    | Overlay::CreatePoll
+                                    | Overlay::PollDetails
+                            ),
+                            |d| {
+                                d.h(px((f32::from(window.viewport_size().height)
+                                    - super::window_chrome::HEIGHT
+                                    - 66.)
+                                    .min(f32::from(self.sp(preferred_height)))))
+                            },
+                        )
                         .when(!side, |d| {
                             d.max_h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
-                                - 66.)
-                                .min(632.)))
+                                - if matches!(overlay, Overlay::Search | Overlay::Create) {
+                                    40.
+                                } else {
+                                    66.
+                                })
+                            .min(
+                                if matches!(overlay, Overlay::Search | Overlay::Create) {
+                                    720.
+                                } else {
+                                    632.
+                                },
+                            )))
                         })
                         .flex()
                         .flex_col()
-                        .bg(t.surface)
-                        .rounded(px(13.))
-                        .border_1()
-                        .border_color(t.border)
-                        .shadow_lg()
                         .track_focus(&self.modal_focus)
                         .tab_group()
                         .occlude()
                         .child(
-                            div()
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap_3()
-                                .px_6()
-                                .py_4()
-                                .border_b_1()
-                                .border_color(t.border)
+                            self.dialog_header()
                                 .child(
                                     div()
                                         .min_w_0()
-                                        .text_size(self.sp(if side { 18. } else { 24. }))
-                                        .font_weight(FontWeight::BOLD)
-                                        .child(self.l(title)),
+                                        .flex_1()
+                                        .when(side, |title| self.style_panel_title(title))
+                                        .when(!side, |title| self.style_dialog_title(title))
+                                        // Keep the single-word consent title visible when
+                                        // large text leaves little room beside the close control.
+                                        .when(overlay == Overlay::RecordingConsent, |title| {
+                                            title.flex_1().text_size(self.sp(20.).min(px(40.)))
+                                        })
+                                        .when(
+                                            matches!(
+                                                overlay,
+                                                Overlay::ConfirmRecording
+                                                    | Overlay::ConfirmEndCall
+                                                    | Overlay::RecordingConsent
+                                            ),
+                                            |title| title.line_height(self.sp(30.)),
+                                        )
+                                        .child(header_title),
                                 )
-                                .child(self.icon_button(
-                                    "close-overlay",
-                                    ("x", "Schließen"),
-                                    ButtonStyle::Quiet,
-                                    Availability::available(),
-                                    LocalAction::Close,
-                                    cx,
-                                )),
+                                .when(overlay == Overlay::CreatePoll, |d| {
+                                    d.children(self.poll_drafts_header(cx))
+                                })
+                                .when(
+                                    !matches!(
+                                        overlay,
+                                        Overlay::ConfirmRecording
+                                            | Overlay::ConfirmEndCall
+                                            | Overlay::RecordingConsent
+                                    ),
+                                    |d| {
+                                        d.child(self.icon_button(
+                                            "close-overlay",
+                                            ("x", "Schließen"),
+                                            ButtonStyle::Quiet,
+                                            Availability::available(),
+                                            LocalAction::Close,
+                                            cx,
+                                        ))
+                                    },
+                                ),
+                        )
+                        .when(
+                            overlay == Overlay::Thread && self.thread_options_open,
+                            |pane| pane.child(self.thread_options(cx)),
                         )
                         .child(content)
+                        .when(overlay == Overlay::Thread, |d| {
+                            d.child(self.thread_composer_view(cx))
+                        })
                         .when(overlay == Overlay::Create, |d| {
                             d.child(self.creation_footer(cx))
                         })
                         .when(
-                            self.feedback_visible() && overlay != Overlay::CallChat,
+                            overlay == Overlay::CreatePoll && !self.poll_drafts_open(),
+                            |d| d.child(self.poll_creation_footer(cx)),
+                        )
+                        .when(overlay == Overlay::CloudFiles, |d| {
+                            d.child(self.cloud_files_footer(cx))
+                        })
+                        .when(
+                            self.feedback_visible()
+                                && !matches!(overlay, Overlay::CallChat | Overlay::Thread),
                             |d| {
                                 d.child(
                                     div()
@@ -165,9 +441,208 @@ impl Desktop {
                 ),
             )
     }
+    pub(super) fn call_participants_body(&self, cx: &Context<Self>) -> Div {
+        let mut body = div().flex().flex_col().gap_3();
+        if let Some(call) = &self.snapshot.call {
+            if call.recording_control.is_some() || call.can_end_everyone {
+                body = body.child(div().flex().justify_end().child(self.icon_button(
+                    "call-moderation",
+                    ("more", "Moderation"),
+                    ButtonStyle::Quiet,
+                    Availability::available().hinted(),
+                    LocalAction::ToggleCallModeration,
+                    cx,
+                )));
+            }
+            body = body.child(self.hint(&format!(
+                "{} · {}",
+                self.l("Im Anruf"),
+                call.participants.as_slice().len()
+            )));
+            for raised in [true, false] {
+                if raised && call.participants.as_slice().iter().any(|p| p.raised_hand) {
+                    body = body.child(self.hint(self.l("Hände")));
+                }
+                for p in call
+                    .participants
+                    .as_slice()
+                    .iter()
+                    .filter(|p| p.raised_hand == raised)
+                {
+                    body = body.child(self.call_participant_row(p, call, cx));
+                }
+            }
+            if call.invitees_loaded && !call.invitees.as_slice().is_empty() {
+                body = body.child(self.hint(&format!(
+                    "{} · {}",
+                    self.l("Nicht im Anruf"),
+                    call.invitees.as_slice().len()
+                )));
+                for person in call.invitees.as_slice() {
+                    use talk_core::ui::presentation::{CallRingOutcome, UiIntent};
+                    let status = call
+                        .ring_status
+                        .filter(|status| status.target == person.local_id);
+                    let label = status.map(|status| match status.outcome {
+                        CallRingOutcome::Pending => "Klingeln wird angefragt …",
+                        CallRingOutcome::Requested => "Klingeln angefragt",
+                        CallRingOutcome::Failed => "Klingeln nicht möglich",
+                    });
+                    let pending = call
+                        .ring_status
+                        .is_some_and(|status| status.outcome == CallRingOutcome::Pending);
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .py_3()
+                            .child(self.person_avatar(person.initials.as_str(), 36.))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .child(
+                                        div()
+                                            .text_ellipsis()
+                                            .child(person.name.as_str().to_owned()),
+                                    )
+                                    .when_some(label, |row, label| {
+                                        row.child(self.hint(self.l(label)))
+                                    }),
+                            )
+                            .when(person.ring_allowed, |row| {
+                                row.child(
+                                    self.icon_button(
+                                        gpui::SharedString::from(format!(
+                                            "ring-call-{}",
+                                            person.local_id
+                                        )),
+                                        ("phone-outgoing", "Erneut klingeln"),
+                                        ButtonStyle::Quiet,
+                                        Availability::when(
+                                            !pending,
+                                            "Eine Anfrage wird bereits bearbeitet.",
+                                        )
+                                        .hinted(),
+                                        LocalAction::Intent(UiIntent::RingCallParticipant {
+                                            call: call.scope,
+                                            target: person.local_id,
+                                        }),
+                                        cx,
+                                    ),
+                                )
+                            }),
+                    );
+                }
+            }
+            if call.recording_pending {
+                body = body.child(self.hint(self.l("Aufzeichnung wird aktualisiert …")));
+            }
+            if call.recording_uncertain {
+                body = body.child(self.hint(self.l("Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei.")));
+            }
+            if self.call_moderation_open
+                && let Some(start) = call.recording_control
+            {
+                body = body.child(self.button(
+                            "call-recording-control",
+                            if start { "Aufzeichnung starten" } else { "Aufzeichnung stoppen" },
+                            ButtonStyle::Secondary,
+                            Availability::when(!call.recording_pending && !call.recording_uncertain,
+                                if call.recording_uncertain {
+                                    "Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei."
+                                } else {
+                                    "Eine Anfrage wird bereits bearbeitet."
+                                }),
+                            if start { LocalAction::Open(Overlay::ConfirmRecording) }
+                            else { LocalAction::Intent(talk_core::ui::presentation::UiIntent::SetCallRecording { call: call.scope, start: false }) },
+                            cx,
+                        ));
+            }
+            if self.call_moderation_open && call.can_end_everyone {
+                body = body.child(div().border_t_1().border_color(self.theme.border));
+                body = body.child(self.button(
+                    "end-everyone",
+                    "Für alle beenden",
+                    ButtonStyle::Danger,
+                    Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet."),
+                    LocalAction::Open(Overlay::ConfirmEndCall),
+                    cx,
+                ));
+            }
+        }
+        body
+    }
+    fn call_participant_row(
+        &self,
+        p: &ParticipantView,
+        call: &talk_core::ui::presentation::CallView,
+        cx: &Context<Self>,
+    ) -> Div {
+        let t = self.theme;
+        let details = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .when(p.raised_hand, |d| {
+                d.child(self.scaled_icon("hand", 16., t.muted))
+            })
+            .when(p.call_microphone == Some(false), |d| {
+                d.child(self.scaled_icon("mic-off", 16., t.muted))
+            })
+            .when(p.call_camera == Some(false), |d| {
+                d.child(self.scaled_icon("video-off", 16., t.muted))
+            })
+            .when(p.speaking, |d| {
+                d.child(self.scaled_icon("mic", 16., t.success))
+            });
+        let mut text = div()
+            .flex_1()
+            .min_w_0()
+            .text_ellipsis()
+            .font_weight(FontWeight::MEDIUM)
+            .child(p.name.as_str().to_owned());
+        if let Some(status) = call
+            .mute_status
+            .filter(|status| status.target == p.local_id)
+        {
+            use talk_core::ui::presentation::CallRingOutcome;
+            text = text.child(self.hint(self.l(match status.outcome {
+                CallRingOutcome::Pending => "Stummschaltung wird angefragt …",
+                CallRingOutcome::Requested => "Stummschaltung angefragt",
+                CallRingOutcome::Failed => "Stummschaltung nicht möglich",
+            })));
+        }
+        let mut row = self
+            .style_list_row(div(), super::controls::RowSize::Detailed)
+            .flex()
+            .items_center()
+            .gap_3()
+            .min_h(px(48.))
+            .child(self.person_avatar(p.initials.as_str(), 32.))
+            .child(text)
+            .child(details);
+        if p.call_can_mute {
+            row = row.child(self.icon_button(
+                gpui::SharedString::from(format!("mute-call-{}", p.local_id)),
+                ("mic-off", "Person stummschalten"),
+                ButtonStyle::Quiet,
+                Availability::available().hinted(),
+                LocalAction::Intent(talk_core::ui::presentation::UiIntent::MuteCallParticipant {
+                    call: call.scope,
+                    target: p.local_id,
+                }),
+                cx,
+            ));
+        }
+        row
+    }
     fn participant_row(&self, p: &ParticipantView) -> Div {
         let t = self.theme;
-        div()
+        self.style_list_row(div(), super::controls::RowSize::Detailed)
             .flex()
             .items_center()
             .gap_3()
@@ -191,6 +666,9 @@ impl Desktop {
                     )
                     .child(self.hint(p.role_label.as_str())),
             )
+            .when(p.raised_hand, |row| {
+                row.child(self.hint(self.l("Hand gehoben")))
+            })
             .child(
                 div()
                     .text_size(self.sp(12.))
@@ -354,34 +832,24 @@ impl Desktop {
     }
     pub(super) fn state_note(&self, symbol: &'static str, title: &str, detail: &str) -> Div {
         let t = self.theme;
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap_3()
-            .py_6()
-            .px_3()
-            .text_center()
-            .child(
-                div()
-                    .size(px(52.))
-                    .rounded(px(16.))
-                    .bg(t.subtle)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(self.scaled_icon(symbol, 26., t.accent)),
-            )
-            .child(
-                div()
-                    .text_size(self.sp(18.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(self.l(title).to_owned()),
-            )
-            .child(self.hint(self.l(detail)))
+        self.empty_state(
+            div()
+                .size(px(52.))
+                .rounded(px(16.))
+                .bg(t.subtle)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(self.scaled_icon(symbol, 26., t.accent)),
+            self.l(title).to_owned(),
+            self.l(detail),
+        )
+        .gap_3()
+        .py_6()
+        .px_3()
     }
     fn thread_body(&self, cx: &Context<Self>) -> Div {
-        let mut body = div().flex().flex_col().gap_4();
+        let mut body = div().flex().flex_col();
         let Some((context, root)) = self
             .thread_parent
             .filter(|(context, _)| Some(*context) == self.snapshot.selected)
@@ -416,6 +884,52 @@ impl Desktop {
             ))),
         };
         let state = load.unwrap_or(&projected).content_state(panel);
+        // The thread history endpoint can return replies without the root. The
+        // main timeline is already room-scoped and can supply it immediately.
+        let root_message = self
+            .snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .find(|message| message.local_id == root)
+            .or_else(|| panel.and_then(|panel| panel.thread_root_message.as_ref()))
+            .or_else(|| {
+                panel.and_then(|panel| {
+                    panel
+                        .thread_messages
+                        .as_slice()
+                        .iter()
+                        .find(|message| message.local_id == root)
+                })
+            });
+        if let Some(message) = root_message {
+            body = body.child(self.thread_message(message, false, cx));
+        } else if panel.is_some_and(|panel| {
+            matches!(
+                panel.thread_root_state,
+                talk_core::ui::conversation::RemoteState::Failed(_, _)
+            )
+        }) {
+            body = body.child(self.banner(
+                BannerRole::Error,
+                self.l("Thread-Anfang konnte nicht geladen werden."),
+            ));
+            body = body.child(self.button(
+                "thread-root-retry",
+                "Erneut versuchen",
+                ButtonStyle::Quiet,
+                true,
+                LocalAction::MessageIn(
+                    context,
+                    super::messaging::Action::Command(
+                        talk_core::ui::messaging::MessageAction::ThreadRoot(root),
+                    ),
+                ),
+                cx,
+            ));
+        } else {
+            body = body.child(self.loading_row(self.l("Thread-Anfang wird geladen …")));
+        }
         let collection = CollectionState::new(
             state,
             panel.is_some_and(|panel| !panel.thread_messages.as_slice().is_empty()),
@@ -431,211 +945,245 @@ impl Desktop {
         if let Some(panel) =
             panel.filter(|_| collection.shows_content() || collection.confirmed_empty())
         {
-            body = body.child(
-                self.hint(
-                    &self.count(
-                        super::localization::Count::Replies,
-                        panel
-                            .thread_messages
-                            .as_slice()
-                            .iter()
-                            .filter(|m| m.local_id != root)
-                            .count() as u64,
-                    ),
-                ),
-            );
-            for message in panel.thread_messages.as_slice() {
-                body = body.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(message.author.as_str().to_owned()),
-                        )
-                        .child(if message.metadata.deleted {
-                            self.l("Nachricht gelöscht.").to_owned()
-                        } else {
-                            message.body.as_str().to_owned()
-                        }),
-                );
-            }
-        }
-        let editing = self.message_ui.editing.is_some() || self.message_ui.pending_edit.is_some();
-        body.child(self.button(
-            "thread-reply",
-            "Im Thread antworten",
-            ButtonStyle::Secondary,
-            Availability::when(
-                state == ContentState::Ready
-                    && !editing
-                    && !self.drafts.pending(context)
-                    && panel.is_some_and(|panel| {
-                        panel
-                            .availability(talk_core::ui::messaging::MessageFeature::Threads)
-                            .enabled()
-                    }),
-                if editing {
-                    "Beende zuerst die aktuelle Bearbeitung."
-                } else {
-                    "Du hast dafür keine Berechtigung."
-                },
-            ),
-            LocalAction::Message(super::messaging::Action::ThreadReply(root)),
-            cx,
-        ))
-    }
-    fn search_body(&self, cx: &Context<Self>) -> Div {
-        let t = self.theme;
-        let q = self.search.read(cx).content.trim().to_lowercase();
-        let mut body =
-            div()
-                .flex()
-                .flex_col()
-                .gap_4()
-                .child(
-                    self.input_surface(&self.search, cx)
-                        .min_h(px(48.))
-                        .child(self.scaled_icon("search", 20., t.muted))
-                        .child(div().flex_1().min_w_0().child(self.search.clone()))
-                        .child(
-                            self.button(
-                                "search-people",
-                                "Personen suchen",
-                                ButtonStyle::Secondary,
-                                !q.is_empty()
-                                    && self.snapshot.active_account.is_some()
-                                    && self
-                                        .snapshot
-                                        .create_panel
-                                        .as_ref()
-                                        .is_none_or(|p| !p.state.pending()),
-                                LocalAction::FindSearchPeople,
-                                cx,
-                            ),
-                        ),
-                )
-                .child(self.hint(self.l(
-                    "Geladene Inhalte sofort filtern oder Personen im Serververzeichnis suchen.",
-                )))
-                .child(
-                    div().flex().flex_wrap().gap_3().children(
-                        [
-                            (SearchKind::All, "Alles"),
-                            (SearchKind::Messages, "Nachrichten"),
-                            (SearchKind::Files, "Dateien"),
-                            (SearchKind::Conversations, "Gespräche"),
-                            (SearchKind::People, "Personen"),
-                        ]
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, (k, l))| {
-                            self.chip(
-                                ("search-tab", i),
-                                l,
-                                (self.search_kind == k, i, 5),
-                                LocalAction::SearchKind(k),
-                                cx,
-                            )
-                        }),
-                    ),
-                );
-        if q.is_empty() {
-            return body.child(self.state_note(
-                "search",
-                "Gespräche und Personen suchen",
-                "Gib einen Namen oder einen Suchbegriff ein.",
-            ));
-        }
-        let mut count = 0;
-        if matches!(self.search_kind, SearchKind::All | SearchKind::People) {
-            let requested = self
-                .directory_query
-                .as_ref()
-                .is_some_and(|(account, query)| {
-                    Some(*account) == self.snapshot.active_account && query == &q
-                });
-            if requested {
-                if let Some(panel) = self
-                    .snapshot
-                    .create_panel
-                    .as_ref()
-                    .filter(|p| Some(p.account) == self.snapshot.active_account)
-                {
-                    body = body.child(self.title(self.l("Personen")));
-                    for person in panel.people.as_slice() {
-                        count += 1;
-                        body = body.child(
-                            self.button(
-                                gpui::SharedString::from(format!(
-                                    "search-person-{}",
-                                    person.id.local
-                                )),
-                                "",
-                                ButtonStyle::Quiet,
-                                !panel.state.pending(),
-                                LocalAction::CreateDirect(person.id),
-                                cx,
-                            )
-                            .w_full()
-                            .justify_start()
-                            .gap_3()
-                            .child(self.content_avatar(
-                                talk_core::ui::content::AssetTarget::PersonAvatar(person.id),
-                                "?",
-                                32.,
-                            ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(person.name.as_str().to_owned())
-                                    .child(self.hint(person.label.as_str())),
-                            ),
-                        );
-                    }
-                    if panel.state.pending() {
-                        body = body.child(self.hint(self.l("Personen werden gesucht …")));
-                    } else if matches!(
-                        panel.state,
-                        talk_core::ui::conversation::RemoteState::Failed(_, _)
-                    ) {
-                        body = body.child(
-                            self.hint(self.l("Personensuche fehlgeschlagen. Erneut versuchen.")),
-                        );
-                    } else if panel.people_loaded && panel.people.as_slice().is_empty() {
-                        body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
-                    }
-                }
-            } else {
-                body = body.child(self.hint(
-                    self.l("Mit „Personen suchen“ das freigegebene Serververzeichnis durchsuchen."),
-                ));
-            }
-        }
-        if matches!(
-            self.search_kind,
-            SearchKind::All | SearchKind::Conversations
-        ) {
-            for row in self
-                .snapshot
-                .conversations
+            let loaded = panel
+                .thread_messages
                 .as_slice()
                 .iter()
-                .filter(|r| r.title.as_str().to_lowercase().contains(&q))
+                .filter(|m| m.local_id != root)
+                .count() as u64;
+            let count =
+                root_message.map_or(loaded, |message| loaded.max(u64::from(message.reply_count)));
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_6()
+                    .py_3()
+                    .child(self.hint(&self.count(super::localization::Count::Replies, count)))
+                    .child(div().h(px(1.)).flex_1().bg(self.theme.border)),
+            );
+            if panel.thread_older.is_some() {
+                body = body.child(self.button(
+                    "thread-older-replies",
+                    "Ältere Antworten laden",
+                    ButtonStyle::Quiet,
+                    Availability::when(
+                        state == ContentState::Ready,
+                        "Die Verbindung ist derzeit nicht bereit.",
+                    ),
+                    LocalAction::MessageIn(context, super::messaging::Action::OlderThread(root)),
+                    cx,
+                ));
+            }
+            let mut previous = None;
+            for message in panel
+                .thread_messages
+                .as_slice()
+                .iter()
+                .filter(|message| message.local_id != root)
             {
-                count += 1;
-                body = body.child(self.option_row(
-                    scoped_id("search-room", row.context, 0, 0),
-                    ("chat", row.title.as_str(), row.subtitle.as_str()),
-                    true,
-                    LocalAction::Navigate(row.context),
+                let continuation = previous
+                    .is_some_and(|previous| self.thread_messages_grouped(previous, message));
+                body = body.child(self.thread_message(message, continuation, cx));
+                previous = Some(message);
+            }
+            if panel.thread_has_newer {
+                body = body.child(self.button(
+                    "thread-latest-replies",
+                    "Neueste Antworten anzeigen",
+                    ButtonStyle::Quiet,
+                    Availability::when(
+                        state == ContentState::Ready,
+                        "Die Verbindung ist derzeit nicht bereit.",
+                    ),
+                    LocalAction::Thread(context, root),
                     cx,
                 ));
             }
         }
+        body
+    }
+    fn current_thread_details(&self) -> Option<&talk_core::ui::messaging::ThreadDetails> {
+        let (context, root) = self.thread_parent?;
+        self.snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| panel.context == context)
+            .and_then(|panel| panel.thread_details.as_ref())
+            .filter(|details| details.root == root)
+    }
+    fn thread_options(&self, cx: &Context<Self>) -> Div {
+        let Some(details) = self.current_thread_details() else {
+            return div();
+        };
+        let Some((context, root)) = self.thread_parent else {
+            return div();
+        };
+        let can_change = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+            panel.context == context && (!panel.state.pending() || self.local_message_intents())
+        }) && self.can_change_thread(context);
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .border_b_1()
+            .border_color(self.theme.border);
+        let following = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| panel.context == context)
+            .and_then(|panel| {
+                panel.thread_following_intent.or_else(|| {
+                    panel
+                        .thread_change_prior
+                        .as_ref()
+                        .and_then(|(_, _, following)| *following)
+                })
+            })
+            .or_else(|| {
+                thread_following(
+                    &self.snapshot.threads,
+                    context,
+                    root,
+                    details.notification_level,
+                )
+            });
+        if following != Some(true) {
+            body = body.child(
+                self.button(
+                    "thread-follow",
+                    "Thread folgen",
+                    ButtonStyle::Quiet,
+                    can_change && details.notification_level.is_some(),
+                    LocalAction::ThreadNotification(0),
+                    cx,
+                )
+                .justify_start(),
+            );
+        }
+        if following != Some(false) {
+            body = body.child(
+                self.button(
+                    "thread-unfollow",
+                    "Thread nicht mehr folgen",
+                    ButtonStyle::Quiet,
+                    can_change && details.notification_level.is_some(),
+                    LocalAction::ThreadNotification(3),
+                    cx,
+                )
+                .justify_start(),
+            );
+            body = body.child(
+                div().flex().flex_wrap().gap_1().children(
+                    [
+                        ("thread-notify-all", "Alle Antworten", 1),
+                        ("thread-notify-mentions", "Nur Erwähnungen", 2),
+                    ]
+                    .into_iter()
+                    .map(|(id, label, level)| {
+                        self.button(
+                            id,
+                            label,
+                            ButtonStyle::Secondary,
+                            can_change,
+                            LocalAction::ThreadNotification(level),
+                            cx,
+                        )
+                        .when(details.notification_level == Some(level), |button| {
+                            button.bg(self.theme.selected)
+                        })
+                    }),
+                ),
+            );
+        }
+        let can_rename = details.rename == talk_core::ui::Decision::Allowed
+            || matches!(
+                self.snapshot.content,
+                ContentState::Ready | ContentState::Offline
+            ) && self.local_message_intents()
+                && details.rename != talk_core::ui::Decision::Denied;
+        if can_rename {
+            body = if self.thread_renaming {
+                body.child(
+                    self.input_surface(&self.thread_title, cx)
+                        .child(self.thread_title.clone()),
+                )
+                .child(self.button(
+                    "thread-save-title",
+                    "Speichern",
+                    ButtonStyle::Secondary,
+                    can_change && !self.thread_title.read(cx).content.trim().is_empty(),
+                    LocalAction::SaveThreadRename,
+                    cx,
+                ))
+            } else {
+                body.child(
+                    self.button(
+                        "thread-rename",
+                        "Thread umbenennen",
+                        ButtonStyle::Quiet,
+                        can_change,
+                        LocalAction::BeginThreadRename,
+                        cx,
+                    )
+                    .justify_start(),
+                )
+            };
+        }
+        body
+    }
+    fn search_body(&self, cx: &Context<Self>) -> Div {
+        let t = self.theme;
+        let q = self.search.read(cx).content.trim().to_lowercase();
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                self.input_surface(&self.search, cx)
+                    .min_h(px(48.))
+                    .child(self.scaled_icon("search", 20., t.muted))
+                    .child(div().flex_1().min_w_0().child(self.search.clone())),
+            )
+            .child(self.hint(self.l("Mit Pfeiltasten auswählen und mit Enter öffnen.")))
+            .child(
+                div().flex().flex_wrap().gap_3().children(
+                    [
+                        (SearchKind::All, "Alles"),
+                        (SearchKind::Messages, "Nachrichten"),
+                        (SearchKind::Files, "Dateien"),
+                        (SearchKind::Conversations, "Gespräche"),
+                        (SearchKind::People, "Personen"),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (k, l))| {
+                        self.chip(
+                            ("search-tab", i),
+                            l,
+                            (self.search_kind == k, i, 5),
+                            LocalAction::SearchKind(k),
+                            cx,
+                        )
+                    }),
+                ),
+            );
+        if self.search_kind == SearchKind::Messages {
+            return body.child(self.account_search_body(cx));
+        }
+        if matches!(
+            self.search_kind,
+            SearchKind::All | SearchKind::Conversations | SearchKind::People
+        ) {
+            body = body.child(self.switcher_results(cx));
+        }
+        if q.is_empty() {
+            return body;
+        }
+        let mut count = 0;
         if let Some(context) = self.snapshot.selected {
             if matches!(self.search_kind, SearchKind::All | SearchKind::Messages) {
                 for m in self
@@ -665,7 +1213,7 @@ impl Desktop {
                         .child(self.hint(&format!(
                             "{} · {}",
                             m.author.as_str(),
-                            m.time_label.as_str()
+                            super::localization::display_time(self.locale, m.time_label.as_str())
                         )));
                 }
             }
@@ -688,15 +1236,84 @@ impl Desktop {
                 }
             }
         }
-        if count == 0 && self.search_kind != SearchKind::People {
+        if count == 0 && matches!(self.search_kind, SearchKind::Messages | SearchKind::Files) {
             body=body.child(self.state_note("search","Keine lokalen Treffer","In den geladenen Inhalten wurde nichts gefunden. Eine vollständige Serversuche ist hier noch nicht verfügbar."));
         }
         body
     }
-    fn discover_body(&self, cx: &Context<Self>) -> Div {
-        div().flex().flex_col().gap_5().child(self.hint(self.l("Finde Gespräche, die für dich im Verzeichnis freigegeben sind.")))
-            .child(self.state_note("compass","Verzeichnis nicht verfügbar","Auffindbarkeit und Beitrittsrechte sind noch nicht bekannt. Ein Gastlink allein macht ein Gespräch nicht öffentlich auffindbar."))
-            .child(self.button_with_icon("discover-refresh",("Verzeichnis laden","refresh"),ButtonStyle::Secondary,Availability::when(false,"Das Gesprächsverzeichnis ist in diesem Client noch nicht verfügbar."),LocalAction::Notice(""),cx))
-            .child(self.button("discover-back","Zurück zu deinen Gesprächen",ButtonStyle::Quiet,true,LocalAction::Close,cx))
+}
+
+/// A thread-info response synthesizes the default notification level even for
+/// a non-attendee. Only a subscribed page, or a complete empty page, proves
+/// membership; an incomplete page leaves it unknown.
+fn thread_following(
+    list: &talk_core::ui::presentation::ThreadList,
+    context: ConversationRef,
+    root: u128,
+    notification_level: Option<i8>,
+) -> Option<bool> {
+    use talk_core::ui::presentation::ContentState;
+    if notification_level == Some(3) {
+        return Some(false);
+    }
+    if list.account != Some(context.account) {
+        return None;
+    }
+    if list
+        .entries
+        .as_slice()
+        .iter()
+        .any(|entry| entry.context == context && entry.root == root)
+    {
+        return Some(true);
+    }
+    if list.content == ContentState::Ready && list.offset == 0 && !list.has_next {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod thread_follow_tests {
+    use super::*;
+    use talk_core::ui::presentation::{ThreadList, ThreadView};
+    use talk_core::ui::{AccountId, AccountScope, ConversationId, HostId, RuntimeGeneration, Text};
+
+    #[test]
+    fn default_level_is_not_proof_of_membership() {
+        let account = AccountId::from_local(1);
+        let scope = AccountScope {
+            account,
+            runtime: RuntimeGeneration::from_local(1),
+        };
+        let context = ConversationRef {
+            account: scope,
+            conversation: ConversationId {
+                account,
+                host: HostId::from_local(1),
+                local: 2,
+            },
+        };
+        let mut list = ThreadList {
+            account: Some(scope),
+            ..Default::default()
+        };
+        assert_eq!(thread_following(&list, context, 7, Some(0)), None);
+        list.content = ContentState::Ready;
+        assert_eq!(thread_following(&list, context, 7, Some(0)), Some(false));
+        list.has_next = true;
+        assert_eq!(thread_following(&list, context, 7, Some(0)), None);
+        list.entries
+            .try_push(ThreadView {
+                context,
+                root: 7,
+                title: Text::new("Planning").unwrap(),
+                replies: 0,
+                last_message: None,
+            })
+            .unwrap();
+        assert_eq!(thread_following(&list, context, 7, Some(0)), Some(true));
+        assert_eq!(thread_following(&list, context, 7, Some(3)), Some(false));
     }
 }

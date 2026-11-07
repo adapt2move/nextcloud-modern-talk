@@ -21,8 +21,10 @@ from vendor import verify_gpui
 ROOT = Path(__file__).resolve().parents[1]
 GRAPH = {
     "talk-core": ("crates/talk-core", {"pulldown-cmark", "url"}),
-    "nextcloud-talk-api": ("crates/nextcloud-talk-api", {"reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "cookie", "futures-lite", "futures-util", "tokio-tungstenite", "rustls", "rustls-native-certs"}),
-    "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "rusqlite", "dirs", "jiff", "semver", "self_update", "sha2", "tempfile", "flate2", "tar", "zip", "webrtc", "rtc", "async-trait", "gstreamer", "gstreamer-app", "gstreamer-video", "futures-util"}),
+    "nextcloud-talk-api": ("crates/nextcloud-talk-api", {"reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "cookie", "futures-lite", "futures-util", "tokio-tungstenite", "rustls", "rustls-native-certs", "percent-encoding", "roxmltree", "time"}),
+    # Image decoding belongs to the adapter when preparing a bounded upload;
+    # native presentation still receives neither selected paths nor image bytes.
+    "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "rusqlite", "dirs", "jiff", "semver", "self_update", "sha2", "tempfile", "flate2", "tar", "zip", "webrtc", "rtc", "async-trait", "gstreamer", "gstreamer-app", "gstreamer-video", "futures-util", "image"}),
     "talk-bootstrap": ("apps/bootstrap", {"talk-core", "talk-adapters"}),
     "talk-desktop": ("apps/desktop", {"talk-core", "talk-adapters", "gpui", "unicode-segmentation", "atomicwrites", "cpal", "gstreamer", "gstreamer-app", "gstreamer-video", "image"}),
 }
@@ -126,6 +128,65 @@ def allow_input_caret_timer(source: str) -> str:
     return source[:start] + method + source[end - 1:]
 
 
+def allow_call_clock(source: str) -> str:
+    """Permit the call view's single retained, cancellable visual clock only."""
+    code = import_source(source)
+    starts = list(re.finditer(r"\bfn\s+start_call_clock\s*\([^;{}]*\)\s*\{", code))
+    require(len(starts) == 1, "native call view must have one clock owner")
+    if len(starts) != 1:
+        return source
+    start = starts[0].end()
+    depth, end = 1, start
+    while depth and end < len(code):
+        depth += (code[end] == '{') - (code[end] == '}')
+        end += 1
+    require(depth == 0, "native call clock method is not closed")
+    if depth:
+        return source
+    method = source[start:end - 1]
+    spawn = r"\bcx\s*\.\s*spawn\s*\("
+    timer = r"\bcx\s*\.\s*background_executor\s*\(\s*\)\s*\.\s*timer\s*\(\s*CALL_CLOCK_INTERVAL\s*\)"
+    require(len(re.findall(spawn, method)) == 1, "call clock must own one foreground task")
+    require(len(re.findall(timer, method)) == 1, "call clock must use one visual interval")
+    method = re.sub(spawn, "cx.reviewed_call_clock(", method)
+    method = re.sub(timer, "cx.reviewed_call_interval()", method)
+    return source[:start] + method + source[end - 1:]
+
+
+def allow_switcher_debounce(source: str) -> str:
+    """One retained foreground debounce may submit a typed directory intent.
+
+    All other worker and I/O calls remain subject to the ordinary boundary scan.
+    The view owns cancellation, query/account validation and a bounded retry count.
+    """
+    code = import_source(source)
+    starts = list(re.finditer(r"\bfn\s+schedule_switcher_directory\s*\([^;{}]*\)\s*\{", code))
+    if not starts:
+        return source
+    require(len(starts) == 1, "switcher must have one debounce owner")
+    if len(starts) != 1:
+        return source
+    start = starts[0].end()
+    depth, end = 1, start
+    while depth and end < len(code):
+        depth += (code[end] == '{') - (code[end] == '}')
+        end += 1
+    require(depth == 0, "switcher debounce method is not closed")
+    if depth:
+        return source
+    method = source[start:end - 1]
+    calls = list(re.finditer(r"\bcx\s*\.\s*spawn\s*\(", code[start:end - 1]))
+    require(len(calls) == 1, "switcher must own one foreground debounce")
+    if len(calls) != 1:
+        return source
+    call = calls[0]
+    method = method[:call.start()] + "cx.reviewed_switcher_debounce(" + method[call.end():]
+    timer = r"\bcx\s*\.\s*background_executor\s*\(\s*\)\s*\.\s*timer\s*\(\s*delay\s*\)"
+    require(len(re.findall(timer, method)) == 1, "switcher must use one platform debounce timer")
+    method = re.sub(timer, "cx.reviewed_switcher_timer()", method)
+    return source[:start] + method + source[end - 1:]
+
+
 def allow_native_export_waiter(source: str) -> str:
     """One foreground waiter observes bounded snapshots and submits typed intents.
 
@@ -161,7 +222,7 @@ def allow_native_export_waiter(source: str) -> str:
 # The markup module is a bounded pure user-text parser, separately inspected by
 # the core I/O guard. Its public records use Text/Page, without transport authority.
 UI_EXPORTS = {
-    *(('crate', 'bounded', name) for name in ('LimitExceeded', 'Page', 'Text')),
+    *(('crate', 'bounded', name) for name in ('ClipboardImage', 'LimitExceeded', 'Page', 'Text')),
     ('crate', 'identity', 'PersistenceState'),
     ('crate', 'markup'),
     *(('crate', 'ids', name) for name in (
@@ -172,14 +233,17 @@ UI_EXPORTS = {
 }
 # These modules contain only recursively inspected bounded presentation values.
 UI_MODULE_TYPES = {
-    "presentation": {"Completion", "ConversationRef", "FeatureSupport", "RequestId", "MessageView"},
+    "presentation": {"Completion", "ConversationRef", "FeatureSupport", "RequestId", "MessageView", "Presence"},
     "conversation": {
         "Availability", "RemoteState", "ConversationPanel", "ConversationAction",
         "AccountPersonRef", "AccountPerson", "CreateAction", "CreationResult", "CreatePanel",
         "CsvFileError", "CsvFileOutcome", "CsvFileResult",
     },
-    "messaging": {"MessageMetadata", "MessagePanel", "MessageAction", "SystemEvent"},
+    "messaging": {"ComposerDraft", "MessageMetadata", "MessagePanel", "MessageAction", "MessageActionError", "SystemEvent"},
     "content": {"ContentPanel", "ContentAction", "AttachmentRef", "FileExportView"},
+    "search": {"Action", "Filters", "Hit", "Panel"},
+    "discover": {"Action", "Panel", "Room"},
+    "reference": {"Preview", "Previews"},
 }
 UNBOUNDED = (
     r"\b(?:String|Vec|Box|VecDeque|LinkedList|HashMap|HashSet|BTreeMap|BTreeSet|"
@@ -293,6 +357,9 @@ def check() -> None:
         "rustls": {"default-features": False, "features": ["std", "aws_lc_rs", "tls12"]},
         "rustls-native-certs": {"default-features": False},
         "reqwest": {"default-features": False, "features": ["rustls", "form", "stream"]},
+        "percent-encoding": {},
+        "roxmltree": {},
+        "time": {"default-features": False, "features": ["parsing"]},
         "tokio": {"default-features": False, "features": ["rt", "time", "sync", "macros", "net", "io-util", "fs"]},
         "serde": {"default-features": False, "features": ["std"]},
         "serde_json": {"default-features": False, "features": ["std"]},
@@ -355,8 +422,10 @@ def check() -> None:
     for name, (directory, expected) in GRAPH.items():
         manifest = read_toml(ROOT / directory / "Cargo.toml")
         require(manifest["package"]["name"] == name, f"{directory}: unexpected package name")
-        require(set(manifest) <= ({"package", "dependencies", "lints", "features", "example", "target", "dev-dependencies"} if name == "talk-adapters" else {"package", "dependencies", "lints", "features"} if name == "nextcloud-talk-api" else {"package", "dependencies", "lints", "target"} if name == "talk-desktop" else {"package", "dependencies", "lints"}),
+        require(set(manifest) <= ({"package", "dependencies", "lints", "features", "example", "target", "dev-dependencies"} if name == "talk-adapters" else {"package", "dependencies", "lints", "features"} if name == "nextcloud-talk-api" else {"package", "dependencies", "lints", "target", "features"} if name == "talk-desktop" else {"package", "dependencies", "lints"}),
                 f"{name}: unreviewed manifest section")
+        if name == "talk-desktop":
+            require(manifest.get("features") == {"default": [], "dev-probes": ["talk-adapters/backend-test"]}, "desktop probes must remain explicit and default-off")
         package_fields = {"name", "version", "edition", "rust-version", "license", "publish"}
         if name == "talk-adapters":
             package_fields.add("autoexamples")
@@ -379,8 +448,12 @@ def check() -> None:
         platform = {target: {"dependencies": {dep: {"workspace": True} for dep in dependencies}}
                     for target, dependencies in platform_edges.items()}
         if name == "talk-adapters":
-            # Legacy fixtures must not unify the shipping D-Bus/credential graph.
+            # Legacy fixtures and the opt-in desktop portal capture probe must
+            # not expand the shipping adapter graph.
             platform['cfg(target_os = "linux")']["dev-dependencies"] = {
+                "ashpd": {"workspace": True},
+                "async-io": {"workspace": True},
+                "futures-lite": {"workspace": True},
                 "keyring-core": {"workspace": True},
                 "secret-service": {"workspace": True},
                 "zbus-secret-service-keyring-store": {"workspace": True},
@@ -421,7 +494,7 @@ def check() -> None:
         platform_edges = PLATFORM_EDGES if name == "talk-adapters" else DESKTOP_PLATFORM_EDGES if name == "talk-desktop" else {}
         expected_edges = GRAPH.get(name, (None, set()))[1] | set().union(*platform_edges.values())
         if name == "talk-adapters":
-            expected_edges |= {"secret-service", "zbus-secret-service-keyring-store"}
+            expected_edges |= {"secret-service", "zbus-secret-service-keyring-store", "ashpd", "async-io", "futures-lite"}
         require({dep.split()[0] for dep in package.get("dependencies", [])} == expected_edges,
                 f"{name}: lockfile dependency mismatch")
     for package in packages:
@@ -483,8 +556,9 @@ def check() -> None:
             require(paths is not None, "boundary imports need explicit paths without aliases/globs")
             for imported in paths or []:
                 allowed = len(imported) == 2 and imported[0] == "super" and imported[1] in {
-                    "AccountId", "AccountScope", "CallScope", "ConversationId", "Decision", "MediaIntent", "Page", "SubmitError", "Text", "UnavailableReason", "UserIntent", "AddressInputError", "ServerInput"
+                    "AccountId", "AccountScope", "CallScope", "ClipboardImage", "ConversationId", "Decision", "MediaIntent", "Page", "SubmitError", "Text", "UnavailableReason", "UserIntent", "AddressInputError", "ServerInput"
                 }
+                allowed |= imported == ("super", "markup", "Prepared")
                 allowed |= imported in {
                     ("crate", "preferences", "navigation", "NavigationAccountKey"),
                     ("crate", "preferences", "navigation", "NavigationRoomKey"),
@@ -531,9 +605,13 @@ def check() -> None:
         # GPUI's read allocation is not bounded; admission and privacy gating
         # belong to the input owner/producer. Other views cannot access the OS.
         hidden_io = source
+        if path == native / "presentation/mod.rs":
+            hidden_io = allow_call_clock(hidden_io)
         if path == native / "presentation/input.rs":
             hidden_io = allow_input_caret_timer(hidden_io)
             hidden_io = re.sub(r"\.(?:read_from_clipboard|write_to_clipboard)\s*\(", ".reviewed_input_clipboard(", hidden_io)
+        if path == native / "presentation/switcher.rs":
+            hidden_io = allow_switcher_debounce(hidden_io)
         if path == native / "presentation/attachments.rs":
             hidden_io = allow_native_export_waiter(hidden_io)
         if path == native / "presentation/conversation_dialog.rs":

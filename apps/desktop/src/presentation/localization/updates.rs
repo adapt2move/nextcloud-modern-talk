@@ -113,8 +113,8 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Iniciar la versión anterior",
     ),
     (
-        "{received} von {total} MiB heruntergeladen.",
-        "{received} of {total} MiB downloaded.",
-        "{received} de {total} MiB descargados.",
+        "{received} von {total} heruntergeladen.",
+        "{received} of {total} downloaded.",
+        "{received} de {total} descargados.",
     ),
 ];

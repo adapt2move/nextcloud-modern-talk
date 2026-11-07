@@ -31,10 +31,50 @@ pub(super) fn public_privacy(value: &Value) -> Option<bool> {
         _ => None,
     }
 }
+fn own_choice(
+    status: nextcloud_talk_api::presence::UserStatus,
+) -> Option<talk_core::preferences::account::StatusChoice> {
+    use nextcloud_talk_api::presence::UserStatus as S;
+    use talk_core::preferences::account::StatusChoice as P;
+    match status {
+        S::Online => Some(P::Online),
+        S::Away => Some(P::Away),
+        S::DoNotDisturb => Some(P::DoNotDisturb),
+        S::Invisible => Some(P::Invisible),
+        S::Offline => Some(P::Offline),
+        S::Unknown => None,
+    }
+}
+fn apply_status(
+    values: &mut AccountPreferences,
+    status: nextcloud_talk_api::presence::StatusDetails,
+) {
+    values.user_status_observed = true;
+    values.user_presence = own_choice(status.presence);
+    let icon = status.icon.filter(|s| !s.is_empty());
+    let message = status.message.filter(|s| !s.is_empty());
+    if icon.is_some() || message.is_some() {
+        values.status_message = Some(talk_core::preferences::account::StatusMessage {
+            icon: icon
+                .as_deref()
+                .and_then(|s| talk_core::bounded::Text::new(s).ok()),
+            message: message
+                .as_deref()
+                .and_then(|s| talk_core::bounded::Text::new(s).ok()),
+            clear_at: status.clear_at,
+        });
+    }
+}
 impl Capabilities {
     pub(super) fn account_preferences(&self, scope: AccountScope) -> AccountPreferences {
         AccountPreferences {
             scope,
+            user_status_enabled: self.user_status_enabled,
+            user_presence: None,
+            user_status_observed: false,
+            user_status_emoji: self.user_status_emoji,
+            status_message: None,
+            predefined_statuses: None,
             send_read_receipts: self
                 .has("chat-read-status")
                 .then_some(self.read_receipts)
@@ -98,6 +138,19 @@ impl NextcloudClient {
         change: AccountPreferenceChange,
         caps: &Capabilities,
     ) -> Result<ProtocolReply, PortError> {
+        match &change {
+            AccountPreferenceChange::UserPresence(choice) => {
+                return self
+                    .set_user_presence(context, request, *choice, caps)
+                    .await;
+            }
+            AccountPreferenceChange::StatusMessage(value) => {
+                return self
+                    .change_status_message(context, request, value, caps)
+                    .await;
+            }
+            _ => {}
+        }
         let before = caps.account_preferences(context.scope);
         let (key, value, available) = match &change {
             AccountPreferenceChange::SendReadReceipts(enabled) => (
@@ -110,6 +163,10 @@ impl NextcloudClient {
                 if *enabled { "0".into() } else { "1".into() },
                 before.share_typing_status.is_some(),
             ),
+            AccountPreferenceChange::UserPresence(_)
+            | AccountPreferenceChange::StatusMessage(_) => {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
             AccountPreferenceChange::AttachmentFolder(folder) => (
                 "attachment_folder",
                 folder.as_str().to_owned(),
@@ -141,6 +198,8 @@ impl NextcloudClient {
             AccountPreferenceChange::AttachmentFolder(value) => {
                 values.attachment_folder.as_ref() == Some(value)
             }
+            AccountPreferenceChange::UserPresence(_)
+            | AccountPreferenceChange::StatusMessage(_) => false,
         };
         if !matches {
             return Err(self.error(ErrorKind::Uncertain));
@@ -154,6 +213,149 @@ impl NextcloudClient {
             values,
         }))
     }
+    pub(super) async fn read_account_preferences(
+        &mut self,
+        context: &OperationContext,
+        caps: &Capabilities,
+    ) -> Result<AccountPreferences, PortError> {
+        let mut values = caps.account_preferences(context.scope);
+        if caps.user_status_enabled == Some(true) {
+            match self.transport.own_status_details(context).await {
+                Ok(status) => apply_status(&mut values, status),
+                Err(error) if error.kind == ErrorKind::NotFound => {
+                    values.user_status_observed = true
+                }
+                Err(_) => {}
+            }
+            if let Ok(list) = self.transport.predefined_statuses(context).await {
+                let mut page = talk_core::bounded::Page::empty();
+                let mut valid = true;
+                for item in list {
+                    let item = (|| {
+                        Some(talk_core::preferences::account::PredefinedStatus {
+                            id: talk_core::bounded::Text::new(&item.id).ok()?,
+                            icon: talk_core::bounded::Text::new(&item.icon).ok()?,
+                            message: talk_core::bounded::Text::new(&item.message).ok()?,
+                        })
+                    })();
+                    if item.is_none_or(|v| page.try_push(v).is_err()) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if valid {
+                    values.predefined_statuses = Some(page);
+                }
+            }
+        }
+        self.transport.validate(context)?;
+        Ok(values)
+    }
+
+    async fn set_user_presence(
+        &mut self,
+        context: &OperationContext,
+        request: RequestId,
+        choice: talk_core::preferences::account::StatusChoice,
+        caps: &Capabilities,
+    ) -> Result<ProtocolReply, PortError> {
+        use nextcloud_talk_api::presence::StatusChoice as S;
+        use talk_core::preferences::account::StatusChoice as P;
+        if caps.user_status_enabled != Some(true) {
+            return Err(self.error(ErrorKind::Unsupported));
+        }
+        let choice = match choice {
+            P::Online => S::Online,
+            P::Away => S::Away,
+            P::DoNotDisturb => S::DoNotDisturb,
+            P::Invisible => S::Invisible,
+            P::Offline => return Err(self.error(ErrorKind::Unsupported)),
+        };
+        self.transport.set_own_user_status(context, choice).await?;
+        // A fresh read incorporates server-side calendar automation. A failed
+        // read after dispatch is uncertain and must never cause a write replay.
+        let observed = self
+            .transport
+            .own_status_details(context)
+            .await
+            .map_err(|_| self.error(ErrorKind::Uncertain))?;
+        let mut values = caps.account_preferences(context.scope);
+        apply_status(&mut values, observed);
+        self.transport
+            .validate(context)
+            .map_err(|_| self.error(ErrorKind::Uncertain))?;
+        Ok(ProtocolReply::Preferences(AccountPreferenceResult {
+            request,
+            values,
+        }))
+    }
+
+    async fn change_status_message(
+        &mut self,
+        context: &OperationContext,
+        request: RequestId,
+        change: &talk_core::preferences::account::StatusMessageChange,
+        caps: &Capabilities,
+    ) -> Result<ProtocolReply, PortError> {
+        use nextcloud_talk_api::presence::MessageChange as M;
+        use talk_core::preferences::account::{StatusClearAfter as T, StatusMessageChange as C};
+        if caps.user_status_enabled != Some(true) {
+            return Err(self.error(ErrorKind::Unsupported));
+        }
+        let expiration = |choice| -> Result<Option<u64>, PortError> {
+            let seconds = match choice {
+                T::Never => return Ok(None),
+                T::ThirtyMinutes => 1800,
+                T::OneHour => 3600,
+                T::FourHours => 14400,
+            };
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .and_then(|v| v.as_secs().checked_add(seconds))
+                .map(Some)
+                .ok_or_else(|| self.error(ErrorKind::Unconfigured))
+        };
+        let command = match change {
+            C::Custom {
+                icon,
+                message,
+                clear_after,
+            } => {
+                if icon.is_some() && caps.user_status_emoji != Some(true) {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                M::Custom {
+                    icon: icon.as_ref().map(|s| s.as_str().to_owned()),
+                    message: message.as_str().to_owned(),
+                    clear_at: expiration(*clear_after)?,
+                }
+            }
+            C::Predefined { id, clear_after } => M::Predefined {
+                id: id.as_str().to_owned(),
+                clear_at: expiration(*clear_after)?,
+            },
+            C::Clear => M::Clear,
+        };
+        self.transport.set_status_message(context, &command).await?;
+        let observed = self.transport.own_status_details(context).await;
+        let mut values = caps.account_preferences(context.scope);
+        match observed {
+            Ok(status) => apply_status(&mut values, status),
+            Err(error) if matches!(change, C::Clear) && error.kind == ErrorKind::NotFound => {
+                values.user_status_observed = true;
+            }
+            Err(_) => return Err(self.error(ErrorKind::Uncertain)),
+        }
+        self.transport
+            .validate(context)
+            .map_err(|_| self.error(ErrorKind::Uncertain))?;
+        Ok(ProtocolReply::Preferences(AccountPreferenceResult {
+            request,
+            values,
+        }))
+    }
+
     pub(super) async fn set_archived(
         &mut self,
         context: &OperationContext,

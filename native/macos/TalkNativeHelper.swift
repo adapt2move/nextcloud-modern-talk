@@ -4,6 +4,9 @@ import AppKit
 import CoreGraphics
 import Foundation
 import UserNotifications
+import ScreenCaptureKit
+import CoreMedia
+import CoreVideo
 
 func emit(_ line: String) {
     guard let data = (line + "\n").data(using: .utf8), data.count <= 64 else { return }
@@ -42,6 +45,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     let banner: Bool
     let sound: NotificationSound
     let call: Bool
+    let reminder: Bool
     let accept: Bool
     let decline: Bool
     let language: String
@@ -55,7 +59,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
               let title = decodeHex(arguments[3], maximum: 128),
               let body = decodeHex(arguments[4], maximum: 512),
               let sound = NotificationSound(rawValue: arguments[6]),
-              [5, 7, 8, 9].allSatisfy({ arguments[$0] == "0" || arguments[$0] == "1" }),
+              [5, 8, 9].allSatisfy({ arguments[$0] == "0" || arguments[$0] == "1" }),
+              ["0", "1", "2"].contains(arguments[7]),
               arguments[10] == "0", // Reserved: delivery never requests permission.
               ["en", "de", "es"].contains(arguments[11]) else { return nil }
         identifier = arguments[2]
@@ -64,6 +69,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         banner = arguments[5] == "1"
         self.sound = sound
         call = arguments[7] == "1"
+        reminder = arguments[7] == "2"
         accept = call && arguments[8] == "1"
         decline = call && arguments[9] == "1"
         language = arguments[11]
@@ -87,7 +93,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             _ = try? FileHandle.standardInput.read(upToCount: 16)
             DispatchQueue.main.async { self?.finish(withdraw: true) }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (call ? 40 : 8)) { [weak self] in self?.finish(withdraw: true) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + ((call || reminder) ? 40 : 8)) { [weak self] in self?.finish(withdraw: true) }
         center.getNotificationSettings { [weak self] settings in
             guard let self = self else { return }
             self.submit(settings)
@@ -137,7 +143,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                     if error != nil { emit("failed"); self.finish(withdraw: true); return }
                     self.submitted = true
                     emit("submitted\t\(canBanner ? 1 : 0)\t\(canSound ? 1 : 0)")
-                    if !self.call { self.finish(withdraw: false) }
+                    if !self.call && !self.reminder { self.finish(withdraw: false) }
                 }
             }
         }
@@ -156,8 +162,11 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         DispatchQueue.main.async {
             defer { completionHandler() }
-            guard self.live, self.submitted, self.call, response.notification.request.identifier == self.identifier,
+            guard self.live, self.submitted, (self.call || self.reminder), response.notification.request.identifier == self.identifier,
                   response.notification.request.content.userInfo["nmt_id"] as? String == self.identifier else { return }
+            if self.reminder && response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+                emit("open"); self.finish(withdraw: true); return
+            }
             // Clicking the banner itself never accepts a call. Only these explicit actions
             // reach Rust, where the current admitted dispatcher must revalidate again.
             if response.actionIdentifier == "accept" && self.accept { emit("accept") }
@@ -212,6 +221,88 @@ func previewPDF(large: Bool) {
     FileHandle.standardOutput.write(png)
 }
 
+// Minimal binary screen bridge. The parent owns lifetime and generation. No
+// audio, persistent source, source replacement, or disk output is supported.
+final class ScreenCapture: NSObject, SCContentSharingPickerObserver, SCStreamOutput, SCStreamDelegate {
+    var stream: SCStream?
+    var selected = false
+    let queue = DispatchQueue(label: "talk.screen.frames")
+    // A static source may produce only one complete frame. Admit that first
+    // frame immediately, then cap subsequent callbacks at the screen cadence.
+    var last: UInt64 = 0
+
+    func begin() {
+        let picker = SCContentSharingPicker.shared
+        var configuration = SCContentSharingPickerConfiguration()
+        configuration.allowedPickerModes = [.singleDisplay, .singleWindow]
+        configuration.allowsChangingSelectedContent = false
+        picker.defaultConfiguration = configuration
+        picker.maximumStreamCount = 1
+        picker.add(self)
+        picker.isActive = true
+        // Closing stdin is the independent local stop path, including while
+        // the picker is still open. Rust also kills/reaps a stalled helper.
+        FileHandle.standardInput.readabilityHandler = { input in
+            if input.availableData.isEmpty { exit(0) }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 90) { if !self.selected { exit(3) } }
+        picker.present()
+    }
+    func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) { exit(4) }
+    func contentSharingPickerStartDidFailWithError(_ error: Error) { exit(2) }
+    func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
+        // A second picker event cannot silently replace the user's source.
+        guard !selected else { return }
+        selected = true
+        picker.isActive = false
+        let configuration = SCStreamConfiguration()
+        let points = filter.contentRect.size
+        let size = CGSize(width: points.width * CGFloat(filter.pointPixelScale), height: points.height * CGFloat(filter.pointPixelScale))
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { exit(2) }
+        let scale = min(1.0, min(1920.0 / max(2.0, size.width), 1080.0 / max(2.0, size.height)))
+        configuration.width = max(2, Int(size.width * scale) / 2 * 2)
+        configuration.height = max(2, Int(size.height * scale) / 2 * 2)
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 10)
+        configuration.queueDepth = 3
+        configuration.showsCursor = true
+        configuration.capturesAudio = false
+        let capture = SCStream(filter: filter, configuration: configuration, delegate: self)
+        self.stream = capture
+        do { try capture.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue) }
+        catch { exit(2) }
+        capture.startCapture { error in if error != nil { exit(2) } }
+    }
+    func stream(_ stream: SCStream, didStopWithError error: Error) { exit(5) }
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen, sampleBuffer.isValid,
+              let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let status = attachments.first?[.status] as? Int else { return }
+        if status == SCFrameStatus.stopped.rawValue || status == SCFrameStatus.suspended.rawValue { exit(5) }
+        guard status == SCFrameStatus.complete.rawValue, let image = sampleBuffer.imageBuffer else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now - last >= 100_000_000 else { return }
+        last = now
+        let width = CVPixelBufferGetWidth(image), height = CVPixelBufferGetHeight(image)
+        guard width > 0, height > 0, width <= 1920, height <= 1080, width % 2 == 0, height % 2 == 0,
+              CVPixelBufferGetPixelFormatType(image) == kCVPixelFormatType_32BGRA,
+              CVPixelBufferLockBaseAddress(image, .readOnly) == kCVReturnSuccess else { exit(2) }
+        defer { CVPixelBufferUnlockBaseAddress(image, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(image) else { exit(2) }
+        let stride = CVPixelBufferGetBytesPerRow(image)
+        let (backingSize, overflow) = stride.multipliedReportingOverflow(by: height)
+        guard !overflow, stride >= width * 4,
+              CVPixelBufferGetDataSize(image) >= backingSize else { exit(2) }
+        var header = [UInt32(width).bigEndian, UInt32(height).bigEndian]
+        var frame = header.withUnsafeMutableBytes { Data($0) }
+        frame.reserveCapacity(8 + width * height * 4)
+        for row in 0..<height { frame.append(base.advanced(by: row * stride).assumingMemoryBound(to: UInt8.self), count: width * 4) }
+        // A serial callback and the bounded OS pipe provide backpressure. The
+        // parent drains on a dedicated reader and kills us if capture is revoked.
+        do { try FileHandle.standardOutput.write(contentsOf: frame) } catch { exit(2) }
+    }
+}
+
 @main
 struct TalkNativeHelper {
     // AppKit entry stays on the main actor, including Swift 5 builds.
@@ -221,6 +312,12 @@ struct TalkNativeHelper {
         guard Bundle.main.bundleIdentifier == "org.adapt2move.nextcloud-modern-talk" else { exit(2) }
         if arguments.count == 3 && arguments[1] == "pdf-preview" && ["large", "thumbnail"].contains(arguments[2]) {
             previewPDF(large: arguments[2] == "large")
+        } else if arguments.count == 2 && arguments[1] == "screen-capture" {
+            let app = NSApplication.shared
+            app.setActivationPolicy(.accessory)
+            let capture = ScreenCapture()
+            capture.begin()
+            withExtendedLifetime(capture) { app.run() }
         } else if arguments.count == 2 && arguments[1] == "reduce-motion" {
             emit(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? "true" : "false")
 

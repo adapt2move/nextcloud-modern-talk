@@ -28,6 +28,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         python("tools/check_docs.py")
+        python("tools/ui/generate-materials.py", "--check")
         python("tools/check_architecture.py")
         python("tools/release/check_workflows.py")
         cargo("fmt", "--all", "--", "--check")
@@ -37,6 +38,10 @@ def main(argv=None):
             python("tools/release/check_workflows.py", "--actionlint")
             for script in (
                 "tools/check_architecture_tests.py",
+                "tests/lab/test_resilience.py",
+                "tools/media/test_recovery_checks.py",
+                "tools/media/test_signaling_metadata.py",
+                "tools/media/test_ice_settings.py",
                 "tools/ci/workflow_policy_tests.py",
                 "tools/ci/test_prepare_gstreamer.py",
                 "tools/ci/test_macos_signing.py",

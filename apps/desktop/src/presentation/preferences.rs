@@ -63,6 +63,53 @@ pub(super) fn update_error_label(
 }
 
 pub trait ComputerSettingsPort {
+    fn stop_voice_review_playback(&self) {}
+    fn voice_review_playback(&self) -> Option<talk_core::ui::content::VoiceReviewPlayback> {
+        None
+    }
+    fn voice_review_play(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+        _play: bool,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn voice_review_seek(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+        _position_ms: u64,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn voice_review_speed(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+        _speed: u8,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn voice_snapshot(&self) -> Option<talk_core::ui::content::VoiceSnapshot> {
+        None
+    }
+    fn start_voice(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn stop_voice(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+        _cancel: bool,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn send_voice(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
     /// Resolve against the platform owner's cached system timezone. These calls
     /// perform no timezone discovery, storage or network work on the UI thread.
     fn resolve_deadline(
@@ -74,6 +121,13 @@ pub trait ComputerSettingsPort {
     > {
         Err(talk_core::preferences::time::LocalTimeError::Unavailable)
     }
+    fn search_date_boundary(
+        &self,
+        _local: talk_core::ui::Text<32>,
+        _end: bool,
+    ) -> Result<talk_core::ui::Text<32>, talk_core::preferences::time::LocalTimeError> {
+        Err(talk_core::preferences::time::LocalTimeError::Unavailable)
+    }
     fn local_datetime(&self, _timestamp: u64) -> Option<talk_core::ui::Text<32>> {
         None
     }
@@ -83,6 +137,10 @@ pub trait ComputerSettingsPort {
     /// Cached OS preference only; the platform owner observes changes outside
     /// rendering. Unknown support suppresses nonessential motion.
     fn reduced_motion(&self) -> bool {
+        true
+    }
+    /// Unknown support uses opaque, flat materials.
+    fn reduced_transparency(&self) -> bool {
         true
     }
     /// Non-macOS native picker support, observed by the platform owner.
@@ -310,10 +368,13 @@ impl Desktop {
         self.appearance = snapshot.active.appearance;
         self.scale = snapshot.active.scale.percent();
         self.compact = snapshot.active.sidebar_density == SidebarDensity::Compact;
-        self.locale = match snapshot.active.locale {
+        let locale = match snapshot.active.locale {
             LocalePreference::System => self.settings_port.system_locale(),
             preference => preference.resolve(&[]),
         };
+        self.account_search_ui
+            .reformat_dates(self.locale, locale, cx);
+        self.locale = locale;
         self.preferences = snapshot;
         self.apply_device_preferences();
         // Labels change without replacing editor entities, drafts or scoped handles.

@@ -9,6 +9,67 @@ use tokio::{
     net::TcpListener,
 };
 
+#[test]
+fn marking_the_first_message_unread_uses_talks_explicit_sentinel() {
+    let room = RoomToken::parse("room1234").unwrap();
+    let (method, route, _, form, _, mutation) =
+        plan(&Request::MarkUnreadFromStart { room }).unwrap();
+    assert_eq!(method, Method::POST);
+    assert!(route.ends_with("/chat/room1234/read"));
+    assert_eq!(form, vec![("lastReadMessage", "-2".into())]);
+    assert!(mutation);
+}
+
+#[tokio::test]
+async fn empty_unread_forward_page_is_not_a_redirect() {
+    let server = Server::start(vec![(304, String::new(), Duration::ZERO)]).await;
+    let (mut client, clock) = client(&server);
+    let response = client
+        .request(
+            &context(&clock),
+            Request::Chat {
+                room: RoomToken::parse("room1234").unwrap(),
+                command: chat::Command::UnreadAfter { after: Some(42) },
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(response, Reply::History { messages, last_given: None, .. } if messages.is_empty())
+    );
+}
+
+#[test]
+fn subscribed_threads_are_account_scoped_and_paged() {
+    let (method, route, query, _, _, mutation) =
+        plan(&Request::SubscribedThreads { offset: 50 }).unwrap();
+    assert_eq!(method, Method::GET);
+    assert_eq!(
+        route,
+        "ocs/v2.php/apps/spreed/api/v1/chat/subscribed-threads"
+    );
+    assert_eq!(query, vec![("limit", "50".into()), ("offset", "50".into())]);
+    assert!(!mutation);
+}
+
+#[tokio::test]
+async fn reference_thumbnails_cannot_fetch_a_third_party_or_unreviewed_server_route() {
+    let server = Server::start(vec![]).await;
+    let (mut owner, clock) = client(&server);
+    for url in [
+        "https://third-party.invalid/core/references/preview/123",
+        "http://127.0.0.1:1/cloud/unreviewed/secret",
+    ] {
+        assert!(
+            owner
+                .reference_thumbnail(&context(&clock), url)
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(server.count(), 0);
+}
+
 #[tokio::test]
 async fn notification_204_is_scoped_unsupported_and_empty_lists_remain_successful() {
     let account = || reply(json!({"id":"synthetic-user","display-name":"Fixture"}));
@@ -384,6 +445,7 @@ async fn meeting_protocol_uses_typed_signals_and_retires_stale_handle() {
         .unwrap();
     assert_eq!(batch.events().len(), 1);
     let signaling::Event::Signal {
+        stream: signaling::StreamKind::Camera,
         from,
         negotiation: received,
         signal: signaling::Signal::Description(sdp),
@@ -545,6 +607,197 @@ fn typed_models_preserve_unknowns_and_strict_canonical_identity() {
         assert_eq!(caps.server_major, Some(major));
         assert!(caps.supports("future-feature"));
         assert_eq!(caps.encryption_required, None);
+    }
+}
+#[test]
+fn call_reactions_follow_bounded_server_configuration() {
+    let value = |reactions| {
+        json!({"version":{"major":35},"capabilities":{"spreed":{
+            "features":["conversation-v4"],"config":{"call":{"supported-reactions":reactions}}
+        }}})
+    };
+    let caps = models::Capabilities::decode(&value(json!(["👍", "🎉"]))).unwrap();
+    assert_eq!(
+        caps.call_reactions,
+        Some(vec!["👍".to_owned(), "🎉".to_owned()])
+    );
+    for invalid in [
+        json!([""]),
+        json!(["x".repeat(65)]),
+        json!(vec!["👍"; 33]),
+        json!(["\n"]),
+    ] {
+        let caps = models::Capabilities::decode(&value(invalid)).unwrap();
+        assert_eq!(caps.call_reactions, None);
+        assert!(caps.supported_protocol());
+    }
+}
+#[tokio::test]
+async fn ringing_requires_fresh_call_permission_and_absent_local_user() {
+    for case in [
+        "allowed",
+        "revoked",
+        "guest",
+        "already-in-call",
+        "caller-left",
+    ] {
+        let mut replies = join_replies();
+        replies.push(reply(json!({"version":{"major":35},"capabilities":{"spreed":{
+            "features":["conversation-v4","send-call-notification"],"config":{"call":{"enabled":true}}
+        }}})));
+        replies.push(reply(
+            json!({"id":7,"token":"testroom","displayName":"Fixture","readOnly":0,
+            "hasCall":true,"permissions":if case == "revoked" {4} else {6}}),
+        ));
+        replies.push(reply(json!([{"attendeeId":44,"actorType":if case == "guest" {"guests"} else {"users"},
+            "actorId":"other-user","displayName":"Other","inCall":if case == "already-in-call" {1} else {0},"sessionIds":["other-session"]}])));
+        replies.push(reply(if case == "caller-left" {
+            json!([])
+        } else {
+            json!([{"sessionId":"own-session"}])
+        }));
+        replies.push(reply(json!([])));
+        let server = Server::start(replies).await;
+        let (mut client, runtime) = client(&server);
+        let handle = join(&mut client, &runtime).await;
+        let (_reader, mut writer, _stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+        let mut moderation = writer.take_moderation_writer().unwrap();
+        let result = moderation.ring(&context(&runtime), 44).await;
+        if case == "allowed" {
+            assert!(result.is_ok());
+            assert!(server.seen.lock().unwrap().iter().any(|request| {
+                request.starts_with("POST /ocs/v2.php/apps/spreed/api/v4/call/testroom/ring/44?")
+            }));
+        } else {
+            assert!(result.is_err(), "{case}");
+            assert!(!server.seen.lock().unwrap().iter().any(|request| {
+                request.starts_with("POST /ocs/v2.php/apps/spreed/api/v4/call/testroom/ring/")
+            }));
+        }
+    }
+}
+#[tokio::test]
+async fn moderator_mute_targets_only_current_other_call_sessions() {
+    for case in ["allowed", "member", "target-left", "caller-left"] {
+        let mut replies = join_replies();
+        replies.push(reply(
+            json!({"version":{"major":35},"capabilities":{"spreed":{
+                "features":["conversation-v4","force-mute"],"config":{"call":{"enabled":true}}
+            }}}),
+        ));
+        replies.push(reply(
+            json!({"id":7,"token":"testroom","displayName":"Fixture","readOnly":0,
+            "hasCall":true,"participantType":if case == "member" {3} else {2}}),
+        ));
+        let mut participants = Vec::new();
+        if case != "caller-left" {
+            participants.push(json!({"sessionId":"own-session"}));
+        }
+        if case != "target-left" {
+            participants.push(json!({"sessionId":"other-session"}));
+        }
+        replies.push(reply(json!(participants)));
+        replies.push(reply(json!([])));
+        let server = Server::start(replies).await;
+        let (mut client, runtime) = client(&server);
+        let handle = join(&mut client, &runtime).await;
+        let (_reader, mut writer, _stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+        let mut moderation = writer.take_moderation_writer().unwrap();
+        let target = signaling::PeerSession::parse("other-session").unwrap();
+        let result = moderation
+            .mute_participant(&context(&runtime), &target)
+            .await;
+        let sent = server.seen.lock().unwrap().iter().any(|request| {
+            request.starts_with("POST /ocs/v2.php/apps/spreed/api/v3/signaling/testroom?")
+                && request.contains("forceMute")
+        });
+        assert_eq!(result.is_ok(), case == "allowed", "{case}");
+        assert_eq!(sent, case == "allowed", "{case}");
+    }
+}
+#[tokio::test]
+async fn recording_control_requires_fresh_backend_role_room_and_session() {
+    for case in [
+        "start",
+        "stop",
+        "no-backend",
+        "no-capability",
+        "classified",
+        "member",
+        "wrong-state",
+        "caller-left",
+    ] {
+        let start = case != "stop";
+        let mut replies = join_replies();
+        replies.push(reply(json!({"version":{"major":35},"capabilities":{"spreed":{
+            "features":if case == "no-capability" { vec!["conversation-v4"] } else { vec!["conversation-v4", "recording-v1"] },
+            "config":{"call":{"enabled":true,"recording":case != "no-backend"}}
+        }}})));
+        replies.push(reply(
+            json!({"id":7,"token":"testroom","displayName":"Fixture","readOnly":0,
+            "hasCall":true,"participantType":if case == "member" {3} else {2},
+            "attributes":if case == "classified" {4} else {0},
+            "callRecording":if case == "stop" || case == "wrong-state" {1} else {0}}),
+        ));
+        replies.push(reply(if case == "caller-left" {
+            json!([])
+        } else {
+            json!([{"sessionId":"own-session"}])
+        }));
+        replies.push(reply(json!([])));
+        let server = Server::start(replies).await;
+        let (mut client, runtime) = client(&server);
+        let handle = join(&mut client, &runtime).await;
+        let (_reader, mut writer, _stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+        let mut moderation = writer.take_moderation_writer().unwrap();
+        let result = moderation.set_recording(&context(&runtime), start).await;
+        let requests = server.seen.lock().unwrap();
+        let sent = requests
+            .iter()
+            .find(|request| request.contains("/api/v1/recording/testroom?"));
+        assert_eq!(result.is_ok(), matches!(case, "start" | "stop"), "{case}");
+        assert_eq!(sent.is_some(), matches!(case, "start" | "stop"), "{case}");
+        if let Some(request) = sent {
+            if start {
+                assert!(request.starts_with("POST ") && request.contains("status=1"));
+            } else {
+                assert!(request.starts_with("DELETE "));
+            }
+        }
+    }
+}
+#[tokio::test]
+async fn end_for_everyone_requires_fresh_moderator_and_current_session() {
+    for case in ["allowed", "member", "breakout", "caller-left"] {
+        let mut replies = join_replies();
+        replies.push(reply(
+            json!({"version":{"major":35},"capabilities":{"spreed":{
+                "features":["conversation-v4"],"config":{"call":{"enabled":true}}
+            }}}),
+        ));
+        replies.push(reply(
+            json!({"id":7,"token":"testroom","displayName":"Fixture","readOnly":0,
+            "hasCall":true,"participantType":if case == "member" {3} else {2},
+            "objectType":if case == "breakout" {"room"} else {""}}),
+        ));
+        replies.push(reply(if case == "caller-left" {
+            json!([])
+        } else {
+            json!([{"sessionId":"own-session"}])
+        }));
+        replies.push(reply(json!([])));
+        let server = Server::start(replies).await;
+        let (mut client, runtime) = client(&server);
+        let handle = join(&mut client, &runtime).await;
+        let (_reader, mut writer, _stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+        let mut moderation = writer.take_moderation_writer().unwrap();
+        let result = moderation.end_for_everyone(&context(&runtime)).await;
+        let sent = server.seen.lock().unwrap().iter().any(|request| {
+            request.starts_with("DELETE /ocs/v2.php/apps/spreed/api/v4/call/testroom?")
+                && request.contains("all=true")
+        });
+        assert_eq!(result.is_ok(), case == "allowed", "{case}");
+        assert_eq!(sent, case == "allowed", "{case}");
     }
 }
 #[tokio::test]
@@ -815,4 +1068,81 @@ async fn unstructured_http_refusals_preserve_safe_causes_without_claiming_revoca
     assert!(
         matches!(owner.request(&context(&clock), Request::Rooms).await, Err(error) if error.kind == ErrorKind::PermissionDenied)
     );
+}
+
+#[test]
+fn internal_screen_offer_and_payload_free_stop_preserve_camera_batch() {
+    use signaling::{Event, StreamKind};
+    let msg = |kind: &str, stream: &str| json!({"type":"message","data":json!({"to":"local","from":"remote","sid":"separate-screen","roomType":stream,"type":kind,"payload":{"type":kind,"sdp":"v=0\r\n"}}).to_string()});
+    let stop = json!({"type":"message","data":json!({"to":"local","from":"remote","sid":"separate-screen","roomType":"screen","type":"unshareScreen"}).to_string()});
+    let batch = signaling::parse_batch(
+        &json!([msg("offer", "screen"), stop, msg("answer", "video")]),
+        "local",
+        1,
+    )
+    .unwrap();
+    assert!(matches!(
+        batch.events()[0],
+        Event::Signal {
+            stream: StreamKind::Screen,
+            ..
+        }
+    ));
+    assert!(matches!(batch.events()[1], Event::ScreenStopped { .. }));
+    assert!(matches!(
+        batch.events()[2],
+        Event::Signal {
+            stream: StreamKind::Camera,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn internal_poll_failure_reports_interruption_then_resume_without_new_authority() {
+    let mut replies = join_replies();
+    replies.extend([
+        (503, "unavailable".into(), Duration::ZERO),
+        reply(json!([signal_row("own-session")])),
+    ]);
+    let server = Server::start(replies).await;
+    let (mut client, runtime) = client(&server);
+    let handle = join(&mut client, &runtime).await;
+    let (mut reader, _writer, stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+    let failed = reader.poll(&context(&runtime)).await.unwrap();
+    assert!(matches!(
+        failed.events(),
+        [signaling::Event::TransportInterrupted]
+    ));
+    assert!(!stop.is_closed());
+    let resumed = reader.poll(&context(&runtime)).await.unwrap();
+    assert!(matches!(
+        resumed.events(),
+        [
+            signaling::Event::TransportResumed,
+            signaling::Event::Signal { .. }
+        ]
+    ));
+    drop(reader);
+    assert!(
+        stop.is_closed(),
+        "abandoning a poll owner still closes the route"
+    );
+}
+
+#[tokio::test]
+async fn internal_poll_recovery_exhaustion_closes_route() {
+    let mut replies = join_replies();
+    replies.extend((0..4).map(|_| (503, "unavailable".into(), Duration::ZERO)));
+    let server = Server::start(replies).await;
+    let (mut client, runtime) = client(&server);
+    let handle = join(&mut client, &runtime).await;
+    let (mut reader, _writer, stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+    for _ in 0..3 {
+        assert!(reader.poll(&context(&runtime)).await.is_ok());
+        assert!(!stop.is_closed());
+    }
+    assert!(reader.poll(&context(&runtime)).await.is_err());
+    assert!(stop.is_closed());
+    assert_eq!(server.count(), 7);
 }

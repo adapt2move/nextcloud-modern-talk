@@ -106,8 +106,17 @@ pub struct NavigationPlacement {
     /// None leaves the server's favorite alone. Never infer unsupported from unknown.
     pub favorite: Option<bool>,
 }
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SidebarFilter {
+    #[default]
+    All,
+    Unread,
+    Mentions,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NavigationEdit {
+    SetFilter(SidebarFilter),
     SetSectionCollapsed {
         section: NavigationSection,
         collapsed: bool,
@@ -130,12 +139,16 @@ pub enum NavigationEdit {
 pub struct AccountNavigation {
     account: NavigationAccountKey,
     collapsed_sections: u8,
+    filter: SidebarFilter,
     groups: Vec<NavigationGroup>,
     placements: Vec<NavigationPlacement>,
 }
 impl AccountNavigation {
     pub fn account(&self) -> &NavigationAccountKey {
         &self.account
+    }
+    pub fn filter(&self) -> SidebarFilter {
+        self.filter
     }
     pub fn groups(&self) -> &[NavigationGroup] {
         &self.groups
@@ -168,6 +181,7 @@ impl AccountNavigation {
     }
     fn apply(&mut self, edit: NavigationEdit) -> Result<(), NavigationError> {
         match edit {
+            NavigationEdit::SetFilter(filter) => self.filter = filter,
             NavigationEdit::SetSectionCollapsed { section, collapsed } => {
                 if collapsed {
                     self.collapsed_sections |= section.bit();
@@ -250,6 +264,7 @@ impl NavigationPreferences {
         let mut layout = AccountNavigation {
             account,
             collapsed_sections: 0,
+            filter: SidebarFilter::All,
             groups: Vec::new(),
             placements: Vec::new(),
         };

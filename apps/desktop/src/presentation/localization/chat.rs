@@ -1,11 +1,26 @@
 //! Chat controls and native picker guidance; never user content.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     (
+        "Ab hier ungelesen",
+        "Mark unread from here",
+        "Marcar como no leído desde aquí",
+    ),
+    (
         "Als Entwurf bearbeiten",
         "Edit as draft",
         "Editar como borrador",
     ),
     ("Angeheftet", "Pinned", "Fijado"),
+    (
+        "Angeheftete Nachricht anzeigen",
+        "Show pinned message",
+        "Mostrar mensaje fijado",
+    ),
+    (
+        "Angeheftete Nachricht einklappen",
+        "Collapse pinned message",
+        "Contraer mensaje fijado",
+    ),
     (
         "Angeheftete Nachricht lösen",
         "Unpin message",
@@ -72,6 +87,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El borrador se está procesando.",
     ),
     (
+        "Die Nachricht wird gesendet, sobald die Verbindung wieder da ist.",
+        "The message will be sent when the connection returns.",
+        "El mensaje se enviará cuando vuelva la conexión.",
+    ),
+    (
         "Die Systemzeitzone ist gerade nicht verfügbar. Bitte gleich erneut versuchen.",
         "The system time zone is unavailable. Please try again shortly.",
         "La zona horaria del sistema no está disponible. Inténtalo de nuevo en un momento.",
@@ -90,6 +110,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die native Emoji-Auswahl konnte nicht geöffnet werden.",
         "The native emoji picker could not be opened.",
         "No se pudo abrir el selector nativo de emojis.",
+    ),
+    (
+        "Die vorherige Nachricht ist noch nicht geladen.",
+        "The previous message has not been loaded yet.",
+        "El mensaje anterior aún no se ha cargado.",
     ),
     (
         "Die Änderung ist für diese Nachricht zu groß oder nicht als Markdown darstellbar. Dein Entwurf bleibt erhalten.",
@@ -172,6 +197,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Mensaje programado eliminado.",
     ),
     (
+        "Gespräch als ungelesen markieren",
+        "Mark conversation as unread",
+        "Marcar conversación como no leída",
+    ),
+    (
         "Gesprächssuche schließen",
         "Close conversation search",
         "Cerrar la búsqueda en la conversación",
@@ -191,6 +221,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Im Gespräch suchen",
         "Search this conversation",
         "Buscar en esta conversación",
+    ),
+    (
+        "Im Thread antworten …",
+        "Reply in thread …",
+        "Responder en el hilo …",
     ),
     ("In 30 Minuten", "In 30 minutes", "Dentro de 30 minutos"),
     ("In einer Stunde", "In one hour", "Dentro de una hora"),
@@ -249,6 +284,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Senden fehlgeschlagen", "Sending failed", "Error al enviar"),
     (
+        "Thread breiter",
+        "Widen thread pane",
+        "Ampliar panel del hilo",
+    ),
+    (
+        "Thread schmaler",
+        "Narrow thread pane",
+        "Estrechar panel del hilo",
+    ),
+    (
         "Threads sind derzeit nicht verfügbar.",
         "Threads are currently unavailable.",
         "Los hilos no están disponibles en este momento.",
@@ -290,6 +335,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Zu Favoriten hinzufügen",
         "Add to favorites",
         "Añadir a favoritos",
+    ),
+    (
+        "Zur ursprünglichen Nachricht springen",
+        "Jump to the original message",
+        "Ir al mensaje original",
     ),
     (
         "Zweite Uhrzeit verwenden",

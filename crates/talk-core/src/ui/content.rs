@@ -2,7 +2,6 @@
 use super::conversation::{AccountPersonRef, Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
 use super::{AccountScope, Page, Text, UnavailableReason};
-
 /// One native file promise's bounded observation, retained until acknowledged.
 /// This correlation grants no authority to read the former account or room.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,6 +30,17 @@ pub enum AssetTarget {
         participant: u128,
     },
     PersonAvatar(AccountPersonRef),
+    CloudFile {
+        account: AccountScope,
+        path: Text<16384>,
+        file: u64,
+        generation: u64,
+    },
+    Reference {
+        context: ConversationRef,
+        message: u128,
+        ordinal: u16,
+    },
     Thumbnail(AttachmentRef),
     Image(AttachmentRef),
 }
@@ -39,9 +49,10 @@ impl AssetTarget {
         match self {
             Self::ConversationAvatar(c)
             | Self::MessageAvatar { context: c, .. }
+            | Self::Reference { context: c, .. }
             | Self::ParticipantAvatar { context: c, .. } => Some(*c),
             Self::Thumbnail(a) | Self::Image(a) => Some(a.context),
-            Self::SelfAvatar | Self::PersonAvatar(_) => None,
+            Self::SelfAvatar | Self::PersonAvatar(_) | Self::CloudFile { .. } => None,
         }
     }
 }
@@ -62,6 +73,12 @@ pub struct AssetView {
     pub color: Option<Text<16>>,
     /// Present only for the native PDF first-page renderer's observed page count.
     pub document_pages: Option<u32>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PollDraftEntry {
+    pub id: u64,
+    pub draft: PollDraft,
+    pub max_votes: u16,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PollOption {
@@ -94,7 +111,7 @@ pub struct PollView {
 pub struct PollDraft {
     pub question: Text<4000>,
     pub options: Page<Text<1000>, 100>,
-    pub multiple: bool,
+    pub max_votes: u16,
     pub hidden_results: bool,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -123,6 +140,38 @@ pub enum PlaybackState {
     Stopping,
     Failed(UnavailableReason),
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VoicePhase {
+    Starting,
+    Recording,
+    Stopping,
+    Review,
+    Failed(UnavailableReason),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VoiceSnapshot {
+    pub context: ConversationRef,
+    pub phase: VoicePhase,
+    pub elapsed_ms: u64,
+    pub level: u16,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VoiceReviewPlayback {
+    pub context: ConversationRef,
+    pub state: PlaybackState,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub speed_half_steps: u8,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VoicePlaybackView {
+    pub attachment: AttachmentRef,
+    pub state: PlaybackState,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub speed_half_steps: u8,
+    pub stop_unconfirmed: bool,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlaybackView {
     pub attachment: AttachmentRef,
@@ -133,7 +182,62 @@ pub struct PlaybackView {
     pub stop_unconfirmed: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CloudFileView {
+    pub name: Text<255>,
+    pub path: Text<16384>,
+    pub directory: bool,
+    pub size: Option<u64>,
+    pub modified: Option<Text<256>>,
+    pub modified_unix: Option<i64>,
+    pub mime: Option<Text<256>>,
+    pub file_id: Option<Text<256>>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileBrowserView {
+    pub account: AccountScope,
+    pub path: Text<16384>,
+    pub section: FileSection,
+    pub sort: FileSort,
+    pub entries: Page<CloudFileView, 1000>,
+    /// Local listing identity, retired when a fresh server observation arrives.
+    pub generation: u64,
+    /// DAV page offset and total, including the folder itself. No server token.
+    pub pagination: Option<(u64, u64)>,
+    pub search_available: bool,
+    pub favorites_available: bool,
+    /// Whether these entries came from a completed listing, including an empty one.
+    pub has_listing: bool,
+    pub loading: bool,
+    pub offline: bool,
+    pub error: Option<UnavailableReason>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserDownloadView {
+    pub request: RequestId,
+    pub name: Text<255>,
+    pub received: u64,
+    pub total: Option<u64>,
+    pub state: DownloadState,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileSection {
+    All,
+    Recent,
+    Favorites,
+    Search,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileSort {
+    Name,
+    Modified,
+    Size,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContentPanel {
+    pub file_browser: Option<FileBrowserView>,
+    /// Explicit DAV refusal for this account; unknown until observed.
+    pub file_browser_supported: Option<bool>,
+    pub browser_download: Option<BrowserDownloadView>,
     pub self_name: Option<Text<256>>,
     pub organization: Option<Text<256>>,
     pub account: Option<AccountScope>,
@@ -143,16 +247,24 @@ pub struct ContentPanel {
     /// These keys retain renderer resources; they authorize no visible target.
     pub retained_avatar_keys: Page<u64, 128>,
     pub polls: Page<PollView, 20>,
+    pub poll_drafts: Page<PollDraftEntry, 100>,
     pub poll_create: Availability,
+    pub poll_drafts_manage: Availability,
+    pub poll_drafts_edit: Availability,
     pub poll_state: RemoteState,
+    pub vote_failure: Option<(u64, UnavailableReason)>,
     pub preview: Option<AttachmentRef>,
     pub playback: Option<PlaybackView>,
+    pub voice_playback: Option<VoicePlaybackView>,
     pub transfer: Option<DownloadView>,
     pub result: Option<(RequestId, Completion)>,
 }
 impl Default for ContentPanel {
     fn default() -> Self {
         Self {
+            file_browser: None,
+            file_browser_supported: None,
+            browser_download: None,
             self_name: None,
             organization: None,
             account: None,
@@ -160,10 +272,15 @@ impl Default for ContentPanel {
             assets: Page::empty(),
             retained_avatar_keys: Page::empty(),
             polls: Page::empty(),
+            poll_drafts: Page::empty(),
             poll_create: Availability::UNKNOWN,
+            poll_drafts_manage: Availability::UNKNOWN,
+            poll_drafts_edit: Availability::UNKNOWN,
             poll_state: RemoteState::Idle,
+            vote_failure: None,
             preview: None,
             playback: None,
+            voice_playback: None,
             transfer: None,
             result: None,
         }
@@ -171,6 +288,28 @@ impl Default for ContentPanel {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentAction {
+    ListFiles(Text<16384>),
+    ListFilesPage {
+        path: Text<16384>,
+        offset: u64,
+    },
+    RecentFiles,
+    FavoriteFiles,
+    SearchFiles(Text<256>),
+    SortFiles(FileSort),
+    OpenBrowserFile(Text<16384>),
+    DownloadBrowserFile(Text<16384>),
+    CancelBrowserDownload,
+    DismissBrowserDownload,
+    CloseFileBrowser,
+    StageCloudFile {
+        context: ConversationRef,
+        path: Text<16384>,
+    },
+    StageCloudFiles {
+        context: ConversationRef,
+        paths: Page<Text<16384>, 8>,
+    },
     DismissDownload,
     Load(AssetTarget),
     Preview(AttachmentRef),
@@ -183,14 +322,31 @@ pub enum ContentAction {
         attachment: AttachmentRef,
         generation: u64,
     },
+    PlayVoice(AttachmentRef),
+    PauseVoice(AttachmentRef),
+    SeekVoice {
+        attachment: AttachmentRef,
+        position_ms: u64,
+    },
+    SpeedVoice {
+        attachment: AttachmentRef,
+        speed_half_steps: u8,
+    },
     SeekPreview {
         attachment: AttachmentRef,
         generation: u64,
         position_ms: u64,
     },
     OpenCloud(AttachmentRef),
+    RefreshPollDrafts,
     RefreshPoll(u64),
     CreatePoll(PollDraft),
+    SavePollDraft(PollDraft),
+    UpdatePollDraft {
+        poll: u64,
+        draft: PollDraft,
+    },
+    DeletePollDraft(u64),
     Vote {
         poll: u64,
         options: Page<u16, 100>,

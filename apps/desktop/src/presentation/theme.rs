@@ -1,9 +1,18 @@
-use gpui::{Hsla, WindowAppearance, rgb};
+use gpui::{BoxShadow, Hsla, WindowAppearance, point, px, rgb};
+
+#[derive(Clone, Copy)]
+pub(super) enum Elevation {
+    Card,
+    Raised,
+    Popover,
+    Dialog,
+}
 
 pub use talk_core::preferences::{Appearance, Palette};
 #[derive(Clone, Copy, Debug)]
 pub struct Theme {
     pub dark: bool,
+    pub reduced_transparency: bool,
     pub disabled_fg: Hsla,
     pub hover: Hsla,
     pub row_hover: Hsla,
@@ -36,14 +45,56 @@ pub struct Theme {
     pub stage_panel: Hsla,
     pub stage_text: Hsla,
     pub stage_muted: Hsla,
-    pub stage_disabled: Hsla,
 }
 fn color(value: u32) -> Hsla {
     rgb(value).into()
 }
 impl Theme {
-    fn chat_header_tints(self) -> [Hsla; 2] {
-        [0.92, 0.86].map(|a| Hsla { a, ..self.surface })
+    /// Two cool shadow layers keep elevation consistent with the brand palette.
+    pub(super) fn elevation(self, level: Elevation) -> Vec<BoxShadow> {
+        let (offset, blur, strength) = match level {
+            Elevation::Card => (8., 24., 1.),
+            Elevation::Raised => (3., 8., 0.7),
+            Elevation::Popover => (8., 24., 1.3),
+            Elevation::Dialog => (16., 40., 1.6),
+        };
+        let color = if self.dark {
+            gpui::black()
+        } else {
+            color(0x26354b)
+        };
+        vec![
+            BoxShadow {
+                color: color.opacity(if self.dark { 0.22 } else { 0.07 } * strength),
+                offset: point(px(0.), px(1.)),
+                blur_radius: px(2.),
+                spread_radius: px(0.),
+            },
+            BoxShadow {
+                color: color.opacity(if self.dark { 0.40 } else { 0.10 } * strength),
+                offset: point(px(0.), px(offset)),
+                blur_radius: px(blur),
+                spread_radius: px(0.),
+            },
+        ]
+    }
+
+    pub(super) fn inner_highlight(self) -> Hsla {
+        gpui::rgba(if self.dark { 0xffffff1c } else { 0xffffff99 }).into()
+    }
+    /// Small presence marks use distinct, saturated colors, independent of the
+    /// darker warning/error text colors used on light surfaces.
+    pub fn presence_dot(self, presence: talk_core::ui::presentation::Presence) -> Hsla {
+        use talk_core::ui::presentation::Presence;
+        match (presence, self.dark) {
+            (Presence::Available, false) => color(0x268a58),
+            (Presence::Available, true) => color(0x60c98d),
+            (Presence::Away, false) => color(0xe5a31a),
+            (Presence::Away, true) => color(0xf0b840),
+            (Presence::DoNotDisturb, false) => color(0xd94848),
+            (Presence::DoNotDisturb, true) => color(0xf07878),
+            _ => self.muted,
+        }
     }
 
     /// Windows has no backdrop implementation. Its explicit product fallback
@@ -56,25 +107,25 @@ impl Theme {
         }
     }
 
-    /// Readability tint painted after the supported native backdrop pass.
+    /// Header surfaces are opaque so timeline content cannot leak through.
     pub fn chat_header_surface(self) -> gpui::Background {
-        if cfg!(target_os = "windows") {
-            return color(0xffffff).into();
-        }
-        let [top, bottom] = self.chat_header_tints();
-        gpui::linear_gradient(
-            180.,
-            gpui::linear_color_stop(top, 0.),
-            gpui::linear_color_stop(bottom, 1.),
-        )
+        self.surface.into()
     }
 
     pub fn chrome(self) -> gpui::Background {
+        if self.reduced_transparency {
+            return self.canvas.into();
+        }
         gpui::linear_gradient(
             155.,
             gpui::linear_color_stop(self.canvas, 0.),
             gpui::linear_color_stop(self.chrome_end, 1.),
         )
+    }
+
+    /// Content keeps the palette surface as its base in every appearance.
+    pub fn content_material(self) -> gpui::Background {
+        self.surface.into()
     }
 
     pub fn avatar(self, seed: usize) -> (Hsla, Hsla) {
@@ -135,13 +186,14 @@ impl Theme {
             ],
         };
         let (disabled, hover, segment) = match (dark, sage) {
-            (false, false) => (0x8797ad, 0xeaf0f8, 0xffffff),
-            (false, true) => (0x879586, 0xeef1eb, 0xffffff),
-            (true, false) => (0x5d6d81, 0x293646, 0x2e3b4d),
-            (true, true) => (0x5c6f62, 0x2d3a32, 0x33413a),
+            (false, false) => (0x485b75, 0xeaf0f8, 0xffffff),
+            (false, true) => (0x515d53, 0xeef1eb, 0xffffff),
+            (true, false) => (0xa8b9cf, 0x293646, 0x2e3b4d),
+            (true, true) => (0xa7baad, 0x2d3a32, 0x33413a),
         };
         Self {
             dark,
+            reduced_transparency: true,
             disabled_fg: color(disabled),
             hover: color(hover),
             row_hover: Hsla {
@@ -155,7 +207,13 @@ impl Theme {
             surface: color(values[2]),
             subtle: color(values[3]),
             text: color(values[4]),
-            muted: color(values[5]),
+            // Secondary labels also remain readable over a blurred, strongly
+            // contrasting backdrop; the underlying surface palette is intact.
+            muted: color(match (dark, sage) {
+                (false, false) => 0x485b75,
+                (false, true) => 0x515d53,
+                _ => values[5],
+            }),
             placeholder: color(match (dark, sage) {
                 (false, false) => 0x657285,
                 (false, true) => 0x6b736a,
@@ -177,7 +235,6 @@ impl Theme {
             stage_panel: color(values[18]),
             stage_text: color(values[19]),
             stage_muted: color(values[20]),
-            stage_disabled: color(if sage { 0x78887c } else { 0x758493 }),
             chrome_end: color(values[21]),
             focus: color(values[22]),
             sidebar_secondary: color(values[23]),
@@ -214,29 +271,6 @@ mod tests {
                     assert!(contrast(t.placeholder, background) >= 4.5);
                     assert!(contrast(t.placeholder, background) < contrast(t.muted, background));
                     assert!(contrast(t.placeholder, background) < contrast(t.text, background));
-                }
-            }
-        }
-    }
-    #[test]
-    fn translucent_header_keeps_text_and_focus_readable_over_extreme_content() {
-        for palette in [Palette::Blue, Palette::Sage] {
-            for appearance in [Appearance::Light, Appearance::Dark] {
-                let t = Theme::resolve(palette, appearance, WindowAppearance::Light);
-                for tint in t.chat_header_tints().map(gpui::Rgba::from) {
-                    assert!((0.5..1.).contains(&tint.a));
-                    for underlying in [0., 1.] {
-                        let mixed = gpui::Rgba {
-                            r: tint.r * tint.a + underlying * (1. - tint.a),
-                            g: tint.g * tint.a + underlying * (1. - tint.a),
-                            b: tint.b * tint.a + underlying * (1. - tint.a),
-                            a: 1.,
-                        };
-                        for text in [t.text, t.sidebar_secondary] {
-                            assert!(contrast(text, mixed.into()) >= 4.5);
-                        }
-                        assert!(contrast(t.focus, mixed.into()) >= 3.);
-                    }
                 }
             }
         }
@@ -305,6 +339,7 @@ mod tests {
                     );
                 }
                 assert!(contrast(t.input_border, t.surface) >= 3.0);
+                assert!(contrast(t.input_border, t.segment) >= 3.0);
                 for background in [
                     t.surface,
                     t.subtle,
@@ -325,12 +360,21 @@ mod tests {
                         "selected marker {palette:?}/{appearance:?}: {}",
                         contrast(t.input_border, track)
                     );
+                }
+                for background in [
+                    t.surface,
+                    t.subtle,
+                    t.canvas,
+                    t.chrome_end,
+                    t.selected,
+                    t.segment,
+                ] {
                     assert!(
-                        contrast(t.disabled_fg, track) < contrast(t.muted, track) * 0.7,
-                        "disabled must be visibly weaker"
+                        contrast(t.disabled_fg, background) >= 4.5,
+                        "disabled labels {palette:?}/{appearance:?}: {}",
+                        contrast(t.disabled_fg, background)
                     );
                 }
-                assert!((2.0..3.6).contains(&contrast(t.disabled_fg, t.surface)));
                 if t.dark {
                     // Raised selection must increase lightness; its accessible
                     // marker, not that small luminance difference, carries state.

@@ -2,6 +2,7 @@
 //! normal calls use the same engine with separately admitted physical sources.
 #![forbid(unsafe_code)]
 #[path = "../../crates/talk-adapters/src/media/engine.rs"]
+#[allow(dead_code)] // Shared production engine also serves call-only operations.
 mod engine;
 
 use engine::{

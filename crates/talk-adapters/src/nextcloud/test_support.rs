@@ -59,7 +59,7 @@ pub fn from_private_fixture(
 }
 
 #[cfg(unix)]
-fn private_file(path: &Path) -> Result<Zeroizing<Vec<u8>>, ErrorKind> {
+pub(crate) fn private_file(path: &Path) -> Result<Zeroizing<Vec<u8>>, ErrorKind> {
     use std::io::Read;
     use std::os::unix::fs::MetadataExt;
     let parent = path.parent().ok_or(ErrorKind::Malformed)?;
@@ -97,7 +97,7 @@ fn private_file(path: &Path) -> Result<Zeroizing<Vec<u8>>, ErrorKind> {
     Ok(bytes)
 }
 #[cfg(not(unix))]
-fn private_file(_path: &Path) -> Result<Zeroizing<Vec<u8>>, ErrorKind> {
+pub(crate) fn private_file(_path: &Path) -> Result<Zeroizing<Vec<u8>>, ErrorKind> {
     Err(ErrorKind::Unsupported)
 }
 

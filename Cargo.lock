@@ -4359,16 +4359,19 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nextcloud-talk-api"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "cookie",
  "futures-lite 2.6.1",
  "futures-util",
+ "percent-encoding",
  "reqwest",
+ "roxmltree",
  "rustls",
  "rustls-native-certs",
  "serde",
  "serde_json",
+ "time",
  "tokio",
  "tokio-tungstenite",
  "url",
@@ -7223,20 +7226,24 @@ checksum = "8bdb6fa0dfa67b38c1e66b7041ba9dcf23b99d8121907cd31c807a332f7a0bbb"
 
 [[package]]
 name = "talk-adapters"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "apple-native-keyring-store",
+ "ashpd 0.13.13",
+ "async-io",
  "async-trait",
  "atomicwrites",
  "dbus-secret-service",
  "dirs 7.0.0",
  "exacl",
  "flate2",
+ "futures-lite 2.6.1",
  "futures-util",
  "getrandom 0.4.3",
  "gstreamer",
  "gstreamer-app",
  "gstreamer-video",
+ "image",
  "jiff",
  "keyring-core",
  "nextcloud-talk-api",
@@ -7268,7 +7275,7 @@ dependencies = [
 
 [[package]]
 name = "talk-bootstrap"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "talk-adapters",
  "talk-core",
@@ -7276,7 +7283,7 @@ dependencies = [
 
 [[package]]
 name = "talk-core"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "pulldown-cmark",
  "url",
@@ -7284,7 +7291,7 @@ dependencies = [
 
 [[package]]
 name = "talk-desktop"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "ashpd 0.13.13",
  "async-io",

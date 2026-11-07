@@ -10,10 +10,12 @@ use std::ops::Range;
 use crate::bounded::{Page, Text};
 
 mod links;
+mod location;
 mod render;
 mod source;
 
 pub use links::web_destination;
+pub use location::location_coordinates;
 
 pub const MAX_SOURCE_BYTES: usize = 4096;
 const MAX_TEXT_BYTES: usize = 8192;
@@ -35,6 +37,32 @@ pub struct Document {
     /// Sorted, disjoint runs over the exact input, including syntax markers.
     /// Oversized input styles only the bounded prefix retained in `text`.
     pub source_spans: Page<Span, 512>,
+}
+
+/// Shared, derived display data. Construction belongs on a background executor;
+/// this value is ephemeral and is never part of the durable content format.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Prepared {
+    value: std::sync::Arc<PreparedValue>,
+}
+#[derive(Debug, Eq, PartialEq)]
+struct PreparedValue {
+    source: Text<4096>,
+    document: Document,
+}
+impl Prepared {
+    pub fn new(source: Text<4096>) -> Self {
+        let document = parse(source.as_str());
+        Self {
+            value: std::sync::Arc::new(PreparedValue { source, document }),
+        }
+    }
+    pub fn source(&self) -> &str {
+        self.value.source.as_str()
+    }
+    pub fn document(&self) -> &Document {
+        &self.value.document
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

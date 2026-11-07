@@ -33,12 +33,17 @@ def source_manifest(root):
 
 def capture(args, before_runtime_cleanup=None):
     root = Path(__file__).resolve().parents[2]
+    source_root = Path(getattr(args, "source_root", None) or root).resolve()
     binary = Path(args.binary).resolve()
     out = Path(args.output).resolve()
     out.mkdir(parents=True, exist_ok=True)
     manifest = {"schema": 1, "kind": "compiled GPUI native X11 UI development evidence", "backend_connected": False,
         "media_engine_attached": False, "media_frames": False, "platform_qualified": False,
-        "binary_sha256": sha(binary), "source_files": source_manifest(root), "captures": []}
+        "preference_scope": "fresh private XDG configuration/data per scenario",
+        "locale_override": args.locale,
+        "material_preview_override": os.environ.get("TALK_UI_MATERIAL_PREVIEW") == "1",
+        "binary_sha256": sha(binary), "capture_tool_sha256": sha(Path(__file__)),
+        "source_files": source_manifest(source_root), "captures": []}
     manifest["source_manifest_sha256"] = hashlib.sha256(json.dumps(manifest["source_files"], sort_keys=True).encode()).hexdigest()
     env = os.environ.copy()
     env.pop("WAYLAND_DISPLAY", None)
@@ -52,6 +57,7 @@ def capture(args, before_runtime_cleanup=None):
         xlog = open(out / "xvfb.log", "w")
         xvfb = subprocess.Popen(["Xvfb", "-displayfd", str(write_fd), "-screen", "0", "1600x1200x24", "-nolisten", "tcp", "-noreset"], pass_fds=(write_fd,), stdout=xlog, stderr=xlog)
         os.close(write_fd)
+        window_manager = None
         try:
             if not select.select([read_fd], [], [], 15)[0]:
                 raise RuntimeError("Owned Xvfb did not expose a display within 15 seconds")
@@ -59,6 +65,11 @@ def capture(args, before_runtime_cleanup=None):
             if not display.isdigit():
                 raise RuntimeError("Xvfb returned an invalid display")
             env["DISPLAY"] = ":" + display
+            if args.call_fullscreen:
+                window_manager = subprocess.Popen(["openbox"], env=env, stdout=xlog, stderr=xlog)
+                time.sleep(.5)
+                if window_manager.poll() is not None:
+                    raise RuntimeError("Fullscreen capture requires a working X11 window manager")
             manifest["vulkan"] = run(["vulkaninfo", "--summary"], env).stdout
             cases = args.scenarios.split(",")
             for case in cases:
@@ -68,7 +79,16 @@ def capture(args, before_runtime_cleanup=None):
                 theme = parts[2] if len(parts) > 2 else "blue"
                 label = f"{scenario}-{appearance}-{theme}"
                 command = [str(binary), "--ui-scenario", scenario, "--ui-appearance", appearance, "--ui-theme", theme, "--ui-font-metrics", "--ui-scale", str(args.scale)]
+                if args.locale: command += ["--ui-locale",args.locale]
                 if args.scale != 100: label += f"-{args.scale}pct"
+                # UI actions use the real preference writer. A saved sidebar
+                # filter or setting from one case must not affect another case,
+                # another capture job, or this computer's ordinary profile.
+                profile = Path(runtime) / label
+                for variable, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data")]:
+                    path = profile / directory
+                    path.mkdir(mode=0o700, parents=True)
+                    env[variable] = str(path)
                 started = time.monotonic()
                 with open(out / f"{label}.log", "w") as app_log:
                     app = subprocess.Popen(command, env=env, stdout=app_log, stderr=app_log, start_new_session=True)
@@ -79,8 +99,15 @@ def capture(args, before_runtime_cleanup=None):
                             if app.poll() is not None:
                                 raise RuntimeError(f"Native app exited {app.returncode}; inspect {label}.log")
                             probe = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(app.pid)], env=env, text=True, capture_output=True, timeout=2)
+                            if probe.returncode != 0 or not probe.stdout.strip():
+                                # Some X11 backends do not advertise _NET_WM_PID.
+                                # The owned display contains exactly one fixture window.
+                                probe=subprocess.run(["xdotool","search","--name","^Talk — FICTITIOUS DATA · UI development$"],env=env,text=True,capture_output=True,timeout=2)
                             if probe.returncode == 0 and probe.stdout.strip():
-                                xid = probe.stdout.strip().splitlines()[0]
+                                windows=probe.stdout.strip().splitlines()
+                                if len(windows)!=1:raise RuntimeError("Ambiguous fixture window on owned display")
+                                xid=windows[0]
+                                run(["xdotool","windowmap","--sync",xid],env)
                                 break
                             time.sleep(0.1)
                         if xid is None:
@@ -90,6 +117,8 @@ def capture(args, before_runtime_cleanup=None):
                         run(["xdotool", "windowmove", "--sync", xid, "0", "0"], env)
                         run(["xdotool", "windowsize", "--sync", xid, str(args.width), str(args.height)], env)
                         run(["xdotool", "mousemove", "--sync", "1590", "1190"], env)
+                        if args.settle_seconds:
+                            time.sleep(args.settle_seconds)
                         screenshot = out / f"{label}.png"
                         # A visible X11 window can precede its first Vulkan frame,
                         # especially during cold shader compilation on software GPUs.
@@ -105,12 +134,29 @@ def capture(args, before_runtime_cleanup=None):
                             if time.monotonic() >= paint_deadline:
                                 raise RuntimeError(f"Native window stayed blank: {label}")
                             time.sleep(0.5)
+                        if args.call_fullscreen:
+                            run(["xdotool", "windowactivate", "--sync", xid], env)
+                            # The call fixture's header action owns fullscreen. Use
+                            # the native control, then capture the resulting window.
+                            run(["xdotool", "mousemove", "--window", xid, str(args.width - 49), "86", "click", "1"], env)
+                            time.sleep(.75)
+                            wm_state = run(["xprop", "-id", xid, "_NET_WM_STATE"], env).stdout
+                            if "_NET_WM_STATE_FULLSCREEN" not in wm_state:
+                                raise RuntimeError("Call header did not enter window-manager fullscreen")
+                            run(["xdotool", "mousemove", "--sync", "1590", "1190"], env)
+                            run(["import", "-window", xid, str(screenshot)], env)
+                        if scenario in ("connection-reconnecting", "offline-with-queue"):
+                            # The production grace deadline advances on the normal
+                            # owner tick. Capture its sustained state, not a blip.
+                            time.sleep(5.5)
+                            run(["import", "-window", xid, str(screenshot)], env)
                         status = Path(f"/proc/{app.pid}/status").read_text()
                         memory = {line.split(":", 1)[0]: line.split(":", 1)[1].strip() for line in status.splitlines() if line.startswith(("VmRSS:", "VmHWM:", "Threads:"))}
+                        actual_size = [int(part) for part in run(["identify", "-format", "%w %h", str(screenshot)], env).stdout.split()]
                         manifest["captures"].append({"scenario": scenario, "appearance": appearance, "theme": theme, "image": screenshot.name,
                             "sha256": sha(screenshot), "first_visible_window_ms": first_window_ms, "process_sample": memory,
                             "measurement_limit": "single Linux diagnostic sample; excludes GPU/Xvfb/other processes; not Q.PERF acceptance",
-                            "window_size": [args.width, args.height], "command": ["talk-desktop"] + command[1:]})
+                            "window_size": actual_size, "fullscreen": args.call_fullscreen, "command": ["talk-desktop"] + command[1:]})
                         if args.interactions:
                             from interactions import exercise
                             manifest["captures"][-1]["interactions"] = exercise(scenario, env, xid, out, label, args.scale>=150)
@@ -130,6 +176,9 @@ def capture(args, before_runtime_cleanup=None):
             if before_runtime_cleanup is not None:
                 before_runtime_cleanup(env)
             os.close(read_fd)
+            if window_manager is not None:
+                window_manager.terminate()
+                window_manager.wait(timeout=5)
             xvfb.terminate()
             try:
                 xvfb.wait(timeout=5)
@@ -142,10 +191,14 @@ def capture(args, before_runtime_cleanup=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", default="target/debug/talk-desktop")
+    parser.add_argument("--source-root", help="source tree used to build the captured binary")
     parser.add_argument("--output", required=True)
     parser.add_argument("--scenarios", default="server,browser,storage,expired,chat,chat:dark,settings,settings:dark:sage,incoming,prejoin,call,direct-call,voice,gate,offline,denied")
     parser.add_argument("--width", type=int, default=1200)
     parser.add_argument("--height", type=int, default=800)
+    parser.add_argument("--locale",choices=["en","de","es"])
     parser.add_argument("--scale", type=int, choices=[100,125,150,200], default=100)
+    parser.add_argument("--settle-seconds", type=float, default=0, help="Wait for a bounded timed state before capture")
+    parser.add_argument("--call-fullscreen", action="store_true", help="Activate the call header fullscreen control before capture")
     parser.add_argument("--interactions", action="store_true", help="Run native keyboard/mouse checks; requires tesseract-ocr")
     capture(parser.parse_args())

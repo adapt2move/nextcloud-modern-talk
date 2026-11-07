@@ -40,6 +40,11 @@ impl Desktop {
         let custom_buttons = cfg!(target_os = "windows")
             || (cfg!(target_os = "linux")
                 && matches!(window.window_decorations(), Decorations::Client { .. }));
+        let call_scrim = matches!(
+            self.overlay,
+            Some(Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent)
+        )
+        .then(|| self.modal_scrim_color());
         let drag = div()
             .id("window-drag-region")
             .window_control_area(WindowControlArea::Drag)
@@ -52,11 +57,7 @@ impl Desktop {
             .when(traffic_lights && !navigation, |d| d.pl(px(88.)))
             .text_size(px(12.))
             .text_color(self.theme.muted)
-            .child(if self.development {
-                "Talk · UI development"
-            } else {
-                "Talk"
-            })
+            .child("NextCloud Talk")
             .on_click(|event, window, _| {
                 if event.click_count() == 2 {
                     if cfg!(target_os = "macos") {
@@ -78,6 +79,7 @@ impl Desktop {
             });
         div()
             .id("application-titlebar")
+            .relative()
             .h(px(HEIGHT))
             .flex_none()
             .w_full()
@@ -185,6 +187,9 @@ impl Desktop {
                             cx,
                         )),
                 )
+            })
+            .when_some(call_scrim, |d, color| {
+                d.child(div().absolute().inset_0().occlude().bg(color))
             })
     }
 

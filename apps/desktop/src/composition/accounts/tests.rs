@@ -1,5 +1,41 @@
 use super::*;
 use talk_core::preferences::account::{AccountPreferenceResult, AccountPreferences};
+use talk_core::ui::presentation::ScreenShareState;
+
+#[cfg(feature = "dev-probes")]
+#[test]
+#[ignore = "requires an owned 200-room server and private NMT_FIXTURE_DIR"]
+fn released_server_startup_exposes_two_hundred_rooms() {
+    let directory =
+        std::path::PathBuf::from(std::env::var_os("NMT_FIXTURE_DIR").expect("owned fixture"));
+    let profile = directory.join("composition-profile");
+    talk_adapters::identity::lab::seed_private_lab(&profile, &directory.join("alice.json"))
+        .expect("seed account");
+    let model = Accounts::start_with_config(
+        talk_adapters::media::MediaService::new(),
+        RuntimeConfig::isolated_fixture(profile),
+    );
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let mut accounts = model.borrow_mut();
+        accounts.tick();
+        if accounts.snapshot.conversations.as_slice().len() == 200 {
+            assert_eq!(
+                accounts.snapshot.conversation_list.content,
+                ContentState::Ready
+            );
+            accounts.shutdown();
+            break;
+        }
+        if Instant::now() >= deadline {
+            let state = accounts.snapshot.conversation_list.content;
+            accounts.shutdown();
+            panic!("complete room list did not reach presentation: {state:?}");
+        }
+        drop(accounts);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 
 fn pending_login() -> (Accounts, RequestId, AccountId, LoginAttemptId) {
     let mut model = model();
@@ -649,6 +685,7 @@ fn login_activation_handoff_releases_only_the_current_save() {
                 family: protocol::ServerFamily::Nextcloud35,
                 talk_available: true,
                 group_creation: talk_core::policy::Decision::Unknown,
+                listable_rooms: protocol::FeatureSupport::Unknown,
                 message_limit: None,
                 reference_correlation: true,
                 channel_semantics: false,
@@ -701,6 +738,25 @@ fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
             microphone: MediaState::Off,
             camera: MediaState::Off,
             share: MediaState::Unavailable,
+            sharing: ScreenShareState::Idle,
+            streams: Page::empty(),
+            replacement_generation: false,
+            remote_audio_received: 0,
+            recording: talk_core::ui::presentation::CallRecordingState::Unknown,
+            recording_control: None,
+            recording_pending: false,
+            recording_uncertain: false,
+            hand_supported: false,
+            hand_raised: false,
+            reactions: Page::empty(),
+            latest_reaction: None,
+            invitees_loaded: false,
+            invitees: Page::empty(),
+            ring_status: None,
+            mute_status: None,
+            can_end_everyone: false,
+            end_pending: false,
+            end_failed: false,
             participants: Page::empty(),
         });
         assert_eq!(m.seal_for_update(), Err(UpdateError::ActiveCall));
@@ -723,6 +779,8 @@ pub(super) fn model() -> Accounts {
         content_owner: content::ContentOwner::default(),
         media: talk_adapters::media::MediaService::new(),
         call_ui: None,
+        breakout_leave: None,
+        breakout_observation: None,
         call_poll_at: Instant::now(),
         call_events: calls::CallEvents::new(),
         call_actions: std::sync::Arc::new(calls::CallActions::new()),
@@ -741,23 +799,50 @@ pub(super) fn model() -> Accounts {
         load_rooms: None,
         load_tags: None,
         preferences: Vec::new(),
+        status_retry: Vec::new(),
+        status_pending: Vec::new(),
+        message_pending: Vec::new(),
         failures: Vec::new(),
         unresolved: Vec::new(),
         queued_send: None,
+        optimistic_room: None,
         queued_read: reads::Reads::default(),
         outbox: outbox::Outbox::default(),
         room_invite: None,
         message_search: None,
+        account_search: None,
+        account_search_retry: None,
+        discover_probe: None,
+        discover_probe_generation: 0,
+        discovery_retry: None,
+        discovery_join: None,
+        reference_owner: references::Owner::default(),
+        reference_generation: 0,
         notices: notifications::Notices::default(),
+        reminders: reminders::Reminders::default(),
+        federation: federation::Federation::default(),
         background: background::Background::default(),
+        typing: typing::Typing::default(),
         history: history::Cache::default(),
+        markup: markup::Owner::default(),
         cache: cache::Cache::default(),
+        #[cfg(debug_assertions)]
+        latency: latency::Metrics::default(),
         picker: None,
         picker_open: false,
+        avatar_picker: None,
+        avatar_dialog: None,
         csv_file_owner: files::CsvOwner::default(),
         attachment_owner: files::Owner::default(),
+        network_revision: 0,
+        last_tick: std::time::SystemTime::now(),
         message_poll_at: Instant::now(),
         message_poll_request: 0,
+        thread_refresh_due: None,
+        scheduled_poll: None,
+        translation: translation::Translations::default(),
+        summary: summary::Summaries::default(),
+        translation_poll: None,
     }
 }
 fn completion(scope: AccountScope, current: bool, reply: ProtocolReply) -> ConnectionCompletion {
@@ -873,6 +958,12 @@ fn stale_preference_reply_preserves_confirmed_values_and_cannot_enable_a_toggle(
         attachment_folder: None,
         attachments_allowed: None,
         conversation_subfolders: None,
+        user_status_enabled: None,
+        user_presence: None,
+        user_status_observed: false,
+        user_status_emoji: None,
+        status_message: None,
+        predefined_statuses: None,
     };
     m.preferences.push(AccountPreferenceSnapshot {
         scope,
@@ -1001,4 +1092,243 @@ fn startup_diagnostics_keep_the_safe_storage_and_profile_causes() {
     let line = diagnostics::test_line(event);
     assert!(line.contains("\"profile_failure\":\"device_changed\""));
     assert!(!line.contains("unix:") && !line.contains("macos:") && !line.contains("/Users/"));
+}
+
+#[test]
+fn pending_dnd_suppresses_only_its_runtime_until_authoritative_reconciliation() {
+    use talk_core::preferences::account::StatusChoice;
+    let mut model = model();
+    let scope = super::super::fixtures::scope();
+    let request = PreferenceRequest(81);
+    let mut other = scope;
+    other.runtime = talk_core::ids::RuntimeGeneration::from_local(987);
+    let mut values = AccountPreferences {
+        scope,
+        send_read_receipts: None,
+        share_typing_status: None,
+        attachment_folder: None,
+        attachments_allowed: None,
+        conversation_subfolders: None,
+        user_status_enabled: Some(true),
+        user_presence: Some(StatusChoice::Away),
+        user_status_observed: true,
+        user_status_emoji: Some(true),
+        status_message: None,
+        predefined_statuses: None,
+    };
+    model.preferences.push(AccountPreferenceSnapshot {
+        scope,
+        values: Some(values.clone()),
+        state: AccountPreferenceState::Saving { request },
+    });
+    model
+        .status_pending
+        .push((scope, request, StatusChoice::DoNotDisturb));
+    assert!(model.suppress_account_notifications(scope));
+    assert!(!model.suppress_account_notifications(other));
+    let mut lost = completion(scope, true, ProtocolReply::AccountValid(scope));
+    lost.result = Err(IdentityError::Request(ErrorKind::Uncertain));
+    model.complete(Purpose::Preferences(scope, request), &lost);
+    assert!(model.suppress_account_notifications(scope));
+
+    let reload = PreferenceRequest(82);
+    model.preferences[0].state = AccountPreferenceState::Loading { request: reload };
+    values.user_presence = None;
+    values.user_status_observed = false;
+    let unknown = completion(
+        scope,
+        true,
+        ProtocolReply::Preferences(AccountPreferenceResult {
+            request: reload,
+            values: values.clone(),
+        }),
+    );
+    model.complete(Purpose::Preferences(scope, reload), &unknown);
+    assert!(model.suppress_account_notifications(scope));
+    assert_eq!(
+        model.preferences[0].state,
+        AccountPreferenceState::Failed {
+            request: reload,
+            error: AccountPreferenceError::Uncertain
+        }
+    );
+    assert_eq!(
+        model.preferences[0].values.as_ref().unwrap().user_presence,
+        Some(StatusChoice::Away)
+    );
+
+    let reload = PreferenceRequest(83);
+    model.preferences[0].state = AccountPreferenceState::Loading { request: reload };
+    values.user_status_observed = true;
+    values.user_presence = Some(StatusChoice::Away);
+    let confirmed = completion(
+        scope,
+        true,
+        ProtocolReply::Preferences(AccountPreferenceResult {
+            request: reload,
+            values,
+        }),
+    );
+    model.complete(Purpose::Preferences(scope, reload), &confirmed);
+    assert!(!model.suppress_account_notifications(scope));
+    assert!(model.status_pending.is_empty());
+}
+
+#[test]
+fn superseded_status_read_cannot_overwrite_a_newer_admitted_choice() {
+    use talk_core::preferences::account::StatusChoice;
+    let mut model = model();
+    let scope = super::super::fixtures::scope();
+    let mut values = AccountPreferences {
+        scope,
+        send_read_receipts: None,
+        share_typing_status: None,
+        attachment_folder: None,
+        attachments_allowed: None,
+        conversation_subfolders: None,
+        user_status_enabled: Some(true),
+        user_presence: Some(StatusChoice::Away),
+        user_status_observed: true,
+        user_status_emoji: Some(true),
+        status_message: None,
+        predefined_statuses: None,
+    };
+    let read = PreferenceRequest(90);
+    let write = PreferenceRequest(91);
+    model.preferences.push(AccountPreferenceSnapshot {
+        scope,
+        values: Some(values.clone()),
+        state: AccountPreferenceState::Saving { request: write },
+    });
+    model
+        .status_pending
+        .push((scope, write, StatusChoice::DoNotDisturb));
+    values.user_presence = Some(StatusChoice::Online);
+    let stale = completion(
+        scope,
+        true,
+        ProtocolReply::Preferences(AccountPreferenceResult {
+            request: read,
+            values: values.clone(),
+        }),
+    );
+    model.complete(Purpose::Preferences(scope, read), &stale);
+    assert!(model.suppress_account_notifications(scope));
+    assert_eq!(
+        model.preferences[0].state,
+        AccountPreferenceState::Saving { request: write }
+    );
+    assert_eq!(
+        model.preferences[0].values.as_ref().unwrap().user_presence,
+        Some(StatusChoice::Away)
+    );
+    values.user_presence = Some(StatusChoice::DoNotDisturb);
+    let confirmed = completion(
+        scope,
+        true,
+        ProtocolReply::Preferences(AccountPreferenceResult {
+            request: write,
+            values,
+        }),
+    );
+    model.complete(Purpose::Preferences(scope, write), &confirmed);
+    assert!(model.status_pending.is_empty());
+    assert!(model.suppress_account_notifications(scope));
+}
+
+#[test]
+fn temporary_status_read_failure_preserves_message_but_observed_clear_removes_it() {
+    use talk_core::preferences::account::StatusMessage;
+    let mut model = model();
+    let scope = super::super::fixtures::scope();
+    let request = PreferenceRequest(101);
+    let message = StatusMessage {
+        icon: Some(text("☕")),
+        message: Some(text("Break")),
+        clear_at: None,
+    };
+    let mut values = AccountPreferences {
+        scope,
+        send_read_receipts: None,
+        share_typing_status: None,
+        attachment_folder: None,
+        attachments_allowed: None,
+        conversation_subfolders: None,
+        user_status_enabled: Some(true),
+        user_presence: None,
+        user_status_observed: true,
+        user_status_emoji: Some(true),
+        status_message: Some(message.clone()),
+        predefined_statuses: None,
+    };
+    model.preferences.push(AccountPreferenceSnapshot {
+        scope,
+        values: Some(values.clone()),
+        state: AccountPreferenceState::Loading { request },
+    });
+    values.user_status_observed = false;
+    values.status_message = None;
+    let failed_read = completion(
+        scope,
+        true,
+        ProtocolReply::Preferences(AccountPreferenceResult {
+            request,
+            values: values.clone(),
+        }),
+    );
+    model.complete(Purpose::Preferences(scope, request), &failed_read);
+    assert_eq!(
+        model.preferences[0].values.as_ref().unwrap().status_message,
+        Some(message)
+    );
+    let request = PreferenceRequest(102);
+    model.preferences[0].state = AccountPreferenceState::Loading { request };
+    values.user_status_observed = true;
+    let cleared = completion(
+        scope,
+        true,
+        ProtocolReply::Preferences(AccountPreferenceResult { request, values }),
+    );
+    model.complete(Purpose::Preferences(scope, request), &cleared);
+    assert!(
+        model.preferences[0]
+            .values
+            .as_ref()
+            .unwrap()
+            .status_message
+            .is_none()
+    );
+}
+
+#[test]
+fn favorite_and_archive_feedback_overlays_never_replace_canonical_rows_or_other_rooms() {
+    let canonical = super::super::fixtures::snapshot(Some("chat"));
+    let context = canonical.selected.unwrap();
+    let mut shown = canonical.clone();
+    OptimisticRoom {
+        request: RequestId(1),
+        context,
+        favorite: Some(true),
+        archived: Some(true),
+    }
+    .project(&mut shown);
+    for (old, new) in canonical
+        .conversations
+        .as_slice()
+        .iter()
+        .zip(shown.conversations.as_slice())
+    {
+        if old.context == context {
+            assert_eq!(new.favorite, Some(true));
+            assert_eq!(new.archived, Some(true));
+        } else {
+            assert_eq!(old, new);
+        }
+    }
+    // Dropping the failed/finished overlay exposes the latest canonical state,
+    // not a snapshot retained before an intervening room refresh.
+    assert_eq!(
+        canonical.conversations,
+        super::super::fixtures::snapshot(Some("chat")).conversations
+    );
 }

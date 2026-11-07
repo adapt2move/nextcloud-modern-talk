@@ -89,6 +89,11 @@ pub struct OperationContext {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolRequest {
+    SearchMessages(crate::protocol::search::Query),
+    ResolveReference {
+        message: MessageId,
+        url: crate::protocol::reference::ReferenceUrl,
+    },
     Content {
         operation: OperationId,
         command: crate::protocol::content::ContentCommand,
@@ -106,8 +111,27 @@ pub enum ProtocolRequest {
     PollIncomingCalls,
     /// Read-only account-wide Notifications observation; never a chat/read-marker poll.
     PollMessageNotifications,
+    /// One bounded account-wide page; conversation IDs remain account scoped.
+    SubscribedThreads {
+        offset: u32,
+    },
+    /// Bounded account-wide reminder observation, without a selected conversation.
+    UpcomingReminders,
+    FederationInvitations,
+    ChangeFederationInvitation {
+        operation: OperationId,
+        invitation: u128,
+        accept: bool,
+    },
     /// Drain the admitted account's bounded live mailbox; hints only request fresh reads.
     PollLiveEvents,
+    WatchTyping(ConversationId),
+    StopTyping,
+    TypingActivity {
+        conversation: ConversationId,
+        active: bool,
+    },
+    PollTyping(ConversationId),
     Meeting(crate::calls::Command),
     ProbeAccount,
     RefreshCallPolicy(CallScope),
@@ -150,6 +174,10 @@ pub enum ProtocolRequest {
         tags: Page<ConversationTagId, 20>,
     },
     ListConversations,
+    ListOpenConversations {
+        query: Text<256>,
+    },
+    JoinOpenConversation(ConversationId),
     Participants(ConversationId),
     History {
         conversation: ConversationId,
@@ -161,12 +189,27 @@ pub enum ProtocolRequest {
     CreateGroup {
         name: Text<256>,
     },
+    InspectCreation,
+    StageCreationPerson(crate::protocol::conversation::RecipientId),
+    UnstageCreationPerson(crate::protocol::conversation::RecipientId),
+    CreateConversation(crate::protocol::creation::Room),
     FindPeople {
         query: Text<256>,
     },
     CreateDirect {
         operation: OperationId,
         recipient: crate::protocol::conversation::RecipientId,
+    },
+    /// A currently observed room participant; the adapter revalidates membership.
+    CreateDirectForMember {
+        operation: OperationId,
+        member: crate::protocol::conversation::MemberId,
+    },
+    /// Create or open the direct conversation of an observed message's author.
+    /// The adapter resolves and rechecks the author; the view supplies no user ID.
+    CreatePrivateReply {
+        operation: OperationId,
+        source: MessageId,
     },
     LeaveConversation(ConversationId),
     ActivateConversation(ConversationId),
@@ -176,6 +219,13 @@ pub enum ProtocolRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolReply {
+    CreationOptions(crate::protocol::creation::Options),
+    CreationPerson(crate::protocol::conversation::RecipientId),
+    CreatedConversation {
+        room: crate::protocol::Conversation,
+        incomplete_invitations: bool,
+    },
+    SearchMessages(crate::protocol::search::Results),
     Content {
         operation: OperationId,
         result: crate::protocol::content::ContentResult,
@@ -192,7 +242,20 @@ pub enum ProtocolReply {
     },
     IncomingCalls(crate::calls::IncomingCalls),
     MessageNotifications(crate::protocol::MessageNotifications),
+    SubscribedThreads {
+        threads: crate::bounded::Page<crate::protocol::messaging::Thread, 50>,
+        /// Based on the server page before unbound rooms are excluded.
+        has_next: bool,
+    },
+    UpcomingReminders(crate::protocol::messaging::AccountReminders),
+    FederationInvitations(crate::protocol::federation::Invitations),
+    FederationInvitationChanged {
+        operation: OperationId,
+        invitation: u128,
+    },
     LiveEvents(crate::protocol::AccountLiveEvents),
+    Typing(crate::protocol::TypingObservation),
+    TypingAccepted,
     Meeting(crate::calls::Snapshot),
     AccountValid(AccountScope),
     Policy(Box<PolicyInputs>),
@@ -202,6 +265,8 @@ pub enum ProtocolReply {
     Tags(ConversationTags),
     TagCreated(ConversationTag),
     Conversations(ConversationList),
+    OpenConversations(crate::protocol::OpenConversations),
+    Reference(Option<crate::protocol::reference::Resolved>),
     Conversation(Conversation),
     People(Page<crate::protocol::conversation::Recipient, 100>),
     Participants(Participants),

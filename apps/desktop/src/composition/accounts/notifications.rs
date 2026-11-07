@@ -39,6 +39,8 @@ impl Notices {
                 n.scope == scope
                     && n.value.conversation == value.conversation
                     && n.value.message == value.message
+                    && n.value.reminder == value.reminder
+                    && (!value.reminder || n.value.notification_id == value.notification_id)
             })
         {
             return;
@@ -122,23 +124,37 @@ impl Accounts {
             .map(|a| NotificationSources {
                 scope: a.scope,
                 revision: 0,
-                messages: if self.background.source(
-                    a.scope,
-                    background::Observation::Messages,
-                    Instant::now(),
-                ) {
+                messages: if !self.suppress_account_notifications(a.scope)
+                    && self.background.source(
+                        a.scope,
+                        background::Observation::Messages,
+                        Instant::now(),
+                    ) {
                     SourceAvailability::Available
                 } else {
                     SourceAvailability::Unavailable
                 },
-                important: SourceAvailability::Unavailable,
-                incoming_calls: if self.incoming_source_available(a.scope) {
+                important: if !self.suppress_account_notifications(a.scope)
+                    && self.background.source(
+                        a.scope,
+                        background::Observation::Messages,
+                        Instant::now(),
+                    ) {
+                    SourceAvailability::Available
+                } else {
+                    SourceAvailability::Unavailable
+                },
+                incoming_calls: if !self.suppress_account_notifications(a.scope)
+                    && self.incoming_source_available(a.scope)
+                {
                     SourceAvailability::Available
                 } else {
                     SourceAvailability::Unavailable
                 },
                 calendar: SourceAvailability::Unavailable,
-                ringing: self.ringing_call().filter(|call| call.account == a.scope),
+                ringing: self.ringing_call().filter(|call| {
+                    call.account == a.scope && !self.suppress_account_notifications(a.scope)
+                }),
             })
             .collect()
     }
@@ -160,13 +176,15 @@ impl Accounts {
                 .and_then(|p| p.details.as_ref());
             let eligible = notice.received.elapsed() < LIFETIME
                 && self.current(notice.scope).is_ok()
+                && !self.suppress_account_notifications(notice.scope)
                 && self.background.source(
                     notice.scope,
                     background::Observation::Messages,
                     Instant::now(),
                 )
                 && background
-                && !current.is_some_and(|d| d.notifications == Some(NotificationLevel::Never));
+                && (notice.value.reminder
+                    || !current.is_some_and(|d| d.notifications == Some(NotificationLevel::Never)));
             if !eligible {
                 self.notices.messages.pop_front();
                 continue;
@@ -176,12 +194,31 @@ impl Accounts {
             let localized = |key| crate::presentation::localization::text(locale, key);
             return Some(NotificationEvent {
                 request: talk_core::preferences::RequestId(0),
-                kind: NotificationKind::Message {
-                    scope: notice.scope,
-                    conversation: notice.value.conversation,
-                    id: NotificationId(notice.value.message),
+                kind: if notice.value.reminder {
+                    NotificationKind::MessageReminder {
+                        scope: notice.scope,
+                        conversation: notice.value.conversation,
+                        id: NotificationId(notice.value.notification_id),
+                        message: notice.value.message,
+                    }
+                } else {
+                    NotificationKind::Message {
+                        scope: notice.scope,
+                        conversation: notice.value.conversation,
+                        id: NotificationId(notice.value.message),
+                    }
                 },
-                title: if redacted {
+                title: if notice.value.reminder {
+                    if redacted {
+                        text(localized("Erinnerung"))
+                    } else {
+                        text(&format!(
+                            "{} · {}",
+                            localized("Erinnerung"),
+                            notice.value.title.as_str()
+                        ))
+                    }
+                } else if redacted {
                     text(localized("Neue Nachricht"))
                 } else {
                     notice.value.title.clone()
@@ -197,15 +234,32 @@ impl Accounts {
         }
     }
     pub(in crate::composition) fn settle_message_notification(&mut self, kind: NotificationKind) {
-        if let NotificationKind::Message {
-            scope,
-            conversation,
-            id,
-        } = kind
-            && self.notices.messages.front().is_some_and(|n| {
-                n.scope == scope && n.value.conversation == conversation && n.value.message == id.0
-            })
-        {
+        let matches = self.notices.messages.front().is_some_and(|n| match kind {
+            NotificationKind::Message {
+                scope,
+                conversation,
+                id,
+            } => {
+                !n.value.reminder
+                    && n.scope == scope
+                    && n.value.conversation == conversation
+                    && n.value.message == id.0
+            }
+            NotificationKind::MessageReminder {
+                scope,
+                conversation,
+                id,
+                message,
+            } => {
+                n.value.reminder
+                    && n.scope == scope
+                    && n.value.conversation == conversation
+                    && n.value.notification_id == id.0
+                    && n.value.message == message
+            }
+            _ => false,
+        });
+        if matches {
             self.notices.messages.pop_front();
         }
     }
@@ -219,6 +273,8 @@ mod tests {
         protocol::MessageNotice {
             conversation: context.conversation,
             message,
+            notification_id: message,
+            reminder: false,
             title: text("Other room"),
             body: text("New message"),
             redacted: false,
@@ -246,6 +302,21 @@ mod tests {
         }]);
         assert!(queue.messages.is_empty());
     }
+    #[test]
+    fn reminders_keep_their_own_event_identity_when_the_same_message_was_notified() {
+        let context = super::super::super::fixtures::context(1);
+        let mut queue = Notices::default();
+        queue.push(context.account, notice(context, 42), Instant::now());
+        let mut reminder = notice(context, 42);
+        reminder.reminder = true;
+        reminder.notification_id = 100;
+        queue.push(context.account, reminder.clone(), Instant::now());
+        queue.push(context.account, reminder.clone(), Instant::now());
+        reminder.notification_id = 101;
+        queue.push(context.account, reminder, Instant::now());
+        assert_eq!(queue.messages.len(), 3);
+    }
+
     #[test]
     fn switching_selection_does_not_drop_a_background_notice_but_stale_completion_does() {
         let mut model = super::super::tests::model();

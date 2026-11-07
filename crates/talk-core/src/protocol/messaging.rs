@@ -2,7 +2,7 @@
 use super::conversation::ActionAvailability;
 use super::{Message, MessageId, SendReceipt};
 use crate::bounded::{Page, Text};
-use crate::ids::ConversationId;
+use crate::ids::{ConversationId, OperationId};
 use crate::policy::Decision;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,6 +25,8 @@ pub struct RichObject {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReplyContext {
     pub id: MessageId,
+    /// An external private quote is display-only; its ID is not a local jump target.
+    pub external: bool,
     pub author: Text<256>,
     pub text: Text<4096>,
     pub unavailable: bool,
@@ -42,6 +44,8 @@ pub struct MessageDetails {
     pub replyable: Option<bool>,
     pub parent: Option<ReplyContext>,
     pub thread: Option<MessageId>,
+    /// Number of replies when the server identifies this message as a thread root.
+    pub thread_replies: Option<u32>,
     pub reactions: Page<Reaction, 64>,
     pub rich: Page<RichObject, 32>,
     pub system: Option<Text<128>>,
@@ -51,6 +55,8 @@ pub struct MessageDetails {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ComposeOptions {
     pub reply_to: Option<MessageId>,
+    /// Original message in another conversation for a private reply.
+    pub private_reply: Option<Box<MessageId>>,
     pub thread: Option<MessageId>,
     pub thread_title: Option<Text<256>>,
     pub silent: bool,
@@ -58,6 +64,7 @@ pub struct ComposeOptions {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mention {
     pub id: Text<512>,
+    pub author_key: Option<Text<256>>,
     pub label: Text<256>,
     pub source: Text<64>,
 }
@@ -67,19 +74,38 @@ pub struct MessageReminder {
     pub timestamp: u64,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountReminders {
+    pub scope: crate::ids::AccountScope,
+    pub supported: bool,
+    /// False when the server limit is reached or a room is not bound locally.
+    pub complete: bool,
+    pub reminders: Page<MessageReminder, 100>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScheduledMessage {
     pub id: MessageId,
     pub text: Text<131072>,
     pub send_at: u64,
+    pub original_send_at: Option<u64>,
     pub options: ComposeOptions,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Thread {
     pub root: MessageId,
+    pub last_message: Option<MessageId>,
+    pub last_reply: Option<ThreadReplyActivity>,
     pub title: Text<256>,
     pub replies: u32,
     pub unread: Option<u32>,
     pub notification_level: Option<i8>,
+    /// Fresh room and root observation; unknown never grants a rename.
+    pub rename: Decision,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadReplyActivity {
+    pub author: Text<256>,
+    pub timestamp: u64,
+    pub expires: Option<u64>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchHit {
@@ -92,6 +118,7 @@ pub enum MessagingFeature {
     Read,
     Send,
     Reply,
+    PrivateReply,
     Edit,
     Delete,
     React,
@@ -100,12 +127,16 @@ pub enum MessagingFeature {
     Search,
     Pins,
     Reminders,
+    UpcomingReminders,
     Schedule,
     Threads,
     Forward,
     Files,
+    Voice,
     Typing,
     ReadReceipts,
+    MarkUnread,
+    UnreadFrom,
     Translation,
     Summary,
 }
@@ -116,8 +147,16 @@ pub struct MessagingCapabilities {
     pub pin_change: Decision,
     pub message_limit: Option<u32>,
     pub file_limit: u64,
+    pub media_caption: bool,
     pub read_receipts: Option<bool>,
     pub typing_status: Option<bool>,
+    pub summary_offer: Option<SummaryOffer>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SummaryOffer {
+    /// Sequence zero means the unread range starts before the first message.
+    pub from: MessageId,
+    pub unread: u32,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessagingCommand {
@@ -131,6 +170,8 @@ pub enum MessagingCommand {
         after: MessageId,
         thread: Option<MessageId>,
     },
+    /// First bounded forward page after the room read marker; None means start.
+    UnreadAfter(Option<MessageId>),
     Context(MessageId),
     /// Read-only recovery of one durable send correlation after restart. Absence
     /// in the bounded search is uncertain and never authorizes a second POST.
@@ -154,6 +195,10 @@ pub enum MessagingCommand {
         emoji: Text<64>,
     },
     MarkUnread,
+    /// Explicitly rewind to the observed predecessor of the selected message.
+    MarkUnreadFrom(MessageId),
+    /// Mark from the beginning when a live exhausted history proves the first row.
+    MarkUnreadFromStart,
     MarkRead(MessageId),
     Typing(bool),
     Mentions(Text<256>),
@@ -219,6 +264,16 @@ pub enum MessagingCommand {
         name: Text<255>,
         progress: super::content::TransferProgress,
     },
+    UploadImage {
+        name: Text<255>,
+        image: super::content::ImageBytes,
+        progress: super::content::TransferProgress,
+    },
+    UploadVoice {
+        bytes: super::content::VoiceBytes,
+        name: Text<255>,
+        progress: super::content::TransferProgress,
+    },
     DownloadFile {
         message: MessageId,
         placeholder: Text<128>,
@@ -228,13 +283,30 @@ pub enum MessagingCommand {
     ShareFile {
         path: Text<16384>,
         caption: Text<4096>,
+        options: ComposeOptions,
+        voice_message: bool,
     },
+    /// Share an already existing account file; result reconciles by reference.
+    ShareExistingFile {
+        voice_message: bool,
+        path: Text<16384>,
+        caption: Text<4096>,
+        options: ComposeOptions,
+    },
+    TranslationLanguages,
     Translate {
         message: MessageId,
         language: Text<64>,
+        source: Text<4096>,
     },
     Summarize {
         from: MessageId,
+    },
+    SummaryStatus {
+        handle: OperationId,
+    },
+    SummaryContinue {
+        handle: OperationId,
     },
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -265,6 +337,22 @@ pub enum MessagingResult {
     Reminders(Page<MessageReminder, 100>),
     Scheduled(Page<ScheduledMessage, 100>),
     Schedule(Box<ScheduledMessage>),
+    TranslationLanguages(Page<Text<64>, 64>),
+    Translation {
+        message: MessageId,
+        source: Text<4096>,
+        language: Text<64>,
+        text: Text<4096>,
+    },
+    SummaryStarted {
+        handle: OperationId,
+    },
+    SummaryPending,
+    SummaryPart {
+        text: Text<4096>,
+        more: bool,
+    },
+    SummaryEmpty,
     Threads(Page<Thread, 50>),
     Thread(Box<Thread>),
     Uploaded {

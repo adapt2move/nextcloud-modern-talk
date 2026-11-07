@@ -9,9 +9,7 @@ use gpui::{Context, Div, ImageSource, ObjectFit, div, img, prelude::*, px};
 use talk_core::ui::{
     Text,
     content::{AssetTarget, AttachmentRef},
-    messaging::{
-        ComposeTarget, MessageAction, MessageFeature, UploadFailure, UploadState, UploadView,
-    },
+    messaging::{MessageAction, MessageFeature, UploadFailure, UploadState, UploadView},
     presentation::{ConversationRef, RequestId},
 };
 pub(in crate::presentation) struct PendingSend {
@@ -51,7 +49,7 @@ impl Desktop {
                 && panel.uploads.as_slice().iter().any(|file| !file.submitted)
         })
     }
-    pub(in crate::presentation) fn can_send_attachments(&self) -> bool {
+    pub(in crate::presentation) fn can_send_attachments(&self, cx: &Context<Self>) -> bool {
         self.snapshot.message_panel.as_ref().is_some_and(|panel| {
             Some(panel.context) == self.snapshot.selected
                 && !panel.uploads_running
@@ -69,15 +67,25 @@ impl Desktop {
             && !self.media_offline()
             && self.message_ui.editing.is_none()
             && self.snapshot.selected.is_some_and(|context| {
-                !self.drafts.pending(context)
-                    && self.drafts.target(context) == ComposeTarget::default()
+                let target = self.drafts.target(context);
+                !target.new_thread
+                    && target.private_reply.is_none()
+                    && !self.drafts.pending(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        ((!target.silent && self.composer.read(cx).content.is_empty())
+                            || panel.media_caption)
+                            && (target.reply_to.is_none()
+                                || self.message_feature_enabled(MessageFeature::Reply))
+                            && (target.thread.is_none()
+                                || self.message_feature_enabled(MessageFeature::Threads))
+                    })
             })
     }
     pub(in crate::presentation) fn send_attachments(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.has_staged_attachments() {
             return false;
         }
-        if !self.can_send_attachments() {
+        if !self.can_send_attachments(cx) {
             return true;
         }
         let Some(body) = self.composer_submission(cx) else {
@@ -145,7 +153,10 @@ impl Desktop {
                 .iter()
                 .filter(|file| !file.submitted)
                 .map(|file| {
+                    let preview = self.asset_image(&Self::local_upload_target(panel.context, file));
+                    let group: gpui::SharedString = format!("staged-file-{}", file.id).into();
                     div()
+                        .group(group.clone())
                         .w(px(280.))
                         .max_w_full()
                         .rounded(px(8.))
@@ -154,7 +165,18 @@ impl Desktop {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(self.scaled_icon("file", 22., self.theme.muted))
+                        .child(if let Some(preview) = preview {
+                            div()
+                                .size(px(40.))
+                                .flex_none()
+                                .rounded(px(4.))
+                                .overflow_hidden()
+                                .child(img(preview).size_full().object_fit(ObjectFit::Cover))
+                                .into_any_element()
+                        } else {
+                            self.scaled_icon("file", 22., self.theme.muted)
+                                .into_any_element()
+                        })
                         .child(
                             div()
                                 .min_w_0()
@@ -168,7 +190,16 @@ impl Desktop {
                                         .text_size(self.sp(13.))
                                         .child(file.name.as_str().to_owned()),
                                 )
-                                .child(self.hint(self.l(upload_label(file.state)))),
+                                .child(self.hint(
+                                    &if matches!(file.state, UploadState::Selected) {
+                                        crate::presentation::localization::file_size(
+                                            self.locale,
+                                            file.bytes,
+                                        )
+                                    } else {
+                                        self.l(upload_label(file.state)).to_owned()
+                                    },
+                                )),
                         )
                         .when(
                             matches!(file.state, UploadState::Uploading | UploadState::Sharing),
@@ -189,16 +220,24 @@ impl Desktop {
                                 cx,
                             ))
                         })
-                        .child(self.icon_button(
-                            scoped_id("remove-file", panel.context, u128::from(file.id), 0),
-                            ("x", "Anhang entfernen"),
-                            ButtonStyle::Quiet,
-                            Availability::when(!panel.uploads_running, "Dateien werden gesendet …"),
-                            LocalAction::Message(messaging::Action::Command(
-                                MessageAction::RemoveFile(file.id),
-                            )),
-                            cx,
-                        ))
+                        .child(
+                            self.icon_button(
+                                scoped_id("remove-file", panel.context, u128::from(file.id), 0),
+                                ("x", "Anhang entfernen"),
+                                ButtonStyle::Quiet,
+                                Availability::when(
+                                    !panel.uploads_running,
+                                    "Dateien werden gesendet …",
+                                ),
+                                LocalAction::Message(messaging::Action::Command(
+                                    MessageAction::RemoveFile(file.id),
+                                )),
+                                cx,
+                            )
+                            .opacity(0.)
+                            .group_hover(group, |style| style.opacity(1.))
+                            .focus(|style| style.opacity(1.)),
+                        )
                 }),
         )
     }
@@ -306,7 +345,11 @@ impl Desktop {
                                 .text_size(self.sp(13.))
                                 .child(file.name.as_str().to_owned()),
                         )
-                        .child(self.hint(&file_detail(file.name.as_str(), file.bytes))),
+                        .child(self.hint(&file_detail(
+                            self.locale,
+                            file.name.as_str(),
+                            file.bytes,
+                        ))),
                 )
         });
         if file.state == UploadState::Uploading {
@@ -338,7 +381,7 @@ impl Desktop {
                     div()
                         .min_w_0()
                         .flex_1()
-                        .child(self.hint(self.l(label)).text_size(self.sp(11.))),
+                        .child(self.hint(self.l(label)).text_size(self.sp(12.))),
                 )
                 .when(pending, |d| d.child(self.pending_dots(self.theme.muted)))
                 .when(retry, |d| {

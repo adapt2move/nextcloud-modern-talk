@@ -774,7 +774,21 @@ fn export_inline(
                 let line_start = doc.text[range.start..i]
                     .chars()
                     .all(|c| c.is_ascii_digit() || c == ' ');
-                if "\\`*_~[]<>!&#".contains(ch)
+                // CommonMark cannot open/close underscore emphasis inside a
+                // word. Escaping those literal underscores changes Talk's
+                // pre-Markdown mention token (e.g. @lab_bob) into plain text.
+                let intraword_underscore = ch == '_'
+                    && doc.text[range.start..i]
+                        .trim_end_matches('_')
+                        .chars()
+                        .next_back()
+                        .is_some_and(char::is_alphanumeric)
+                    && doc.text[end..range.end]
+                        .trim_start_matches('_')
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_alphanumeric);
+                if ("\\`*_~[]<>!&#".contains(ch) && !intraword_underscore)
                     || (line_start && matches!(ch, '-' | '+' | '=' | '.' | ')'))
                 {
                     out.push("\\")?;

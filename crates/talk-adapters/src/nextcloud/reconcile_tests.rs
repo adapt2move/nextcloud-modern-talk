@@ -6,6 +6,62 @@ fn fixture_message(token: &str) -> Value {
 }
 
 #[tokio::test]
+async fn existing_file_share_is_permission_checked_and_reference_correlated() {
+    let mut capabilities = caps(35);
+    let features = capabilities["capabilities"]["spreed"]["features"]
+        .as_array_mut()
+        .unwrap();
+    features.push(json!("rich-object-sharing"));
+    features.push(json!("media-caption"));
+    capabilities["capabilities"]["spreed"]["config"]["attachments"] = json!({"allowed": true});
+    let server = Server::start(vec![
+        Reply::data(capabilities),
+        Reply::data(room()),
+        Reply::data(json!({"id": "42"})),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let conversation = bind(&mut client);
+    let operation = OperationId::from_local(812);
+    let result = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::Messaging {
+                conversation,
+                operation,
+                command: M::ShareExistingFile {
+                    voice_message: false,
+                    path: Text::new("/Plans/plan.pdf").unwrap(),
+                    caption: Text::new("caption").unwrap(),
+                    options: Default::default(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        result,
+        ProtocolReply::Messaging {
+            result: R::Changed,
+            ..
+        }
+    ));
+    let requests = server.seen.lock().unwrap();
+    let request = requests
+        .iter()
+        .find(|r| r.starts_with(b"POST /cloud/ocs/v2.php/apps/files_sharing/api/v1/shares"))
+        .unwrap();
+    let request = String::from_utf8_lossy(request);
+    assert!(request.contains("shareType=10"));
+    assert!(request.contains("shareWith=testroom"));
+    assert!(request.contains("referenceId="));
+    assert!(request.contains("talkMetaData="));
+    assert_eq!(client.sends.len(), 1);
+    assert_eq!(client.sends[0].operation, operation);
+}
+
+#[tokio::test]
 async fn send_and_forward_recover_a_lost_write_ack_in_a_fresh_client_without_another_post() {
     for forward in [false, true] {
         let source_room = room();
@@ -299,6 +355,10 @@ async fn attachment_share_is_correlated_after_a_lost_ack_without_a_second_post()
             .as_array_mut()
             .unwrap()
             .push(json!("rich-object-sharing"));
+        capabilities["capabilities"]["spreed"]["features"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("media-caption"));
         capabilities["capabilities"]["spreed"]["config"]["attachments"] =
             json!({"allowed": true, "conversation-subfolders":true});
         let mut dropped = Reply::data(json!({"renames":[{"one.png":"one.png"}]}));
@@ -336,6 +396,8 @@ async fn attachment_share_is_correlated_after_a_lost_ack_without_a_second_post()
                     command: M::ShareFile {
                         path: Text::new("/draft/one").unwrap(),
                         caption: Text::new("caption").unwrap(),
+                        options: Default::default(),
+                        voice_message: false,
                     },
                 },
             )

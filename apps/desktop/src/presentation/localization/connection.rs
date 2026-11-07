@@ -1,6 +1,11 @@
 //! Account connection failures shared by login, accounts and the composer.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     (
+        "Auf diesem Server nicht verfügbar.",
+        "This feature is unavailable on this server.",
+        "Esta función no está disponible en este servidor.",
+    ),
+    (
         "Dein Entwurf bleibt erhalten. Nachrichten werden nicht automatisch gesendet.",
         "Your draft is preserved. Messages will not be sent automatically.",
         "Se conserva tu borrador. Los mensajes no se enviarán automáticamente.",
@@ -9,11 +14,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Der Server begrenzt die Anfragen. Bitte später erneut versuchen.",
         "The server is limiting requests. Please try again later.",
         "El servidor está limitando las solicitudes. Vuelve a intentarlo más tarde.",
-    ),
-    (
-        "Der Server hat die Anfrage mit HTTP 403 abgelehnt. Prüfe den Serverzugriff.",
-        "The server refused the request with HTTP 403. Check access to the server.",
-        "El servidor rechazó la solicitud con HTTP 403. Revisa el acceso al servidor.",
     ),
     (
         "Der Server meldet einen Fehler. Bitte versuche es später erneut.",
@@ -34,6 +34,26 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die Verbindung zum Server ist fehlgeschlagen. Prüfe Netzwerk, VPN und Serveradresse.",
         "The connection to the server failed. Check your network, VPN and server address.",
         "No se pudo conectar con el servidor. Revisa la red, la VPN y la dirección del servidor.",
+    ),
+    (
+        "Dieser Entwurf bleibt nur für diese Sitzung erhalten.",
+        "This draft is kept for this session only.",
+        "Este borrador se conserva solo durante esta sesión.",
+    ),
+    (
+        "Mikrofon, Kamera und Freigabe bleiben beim erneuten Verbinden aus.",
+        "Microphone, camera and screen sharing stay off while reconnecting.",
+        "El micrófono, la cámara y la pantalla compartida permanecen apagados al reconectar.",
+    ),
+    (
+        "Offline – Änderungen werden gesendet, sobald du wieder online bist",
+        "Offline – changes will be sent when you are back online",
+        "Sin conexión – los cambios se enviarán cuando vuelvas a conectarte",
+    ),
+    (
+        "Prüfe, ob du auf diesen Server zugreifen darfst.",
+        "Check whether you have access to this server.",
+        "Comprueba si tienes acceso a este servidor.",
     ),
     (
         "Server antwortet nicht rechtzeitig.",

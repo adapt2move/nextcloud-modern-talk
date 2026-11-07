@@ -2,6 +2,30 @@
 use gpui::{AssetSource, Result, SharedString};
 use std::borrow::Cow;
 pub struct Assets;
+
+/// Decode the three fixed, tiny project-owned materials once per window. They
+/// are static assets, not content or media frames supplied by an account.
+pub(super) fn materials() -> crate::presentation::MaterialImages {
+    fn prepare(bytes: &[u8]) -> Option<gpui::ImageSource> {
+        let mut pixels = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+            .ok()?
+            .into_rgba8();
+        if pixels.width() != 128 || pixels.height() != 128 {
+            return None;
+        }
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2); // GPUI uses straight-alpha BGRA.
+        }
+        Some(gpui::ImageSource::Render(std::sync::Arc::new(
+            gpui::RenderImage::new([image::Frame::new(pixels)]),
+        )))
+    }
+    crate::presentation::MaterialImages {
+        grain: prepare(include_bytes!("../../assets/materials/grain.png")),
+        light: prepare(include_bytes!("../../assets/materials/grid-light.png")),
+        dark: prepare(include_bytes!("../../assets/materials/grid-dark.png")),
+    }
+}
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         let bytes: &'static [u8] = match path {
@@ -21,9 +45,14 @@ impl AssetSource for Assets {
             "icons/hand.svg" => include_bytes!("../../assets/icons/hand.svg"),
             "icons/more.svg" => include_bytes!("../../assets/icons/more.svg"),
             "icons/chat.svg" => include_bytes!("../../assets/icons/chat.svg"),
+            "icons/maximize-2.svg" => include_bytes!("../../assets/icons/maximize-2.svg"),
+            "icons/minimize-2.svg" => include_bytes!("../../assets/icons/minimize-2.svg"),
+            "icons/wifi-off.svg" => include_bytes!("../../assets/icons/wifi-off.svg"),
             "icons/grid.svg" => include_bytes!("../../assets/icons/grid.svg"),
             "icons/thumbs-up.svg" => include_bytes!("../../assets/icons/thumbs-up.svg"),
             "icons/sparkles.svg" => include_bytes!("../../assets/icons/sparkles.svg"),
+            "icons/cloud-off.svg" => include_bytes!("../../assets/icons/cloud-off.svg"),
+            "icons/bar-chart-2.svg" => include_bytes!("../../assets/icons/bar-chart-2.svg"),
             "icons/cloud.svg" => include_bytes!("../../assets/icons/cloud.svg"),
             "icons/globe.svg" => include_bytes!("../../assets/icons/globe.svg"),
             "icons/arrow-right.svg" => include_bytes!("../../assets/icons/arrow-right.svg"),
@@ -36,6 +65,7 @@ impl AssetSource for Assets {
             "icons/browser.svg" => include_bytes!("../../assets/icons/browser.svg"),
             "icons/check.svg" => include_bytes!("../../assets/icons/check.svg"),
             "icons/check-circle.svg" => include_bytes!("../../assets/icons/check-circle.svg"),
+            "icons/bell-off.svg" => include_bytes!("../../assets/icons/bell-off.svg"),
             "icons/bell.svg" => include_bytes!("../../assets/icons/bell.svg"),
             "icons/clock.svg" => include_bytes!("../../assets/icons/clock.svg"),
             "icons/refresh.svg" => include_bytes!("../../assets/icons/refresh.svg"),
@@ -61,6 +91,11 @@ impl AssetSource for Assets {
             "icons/phone-missed.svg" => include_bytes!("../../assets/icons/phone-missed.svg"),
             "icons/pin.svg" => include_bytes!("../../assets/icons/pin.svg"),
             "icons/file.svg" => include_bytes!("../../assets/icons/file.svg"),
+            "icons/folder.svg" => include_bytes!("../../assets/icons/folder.svg"),
+            "icons/file-image.svg" => include_bytes!("../../assets/icons/file-image.svg"),
+            "icons/file-video.svg" => include_bytes!("../../assets/icons/file-video.svg"),
+            "icons/file-audio.svg" => include_bytes!("../../assets/icons/file-audio.svg"),
+            "icons/file-archive.svg" => include_bytes!("../../assets/icons/file-archive.svg"),
             "icons/download.svg" => include_bytes!("../../assets/icons/download.svg"),
             "icons/smile.svg" => include_bytes!("../../assets/icons/smile.svg"),
             "icons/paperclip.svg" => include_bytes!("../../assets/icons/paperclip.svg"),

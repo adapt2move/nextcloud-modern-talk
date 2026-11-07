@@ -6,7 +6,7 @@ use talk_core::policy::Decision;
 use talk_core::ports::ErrorKind;
 use talk_core::protocol::{
     AccountProbe, Conversation, ConversationOrganization, FeatureSupport, Role, RoomActions,
-    RoomKind, ServerFamily,
+    RoomKind, ServerFamily, UserPresence, UserStatus,
 };
 
 #[cfg(any(test, feature = "backend-test"))]
@@ -51,6 +51,8 @@ fn boolean(value: Option<&Value>) -> Decision {
 
 #[derive(Clone)]
 pub(super) struct Capabilities {
+    pub user_status_enabled: Option<bool>,
+    pub user_status_emoji: Option<bool>,
     pub read_receipts: Option<bool>,
     pub typing_status: Option<bool>,
     pub attachment_folder: Option<talk_core::preferences::account::NextcloudFolder>,
@@ -65,6 +67,12 @@ pub(super) struct Capabilities {
     pub recording_consent: Option<u64>,
     pub recording_enabled: Option<bool>,
     pub breakouts_enabled: Option<bool>,
+    pub translation_providers: Option<bool>,
+    pub summary_threshold: Option<u32>,
+    pub federation_enabled: Option<bool>,
+    pub federation_incoming: Option<bool>,
+    /// True only after observing the remote capabilities for this exact room.
+    pub federation_verified: bool,
     pub encryption_required: Option<bool>,
 }
 impl Capabilities {
@@ -88,6 +96,8 @@ impl Capabilities {
             return Err(ErrorKind::Malformed);
         }
         Ok(Self {
+            user_status_enabled: data["capabilities"]["user_status"]["enabled"].as_bool(),
+            user_status_emoji: data["capabilities"]["user_status"]["supports_emoji"].as_bool(),
             features,
             read_receipts: super::preferences::public_privacy(
                 &spreed["config"]["chat"]["read-privacy"],
@@ -113,6 +123,13 @@ impl Capabilities {
             recording_consent: integer(spreed["config"]["call"].get("recording-consent")),
             recording_enabled: spreed["config"]["call"]["recording"].as_bool(),
             breakouts_enabled: spreed["config"]["call"]["breakout-rooms"].as_bool(),
+            translation_providers: spreed["config"]["chat"]["has-translation-providers"].as_bool(),
+            summary_threshold: integer(spreed["config"]["chat"].get("summary-threshold"))
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|n| *n > 0),
+            federation_enabled: spreed["config"]["federation"]["enabled"].as_bool(),
+            federation_incoming: spreed["config"]["federation"]["incoming-enabled"].as_bool(),
+            federation_verified: false,
             encryption_required: spreed["config"]["call"]
                 .get("end-to-end-encryption")
                 .and_then(Value::as_bool),
@@ -144,11 +161,53 @@ impl Capabilities {
             } else {
                 Decision::Unknown
             },
+            listable_rooms: self.feature("listable-rooms"),
             message_limit: self.message_limit,
             reference_correlation: self.has("chat-reference-id"),
             channel_semantics: self.has("announcement-preset"),
         }
     }
+}
+
+pub(super) fn presence(value: nextcloud_talk_api::presence::UserStatus) -> UserPresence {
+    use nextcloud_talk_api::presence::UserStatus as S;
+    match value {
+        S::Online => UserPresence::Online,
+        S::Away => UserPresence::Away,
+        S::DoNotDisturb => UserPresence::DoNotDisturb,
+        S::Offline => UserPresence::Offline,
+        S::Invisible => UserPresence::Invisible,
+        S::Unknown => UserPresence::Unknown,
+    }
+}
+
+fn user_status(data: &Value, kind: RoomKind, caps: &Capabilities) -> Option<UserStatus> {
+    if kind != RoomKind::Direct || caps.user_status_enabled != Some(true) || !caps.supported() {
+        return None;
+    }
+    let raw = data.get("status")?.as_str()?;
+    let presence = presence(nextcloud_talk_api::presence::UserStatus::from_wire(Some(
+        raw,
+    )));
+    Some(UserStatus {
+        presence,
+        icon: data
+            .get("statusIcon")
+            .and_then(Value::as_str)
+            .and_then(|s| Text::new(s).ok()),
+        message: data
+            .get("statusMessage")
+            .and_then(Value::as_str)
+            .and_then(|s| Text::new(s).ok()),
+    })
+}
+
+pub(super) fn is_federated(data: &Value) -> bool {
+    data.get("remoteServer")
+        .is_some_and(|value| value.as_str() != Some(""))
+        || data
+            .get("remoteToken")
+            .is_some_and(|value| value.as_str() != Some(""))
 }
 
 pub(super) fn room(
@@ -174,12 +233,7 @@ pub(super) fn room(
     let classified = attrs & 4 != 0;
     let channel = attrs & 8 != 0;
     let moderator = matches!(role, Role::Owner | Role::Moderator | Role::GuestModerator);
-    let remote = data
-        .get("remoteServer")
-        .is_some_and(|v| v.as_str() != Some(""))
-        || data
-            .get("remoteToken")
-            .is_some_and(|v| v.as_str() != Some(""));
+    let remote = is_federated(data);
     let object = data.get("objectType").and_then(Value::as_str).unwrap_or("");
     // Both pinned Talk releases create type 6 with objectType "note_to_self":
     // lib/Room.php and lib/Service/NoteToSelfService.php at
@@ -203,7 +257,7 @@ pub(super) fn room(
         || !caps.has("read-only-rooms")
         || !matches!(read_only, Some(0 | 1))
         || !matches!(lobby, Some(0 | 1))
-        || remote
+        || remote && !caps.federation_verified
         || !(note_object
             || matches!(
                 object,
@@ -264,7 +318,13 @@ pub(super) fn room(
     if channel || classified || read_only == Some(1) {
         actions.join_call = Decision::Denied;
     }
-    Ok(Conversation {
+    if remote {
+        actions.list_participants = Decision::Denied;
+        actions.leave_conversation = Decision::Denied;
+        actions.join_call = Decision::Denied;
+    }
+    let mut conversation = Conversation {
+        user_status: user_status(data, kind, caps),
         id,
         call_scope: None,
         navigation_key: None,
@@ -339,6 +399,27 @@ pub(super) fn room(
         },
         actions,
         unread_messages: integer(data.get("unreadMessages")).and_then(|n| u32::try_from(n).ok()),
+        unread_direct_mention: caps
+            .has("direct-mention-flag")
+            .then(|| data.get("unreadMentionDirect").and_then(Value::as_bool))
+            .flatten(),
+        last_read_message: if data.get("lastReadMessage").and_then(Value::as_i64) == Some(-2) {
+            Some(0)
+        } else {
+            integer(data.get("lastReadMessage"))
+        },
+        unread_mention: (caps.feature("mention-flag") == FeatureSupport::Supported)
+            .then(|| data.get("unreadMention").and_then(Value::as_bool))
+            .flatten(),
+        notification_muted: (caps.feature("notification-levels") == FeatureSupport::Supported)
+            .then(
+                || match data.get("notificationLevel").and_then(Value::as_i64) {
+                    Some(0..=2) => Some(false),
+                    Some(3) => Some(true),
+                    _ => None,
+                },
+            )
+            .flatten(),
         last_activity: integer(data.get("lastActivity")),
         call_active: data.get("hasCall").and_then(Value::as_bool),
         sensitive: classified
@@ -349,7 +430,13 @@ pub(super) fn room(
         classified,
         channel,
         unknown_restrictions: unknown,
-    })
+    };
+    if remote {
+        conversation.archive = Decision::Denied;
+        conversation.organization.favorite_change = Decision::Denied;
+        conversation.organization.tag_change = Decision::Denied;
+    }
+    Ok(conversation)
 }
 
 #[cfg(test)]
@@ -384,7 +471,7 @@ mod tests {
     fn hostile_json_has_finite_structure_and_no_duplicate_policy_keys() {
         assert!(json(br#"{"permission":true,"permission":false}"#).is_err());
         assert!(json(format!("{}0{}", "[".repeat(66), "]".repeat(66)).as_bytes()).is_err());
-        assert!(json(format!("[{}0]", "0,".repeat(4097)).as_bytes()).is_err());
+        assert!(json(format!("[{}0]", "0,".repeat(131_073)).as_bytes()).is_err());
         assert!(json(b"{} trailing").is_err());
         assert!(json(br#"{"newField":{"unknown":true},"text":"Unicode \u00fc"}"#).is_ok());
     }

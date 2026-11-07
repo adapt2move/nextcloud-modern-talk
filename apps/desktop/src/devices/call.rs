@@ -8,6 +8,7 @@ pub(super) struct Calls {
     camera: Option<(camera::Capture, Arc<Signal>)>,
     frames: frames::FramePool,
     speaker_failed: bool,
+    screen: Option<(u64, screen::Capture)>,
 }
 impl Calls {
     pub(super) fn stop(&mut self) -> Result<(), DeviceError> {
@@ -21,6 +22,7 @@ impl Calls {
             signal.revoke();
             camera.stop()?;
         }
+        self.screen = None;
         self.frames.clear_released();
         self.scope = None;
         self.speaker_failed = false;
@@ -45,6 +47,25 @@ impl Calls {
             return Ok(());
         };
         let wishes = handle.requested();
+        let screen_generation = handle.screen_generation();
+        if self.screen.as_ref().is_some_and(|(generation, capture)| {
+            Some(*generation) != screen_generation || capture.finished()
+        }) {
+            self.screen = None;
+        }
+        if let Some(generation) = screen_generation
+            && self.screen.is_none()
+        {
+            match screen::Capture::start(handle.clone(), generation) {
+                Ok(capture) => self.screen = Some((generation, capture)),
+                Err(()) => handle.screen_state(
+                    generation,
+                    talk_core::calls::SharingState::Failed(
+                        talk_core::calls::ShareFailure::Unavailable,
+                    ),
+                ),
+            }
+        }
         for (index, requested) in [wishes.microphone, handle.receive_allowed()]
             .into_iter()
             .enumerate()

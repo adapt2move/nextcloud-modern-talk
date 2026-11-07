@@ -133,7 +133,7 @@ class Lab:
         if not condition:
             raise LabError("Assertion failed: " + name)
 
-    def request(self, actor, method, path, *, body=None, query=None, expected=(200,), name=None):
+    def request(self, actor, method, path, *, body=None, query=None, expected=(200,), name=None, response_headers=None):
         url = self.base + path
         if query:
             url += "?" + urllib.parse.urlencode(query)
@@ -152,6 +152,9 @@ class Lab:
         with response:
             raw = response.read(4 * 1024 * 1024)
             status = response.code
+            if response_headers is not None:
+                for header in response_headers:
+                    response_headers[header] = response.headers.get(header)
         try:
             payload = json.loads(raw)
         except ValueError as error:

@@ -442,28 +442,27 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Option<Div> {
         let target = self.account_removal.confirmation.as_ref()?;
-        Some(div().absolute().inset_0().occlude().bg(self.theme.scrim)
-            .flex().items_center().justify_center().p_6()
-            .child(div().track_focus(&self.account_removal.focus).tab_group()
-                .w(px(440.)).max_w_full().rounded_xl().bg(self.theme.surface)
-                .border_1().border_color(self.theme.border).shadow_xl()
-                .child(self.scroll_area(super::navigation::Region::Overlay)
-                .max_h(window.viewport_size().height - px(super::window_chrome::HEIGHT + 48.)).p_5()
-                .child(div().flex().flex_col().gap_4()
-                .child(div().text_size(self.sp(18.)).font_weight(FontWeight::MEDIUM)
-                    .child(self.l("Konto aus dieser App entfernen?")))
-                .child(div().font_weight(FontWeight::MEDIUM).child(target.label.clone()))
-                .child(self.hint(self.l("Du wirst in dieser App abgemeldet und die gespeicherte Anmeldung wird entfernt. Dein NextCloud-Konto und gespeicherte Downloads bleiben erhalten.")))
-                .when(self.snapshot.call.as_ref().is_some_and(|call| call.scope.account.account == target.account
-                    && !matches!(call.stage, super::CallStage::Ended | super::CallStage::Failed)),
-                    |d| d.child(self.hint(self.l("Der laufende Anruf wird beendet.")).text_color(self.theme.danger)))
-                .when(self.drafts.has_unsent_for_account(target.account),
-                    |d| d.child(self.hint(self.l("Lokale Entwürfe werden verworfen. Bereits gesendete Nachrichten können nicht zurückgerufen werden.")).text_color(self.theme.danger)))
-                .child(div().flex().flex_wrap().justify_end().gap_2()
-                    .child(self.button("cancel-account-removal", "Abbrechen", ButtonStyle::Secondary,
+        Some(self.dialog_scrim().items_center().justify_center().p_6()
+            .child(self.dialog_shell_surface().track_focus(&self.account_removal.focus).tab_group()
+                .w(px(440.)).max_w_full()
+                .h((window.viewport_size().height - px(super::window_chrome::HEIGHT + 48.)).min(px(380.)).max(px(1.)))
+                .min_h_0().flex().flex_col()
+                .child(self.dialog_header().child(self.style_dialog_title(div())
+                    .child(self.l("Konto aus dieser App entfernen?"))))
+                .child(self.scroll_area(super::navigation::Region::Overlay).flex_1().min_h_0().p_4()
+                    .child(div().flex().flex_col().gap_4()
+                        .child(div().font_weight(FontWeight::MEDIUM).child(target.label.clone()))
+                        .child(self.hint(self.l("Du wirst in dieser App abgemeldet und die gespeicherte Anmeldung wird entfernt. Dein NextCloud-Konto und gespeicherte Downloads bleiben erhalten.")))
+                        .when(self.snapshot.call.as_ref().is_some_and(|call| call.scope.account.account == target.account
+                            && !matches!(call.stage, super::CallStage::Ended | super::CallStage::Failed)),
+                            |d| d.child(self.hint(self.l("Der laufende Anruf wird beendet.")).text_color(self.theme.danger)))
+                        .when(self.drafts.has_unsent_for_account(target.account) || self.thread_drafts.has_unsent_for_account(target.account) || self.has_thread_edit(Some(target.account)),
+                            |d| d.child(self.hint(self.l("Lokale Entwürfe werden verworfen. Bereits gesendete Nachrichten können nicht zurückgerufen werden.")).text_color(self.theme.danger)))))
+                .child(self.dialog_footer()
+                    .child(self.button("cancel-account-removal", "Abbrechen", ButtonStyle::Quiet,
                         true, LocalAction::CancelAccountRemoval, cx))
                     .child(self.button("confirm-account-removal", "Aus dieser App entfernen", ButtonStyle::Danger,
-                        true, LocalAction::ConfirmAccountRemoval, cx)))))
+                        true, LocalAction::ConfirmAccountRemoval, cx)))
                 .map(|mut panel| {
                     panel.interactivity().element_id = Some("account-removal-dialog".into());
                     self.dialog_panel(DialogSurface::AccountRemoval, panel)

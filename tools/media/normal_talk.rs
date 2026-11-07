@@ -1,6 +1,9 @@
 //! Bounded synthetic-device exercise of the normal account-owned call path.
 //! Only credential intake and generated raw frames are fixture-specific.
 #![forbid(unsafe_code)]
+#[cfg(target_os = "linux")]
+#[path = "../../apps/desktop/src/devices/screen.rs"]
+mod screen_capture;
 use serde_json::{Value, json};
 use std::{
     path::Path,
@@ -43,7 +46,7 @@ fn snapshot(reply: ProtocolReply) -> Result<Snapshot, String> {
         Err("meeting reply type".into())
     }
 }
-async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), String> {
+async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> Result<(), String> {
     let scope = AccountScope {
         account: AccountId::from_local(1),
         runtime: RuntimeGeneration::from_local(1),
@@ -163,8 +166,18 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut next_poll = Instant::now();
     let mut frames = 0u64;
+    #[cfg(target_os = "linux")]
+    let mut portal_capture = None;
+    let mut screen_started = false;
+    let mut screen_stopped = false;
+    let mut screen_seen = false;
+    let mut local_screen_flowed = false;
+    let mut screen_dimensions = None;
+    let mut screen_sent = 0u64;
+    let mut stale_screen = None;
     let mut phase = 0u64;
     let mut observed = Vec::new();
+    let mut observed_generation = 1u8;
     let mut raw_audio = 0u64;
     let mut raw_video = 0u64;
     let mut played = 0u64;
@@ -179,10 +192,48 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
     let mut publication_after_mute = None;
     let mut observed_before_reconnect = None;
     let mut incoming_enabled = false;
-    let limit = if mode == "reconnect" { 44 } else { 24 };
+    let continuity = matches!(mode, "network-resume" | "session-replaced");
+    let recovery_probe =
+        continuity || std::env::var("NMT_MEDIA_RECOVERY_PROBE").as_deref() == Ok("true");
+    let mut ready_at: Option<Duration> = None;
+    let mute_at = if continuity { 4 } else { 10 };
+    let unmute_at = if continuity { 16 } else { 12 };
+    // A severed internal poll may remain active server-side for its documented
+    // 30-second duration. Exercise recovery after that real response, without
+    // treating a fresh REST request as a successful destructive signaling read.
+    let recovery_window = std::env::var("NMT_MEDIA_RECOVERY_SECONDS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| matches!(*v, 32 | 50))
+        .unwrap_or(32);
+    let limit = if mode == "reconnect" {
+        44
+    } else if recovery_probe {
+        recovery_window
+    } else if mode == "web-screen" && recovery_window == 50 {
+        50
+    } else {
+        24
+    };
     report["stage"] = json!("exchange");
-    while started.elapsed() < Duration::from_secs(limit) {
+    report["exchange_window_seconds"] = json!(limit);
+    while started.elapsed()
+        < if recovery_probe {
+            ready_at.map_or(Duration::from_secs(20), |ready| {
+                ready + Duration::from_secs(limit)
+            })
+        } else {
+            Duration::from_secs(limit)
+        }
+    {
         tick.tick().await;
+        let control_elapsed = if recovery_probe {
+            ready_at
+                .map(|ready| started.elapsed().saturating_sub(ready))
+                .unwrap_or_default()
+        } else {
+            started.elapsed()
+        };
         if previous.is_none() {
             previous = media.capture();
         }
@@ -208,7 +259,11 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
             .await?;
             incoming_enabled = true;
         }
-        if mode == "reconnect" && started.elapsed() >= Duration::from_secs(10) && !muted {
+        if (mode == "reconnect" || continuity)
+            && (!recovery_probe || ready_at.is_some())
+            && control_elapsed >= Duration::from_secs(mute_at)
+            && !muted
+        {
             current = snapshot(
                 request(
                     &mut client,
@@ -229,7 +284,11 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
             counters_before_mute = Some(current.counters);
             muted = true;
         }
-        if mode == "reconnect" && started.elapsed() >= Duration::from_secs(12) && !unmuted {
+        if (mode == "reconnect" || continuity)
+            && (!recovery_probe || ready_at.is_some())
+            && control_elapsed >= Duration::from_secs(unmute_at)
+            && !unmuted
+        {
             current = snapshot(
                 request(
                     &mut client,
@@ -239,6 +298,16 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
                 )
                 .await?,
             )?;
+            call = current.call;
+            if continuity {
+                report["muted_intent_retained"] =
+                    json!(!current.wishes.microphone && !current.wishes.camera);
+                report["muted_capture_retained"] = json!(
+                    media
+                        .capture()
+                        .is_some_and(|c| !c.requested().microphone && !c.requested().camera)
+                );
+            }
             report["muted_counters_stopped"] =
                 json!(
                     counters_before_mute.is_some_and(|before| current.counters.audio_sent
@@ -316,6 +385,36 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
             .await?;
             resumed = true;
         }
+        if matches!(
+            mode,
+            "native-screen" | "native-static-screen" | "portal-screen"
+        ) && started.elapsed() > Duration::from_secs(5)
+            && !screen_started
+        {
+            request(
+                &mut client,
+                &runtime,
+                scope,
+                ProtocolRequest::Meeting(Command::StartScreenShare(call)),
+            )
+            .await?;
+            screen_started = true;
+        }
+        if matches!(
+            mode,
+            "native-screen" | "native-static-screen" | "portal-screen"
+        ) && started.elapsed() > Duration::from_secs(15)
+            && !screen_stopped
+        {
+            request(
+                &mut client,
+                &runtime,
+                scope,
+                ProtocolRequest::Meeting(Command::StopScreenShare(call)),
+            )
+            .await?;
+            screen_stopped = true;
+        }
         if let Some(capture) = media.capture() {
             let wishes = capture.requested();
             if wishes.microphone {
@@ -345,12 +444,50 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
                 }
                 raw_video += u64::from(capture.camera_rgba(640, 480, &pixels));
             }
+            #[cfg(target_os = "linux")]
+            if mode == "portal-screen" {
+                if let Some(generation) = capture.screen_generation() {
+                    if portal_capture
+                        .as_ref()
+                        .is_some_and(screen_capture::Capture::finished)
+                    {
+                        return Err("portal capture ended".into());
+                    }
+                    if portal_capture.is_none() {
+                        portal_capture = Some(
+                            screen_capture::Capture::start(capture.clone(), generation)
+                                .map_err(|_| "portal worker unavailable")?,
+                        );
+                    }
+                } else {
+                    portal_capture = None;
+                }
+            }
+            if (mode == "native-screen" || mode == "native-static-screen" && screen_sent == 0)
+                && let Some(generation) = capture.screen_generation()
+            {
+                stale_screen = Some((capture.clone(), generation));
+                if frames.is_multiple_of(10) {
+                    let pixels = vec![200; 1280 * 720 * 4];
+                    screen_sent += u64::from(capture.screen_rgba(generation, 1280, 720, &pixels));
+                }
+            }
             let mut out = [0; 480];
             if capture.output_audio(&mut out) && out.iter().any(|s| *s != 0) {
                 played += 1;
             }
             if capture.take_video().is_some() {
                 drawn += 1;
+            }
+        }
+        local_screen_flowed |= current.sharing == talk_core::calls::SharingState::Sharing;
+        if let talk_core::calls::SharingState::Failed(reason) = current.sharing {
+            report["capture_failure"] = json!(format!("{:?}", reason));
+        }
+        for participant in current.participants.as_slice() {
+            if participant.kind == talk_core::calls::StreamKind::Screen && participant.flowing {
+                screen_seen = true;
+                screen_dimensions = participant.dimensions;
             }
         }
         frames += 1;
@@ -362,6 +499,7 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
                 ProtocolRequest::Meeting(Command::Observe(call)),
             )
             .await;
+            report["samples"] = json!(&observed);
             current = match observed_reply {
                 Ok(value) => snapshot(value)?,
                 Err(error)
@@ -374,25 +512,55 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
                 }
                 Err(error) => return Err(error),
             };
-            if observed.len() < 64 {
-                observed.push(json!({"ms":started.elapsed().as_millis(),"phase":format!("{:?}",current.phase),"peers":current.peers,"audio_sent":current.counters.audio_sent,"audio_received":current.counters.audio_received,"video_sent":current.counters.video_sent,"video_received":current.counters.video_received,"data_received":current.counters.data_received,"offers_sent":current.counters.offers_sent,"answers_sent":current.counters.answers_sent,"policy_refreshes":current.counters.policy_refreshes}));
+            if call != current.call {
+                observed_generation = observed_generation.saturating_add(1);
+                report["automatic_new_call_generation"] = json!(true);
+                report["old_capture_closed"] = json!(
+                    previous
+                        .as_ref()
+                        .is_some_and(|c| c.scope().is_none() && !c.microphone(&[1; 480]))
+                );
+                call = current.call;
             }
+            if ready_at.is_none()
+                && current.phase == Phase::Active
+                && current.counters.audio_received > 50
+                && current.counters.video_received > 5
+                && current.counters.audio_sent > 50
+                && current.counters.video_sent > 5
+            {
+                ready_at = Some(started.elapsed());
+                report["media_ready_ms"] = json!(started.elapsed().as_millis());
+            }
+            if observed.len() < 96 {
+                observed.push(json!({"ms":started.elapsed().as_millis(),"generation":observed_generation,"phase":format!("{:?}",current.phase),"sharing":format!("{:?}",current.sharing),"microphone_intent":current.wishes.microphone,"camera_intent":current.wishes.camera,"screen_flowing":current.participants.as_slice().iter().any(|p|p.kind==talk_core::calls::StreamKind::Screen && p.flowing),"peers":current.peers,"audio_sent":current.counters.audio_sent,"audio_received":current.counters.audio_received,"video_sent":current.counters.video_sent,"video_received":current.counters.video_received,"data_received":current.counters.data_received,"offers_sent":current.counters.offers_sent,"answers_sent":current.counters.answers_sent,"policy_refreshes":current.counters.policy_refreshes}));
+            }
+            report["samples"] = json!(&observed);
+            // Bounded metadata progress lets the browser driver cut transport
+            // only after an established call, never during initial negotiation.
+            let bytes = serde_json::to_vec(report).map_err(|_| "progress encoding")?;
+            if bytes.len() > 131_072 {
+                return Err("progress bound".into());
+            }
+            let temporary = output.with_extension("progress");
+            std::fs::write(&temporary, bytes).map_err(|_| "progress write")?;
+            std::fs::rename(temporary, output).map_err(|_| "progress replace")?;
             next_poll = Instant::now() + Duration::from_secs(1);
-            if matches!(
-                current.phase,
-                Phase::Waiting(_) | Phase::Ended | Phase::Reconnecting
-            ) {
+            if matches!(current.phase, Phase::Waiting(_) | Phase::Ended) {
                 break;
             }
         }
     }
     report["samples"] = json!(observed);
+    report["local_sharing_state"] = json!(format!("{:?}", current.sharing));
+    report["remote_streams"] = json!(current.participants.as_slice().iter().map(|p| json!({"kind":format!("{:?}",p.kind),"dimensions":p.dimensions,"flowing":p.flowing})).collect::<Vec<_>>());
     report["raw_audio"] = json!(raw_audio);
     report["raw_video"] = json!(raw_video);
     report["decoded_audio_blocks_nonzero"] = json!(played);
     report["decoded_video_frames"] = json!(drawn);
     report["duration_ms"] = json!(started.elapsed().as_millis());
-    let exchanged = current.counters.data_received > 0
+    let exchanged = current.phase == Phase::Active
+        && current.counters.data_received > 0
         && current.counters.audio_sent > 100
         && current.counters.audio_received > 100
         && current.counters.video_sent > 20
@@ -422,6 +590,39 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
                 && current.counters.video_sent > 20
                 && observed_before_reconnect.is_some_and(|c| c.audio_sent > 100)
         );
+    }
+    if matches!(mode, "native-screen" | "native-static-screen") {
+        report["screen_generated_frames"] = json!(screen_sent);
+        report["screen_stopped"] = json!(screen_stopped);
+        report["stale_screen_rejected"] = json!(
+            stale_screen
+                .as_ref()
+                .is_some_and(|(h, g)| !h.screen_rgba(*g, 2, 2, &[0; 16]))
+        );
+        if screen_sent
+            < if mode == "native-static-screen" {
+                1
+            } else {
+                20
+            }
+            || !screen_stopped
+            || report["stale_screen_rejected"] != true
+        {
+            return Err("screen lifecycle incomplete".into());
+        }
+    }
+    if mode == "portal-screen" {
+        report["portal_frames_published"] = json!(local_screen_flowed);
+        if !local_screen_flowed {
+            return Err("portal source never flowed".into());
+        }
+    }
+    if mode == "web-screen" {
+        report["screen_received"] = json!(screen_seen);
+        report["screen_dimensions"] = json!(screen_dimensions);
+        if !screen_seen {
+            return Err("remote screen never flowed".into());
+        }
     }
     report["stage"] = json!("leave");
     request(
@@ -465,7 +666,14 @@ async fn run(fixture: &Path, mode: &str, report: &mut Value) -> Result<(), Strin
         ]
         .iter()
         .all(|key| report[key] == true);
-    if exchanged && closed && lifecycle && report["peer_remains_in_call"] == true {
+    let continuity_ok = !continuity
+        || report["muted_intent_retained"] == true
+            && report["muted_capture_retained"] == true
+            && report["muted_counters_stopped"] == true
+            && (mode != "session-replaced"
+                || report["automatic_new_call_generation"] == true
+                    && report["old_capture_closed"] == true);
+    if exchanged && closed && lifecycle && continuity_ok && report["peer_remains_in_call"] == true {
         Ok(())
     } else {
         Err("normal media or cleanup observations incomplete".into())
@@ -480,6 +688,12 @@ fn main() {
             "policy-loss",
             "incoming-accept",
             "incoming-decline",
+            "native-screen",
+            "native-static-screen",
+            "portal-screen",
+            "web-screen",
+            "network-resume",
+            "session-replaced",
         ]
         .contains(&args[3].as_str())
     {
@@ -493,8 +707,13 @@ fn main() {
         .expect("bounded runtime");
     match runtime.block_on(async {
         tokio::time::timeout(
-            Duration::from_secs(62),
-            run(Path::new(&args[1]), &args[3], &mut report),
+            Duration::from_secs(92),
+            run(
+                Path::new(&args[1]),
+                Path::new(&args[2]),
+                &args[3],
+                &mut report,
+            ),
         )
         .await
     }) {

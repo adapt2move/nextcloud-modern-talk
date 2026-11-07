@@ -50,7 +50,7 @@ an available rich-object reference alone does not authorize downloading its file
 
 `Request::FindPeople` queries the server-filtered local-user directory without a room; `Request::CreateDirect` creates or returns a direct room. The application accepts only current, account-scoped directory selections and retains uncertain creation operations without replay. Group creation keeps its separate server permission.
 
-`Client::own_user_status` reads the current user's account-correlated status through the existing bounded transport. Fresh chat-poll notification eligibility requires known non-silent incoming content, an explicit supported personal notification mode and known non-DND status. Omitted `silent` is decoded according to the pinned Talk response contract; malformed values remain unknown. Group defaults, broader mention types, thread subscription policy and unknown status remain suppressed until authoritative data is available.
+`Client::own_user_status` reads the current user's account-correlated status through the existing bounded transport. `Client::set_own_user_status` writes an explicit availability choice; the application gates it on `user_status.enabled` and reconciles without replaying an uncertain mutation. Fresh chat-poll notification eligibility requires known non-silent incoming content, an explicit supported personal notification mode and known non-DND status. Omitted `silent` is decoded according to the pinned Talk response contract; malformed values remain unknown. Group defaults, broader mention types, thread subscription policy and unknown status remain suppressed until authoritative data is available.
 
 `Client::poll_live_events` drains at most 32 account-scoped, coalesced HPB invalidations and reports the connection state. Internal-signaling deployments return `Internal`; application scheduling supplies bounded room/message reconciliation in either case. An event is a refresh hint, never media authority or proof that a mutation succeeded. The first transport failure is exposed only as a safe error category, without wire text or credentials.
 
@@ -64,7 +64,7 @@ The ordinary internal-signaling path was exercised against original Talk24.0.6/N
 
 ## Protocol coverage and verification
 
-[Operation inventory](spec/operations.json) classifies all 187 operations in the full Talk 25.0.6 specification, including relevant federation/avatar routes absent from the ordinary specification. [Provenance](spec/provenance.json) pins both Talk 24.0.6 and 25.0.6 full specifications, the ordinary v25 document, checksums and upstream AGPL license. Only metadata is retained; no generated HTTP wrapper or upstream implementation source is compiled. Application account/capability probes belong to Nextcloud OCS and are additional to that Talk inventory.
+[Operation inventory](spec/operations.json) classifies all 187 operations in the full Talk 25.0.6 specification, including relevant federation/avatar routes absent from the ordinary specification. [Provenance](spec/provenance.json) pins both Talk 24.0.6 and 25.0.6 full specifications, the ordinary v25 document, checksums and upstream AGPL license. Only metadata is retained; no generated HTTP wrapper or upstream implementation source is compiled. Application account/capability probes, user status, account search, references, translation and task status use NextCloud OCS/core APIs outside that Talk inventory; their available entries carry separate source provenance in `external_operations`.
 
 ```sh
 cargo test --locked -p nextcloud-talk-api

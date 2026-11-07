@@ -37,7 +37,10 @@ def copy_source(destination):
     (destination / 'tools').mkdir()
     shutil.copy2(candidate / 'tools/check_architecture.py', destination / 'tools/check_architecture.py')
     shutil.copy2(candidate / 'tools/vendor.py', destination / 'tools/vendor.py')
-    shutil.copytree(candidate / 'tools/media', destination / 'tools/media')
+    # Runtime probes may import these tools while checks run. Python bytecode
+    # and its transient rename files are generated outputs, never source inputs.
+    shutil.copytree(candidate / 'tools/media', destination / 'tools/media',
+                    ignore=shutil.ignore_patterns('__pycache__'))
     (destination / 'tests/identity').mkdir(parents=True)
     shutil.copy2(candidate / 'tests/identity/driver.rs', destination / 'tests/identity/driver.rs')
 

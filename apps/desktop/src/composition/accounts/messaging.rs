@@ -7,6 +7,12 @@ use talk_core::ui::{conversation::RemoteState, messaging as view};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Work {
     Thread,
+    ThreadOlder(u128),
+    ThreadActivity,
+    ThreadRoot(u128),
+    ThreadInfo(u128),
+    ThreadChange(u128),
+    ThreadQueued(u128),
     History,
     Latest,
     Prefetch,
@@ -17,19 +23,29 @@ pub(super) enum Work {
     Forward(ConversationRef),
     Reminder(u128),
     CancelScheduled(u128),
+    EditScheduled(u128),
     Reaction(u128),
+    ReactionAuthors,
     Files,
     Search,
     Reminders,
     Scheduled,
+    ScheduledPoll,
+    TranslationOptions,
+    Translate(u128),
+    SummaryStart,
+    SummaryStatus,
+    SummaryContinue,
     Pins,
     PinChange { message: u128, pinned: bool },
     Share,
     Send,
     Read(u128),
     Unread,
+    UnreadFrom(u128),
     Typing,
     Context(u128),
+    UnreadContext(u128),
     Recovery,
 }
 impl Work {
@@ -40,18 +56,22 @@ impl Work {
                 | Self::Forward(_)
                 | Self::Reminder(_)
                 | Self::CancelScheduled(_)
+                | Self::EditScheduled(_)
                 | Self::Reaction(_)
                 | Self::PinChange { .. }
                 | Self::Share
                 | Self::Send
+                | Self::Unread
+                | Self::UnreadFrom(_)
+                | Self::ThreadChange(_)
         )
     }
     pub(super) fn diagnostic_operation(self) -> Option<DiagnosticOperation> {
         Some(match self {
             Self::History => DiagnosticOperation::History,
             Self::Older => DiagnosticOperation::Older,
-            Self::Context(_) => DiagnosticOperation::Context,
-            Self::Thread => DiagnosticOperation::Thread,
+            Self::Context(_) | Self::UnreadContext(_) => DiagnosticOperation::Context,
+            Self::Thread | Self::ThreadOlder(_) => DiagnosticOperation::Thread,
             Self::Latest | Self::Prefetch | Self::Poll | Self::Metadata => {
                 DiagnosticOperation::Poll
             }
@@ -68,13 +88,25 @@ impl Work {
                 | Self::Prefetch
                 | Self::Older
                 | Self::Context(_)
+                | Self::UnreadContext(_)
                 | Self::Recovery
         )
     }
     pub(super) fn background(self) -> bool {
         matches!(
             self,
-            Self::Latest | Self::Prefetch | Self::Poll | Self::Metadata | Self::Recovery
+            Self::Latest
+                | Self::Prefetch
+                | Self::Poll
+                | Self::Metadata
+                | Self::Recovery
+                | Self::ThreadActivity
+                | Self::ThreadQueued(_)
+                | Self::ScheduledPoll
+                | Self::TranslationOptions
+                | Self::SummaryStart
+                | Self::SummaryStatus
+                | Self::SummaryContinue
         )
     }
 }
@@ -278,6 +310,14 @@ impl Accounts {
         if self.snapshot.selected != Some(context) {
             return;
         }
+        if let Some(panel) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| panel.context == context)
+        {
+            self.history.ensure_open_thread(context, panel);
+        }
         if let Some(history) = self.history.get(context) {
             // Pin activity remains canonical for cursors/read state, while its
             // already visible banner and marker replace redundant chat prose.
@@ -317,12 +357,27 @@ impl Accounts {
         self.project_queued_read(context);
         self.project_outbox(context);
         self.project_uploads();
+        self.prune_references();
     }
     pub(super) fn invalidate_history(&mut self, context: ConversationRef, state: ContentState) {
+        if self.snapshot.selected == Some(context) && state == ContentState::Denied {
+            self.retire_references();
+        }
         if self.snapshot.selected == Some(context) {
             self.queued_read.clear();
         }
         if state == ContentState::Denied {
+            self.forget_poll_room(context);
+            if let Some(panel) = &mut self.snapshot.search_panel {
+                panel.hits = page(
+                    panel
+                        .hits
+                        .as_slice()
+                        .iter()
+                        .filter(|hit| hit.context != context)
+                        .cloned(),
+                );
+            }
             self.revoke_room_metadata(context, UnavailableReason::PermissionDenied);
             self.invalidate_cached_room(context);
         }
@@ -377,6 +432,7 @@ impl Accounts {
         if self.pending.iter().any(|p| {
             matches!(p.purpose, Purpose::Message(_, c, _, w)
                 if c == context && (w == work || w.backward() && work.backward()
+                    || matches!(w, Work::Scheduled | Work::ScheduledPoll) && matches!(work, Work::Scheduled | Work::ScheduledPoll)
                     || matches!((w, work), (Work::Reaction(_), Work::Reaction(_)))
                     || work == Work::Poll && w == Work::History
                         && !self.history.get(context).is_some_and(|h| h.loaded)))
@@ -430,6 +486,16 @@ impl Accounts {
         }
         let poll_after = match &command {
             wire::MessagingCommand::Poll { after, .. } => Some(u128::from(after.sequence)),
+            wire::MessagingCommand::UnreadAfter(after) => {
+                Some(after.map_or(0, |id| u128::from(id.sequence)))
+            }
+            _ => None,
+        };
+        let older_before = match &command {
+            wire::MessagingCommand::History {
+                before: Some(before),
+                thread: None,
+            } if work == Work::Older => Some(u128::from(before.sequence)),
             _ => None,
         };
         self.request(
@@ -446,6 +512,9 @@ impl Accounts {
         if let Some(after) = poll_after {
             self.history.poll_admitted(context, operation, after);
         }
+        if let Some(before) = older_before {
+            self.history.older_admitted(context, operation, before);
+        }
         if queued.is_none()
             && let Some(panel) = self
                 .snapshot
@@ -459,8 +528,11 @@ impl Accounts {
                     panel.state = RemoteState::Saving(request);
                 }
                 Work::History | Work::Older => panel.history = RemoteState::Loading(request),
-                Work::Thread => panel.thread_state = RemoteState::Loading(request),
-                Work::Context(target) => {
+                Work::Thread | Work::ThreadOlder(_) => {
+                    panel.thread_state = RemoteState::Loading(request)
+                }
+                Work::ThreadRoot(_) => panel.thread_root_state = RemoteState::Loading(request),
+                Work::Context(target) | Work::UnreadContext(target) => {
                     panel.context_load = Some(view::ContextLoad {
                         target,
                         state: RemoteState::Loading(request),
@@ -505,12 +577,69 @@ impl Accounts {
         if self.snapshot.content == ContentState::Denied {
             return;
         }
+        let now = Instant::now();
+        if self
+            .scheduled_poll
+            .is_none_or(|(room, due)| room != context || now >= due)
+            && self.pending.len() < 12
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel
+                        .availability(view::MessageFeature::Schedules)
+                        .enabled()
+            })
+        {
+            self.scheduled_poll = Some((context, now + Duration::from_secs(30)));
+            let _ = self.start_message(
+                RequestId(0),
+                context,
+                wire::MessagingCommand::Scheduled,
+                Work::ScheduledPoll,
+            );
+        }
         if self.history.get(context).is_some_and(|h| h.needs_pins()) {
             let _ = self.start_message(
                 RequestId(0),
                 context,
                 wire::MessagingCommand::Pins,
                 Work::Pins,
+            );
+        }
+        if self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .is_some_and(|panel| panel.availability(view::MessageFeature::Threads).enabled())
+            && self
+                .history
+                .get(context)
+                .is_some_and(|history| history.needs_thread_activity(Instant::now()))
+        {
+            let _ = self.start_message(
+                RequestId(0),
+                context,
+                wire::MessagingCommand::Threads,
+                Work::ThreadActivity,
+            );
+        }
+        if self
+            .translation_poll
+            .is_none_or(|(room, due)| room != context || now >= due)
+            && self.pending.len() < 12
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel.translation_targets.is_none()
+                    && panel
+                        .availability(view::MessageFeature::Translation)
+                        .enabled()
+            })
+        {
+            self.translation_poll = Some((context, now + Duration::from_secs(60)));
+            let _ = self.start_message(
+                RequestId(0),
+                context,
+                wire::MessagingCommand::TranslationLanguages,
+                Work::TranslationOptions,
             );
         }
         let Ok((command, work)) = self.live_message_request(context) else {
@@ -543,11 +672,37 @@ impl Accounts {
         context: ConversationRef,
         action: view::MessageAction,
     ) -> Result<(), SubmitError> {
+        if matches!(action, view::MessageAction::Summarize) {
+            return self.begin_summary(request, context);
+        }
+        if matches!(action, view::MessageAction::DismissSummary) {
+            return self.dismiss_summary(context);
+        }
+        if let view::MessageAction::Translate {
+            message,
+            source,
+            language,
+        } = &action
+        {
+            return self.begin_translation(
+                request,
+                context,
+                *message,
+                source.clone(),
+                language.clone(),
+            );
+        }
         if let Some(result) = self.deliberate_read(request, context, &action) {
             return result;
         }
         if let Some(result) = self.queue_message_action(request, context, &action) {
+            if result.is_ok() && matches!(action, view::MessageAction::Reminder { .. }) {
+                self.reminder_changed(context.account);
+            }
             return result;
+        }
+        if matches!(action, view::MessageAction::EditScheduled { .. }) {
+            return Err(SubmitError::Unavailable(UnavailableReason::Unconfigured));
         }
         let view::MessageAction::Send { body, target } = &action else {
             return self.dispatch_message_action(request, context, action);
@@ -593,8 +748,24 @@ impl Accounts {
             ),
             other => other,
         };
+        let optimistic_thread = match &action {
+            V::RenameThread { root, title } => Some(super::thread_change::Change::Title {
+                root: *root,
+                title: title.clone(),
+            }),
+            V::ThreadNotifications { root, level } => {
+                Some(super::thread_change::Change::Notifications {
+                    root: *root,
+                    level: *level,
+                })
+            }
+            _ => None,
+        };
         match &action {
             V::StageFiles(paths) => return self.stage_files(context, paths.clone()),
+            V::StageClipboardImage { name, image } => {
+                return self.stage_clipboard_image(context, name.clone(), image.clone());
+            }
             V::SendFiles { caption, target } => {
                 return self.send_files(request, context, caption.clone(), target.clone());
             }
@@ -649,11 +820,23 @@ impl Accounts {
             V::Pins => Work::Pins,
             V::ShareUpload { .. } => Work::Share,
             V::Thread(_) => Work::Thread,
+            V::ThreadOlder(root) => Work::ThreadOlder(*root),
+            V::ThreadRoot(root) => Work::ThreadRoot(*root),
+            V::ThreadInfo(root) => Work::ThreadInfo(*root),
+            V::RenameThread { root, .. } | V::ThreadNotifications { root, .. } => {
+                Work::ThreadChange(*root)
+            }
             V::Older => Work::Older,
             V::Refresh => Work::History,
             V::Send { .. } => Work::Send,
             V::MarkRead(id) => Work::Read(*id),
             V::MarkUnread => Work::Unread,
+            V::MarkUnreadFrom(message) => Work::UnreadFrom(
+                self.history
+                    .get(context)
+                    .and_then(|history| history.predecessor(*message))
+                    .ok_or(SubmitError::StaleScope)?,
+            ),
             V::Typing(_) => Work::Typing,
             V::Pin(message) => Work::PinChange {
                 message: *message,
@@ -664,10 +847,14 @@ impl Accounts {
                 pinned: false,
             },
             V::React { message, .. } => Work::Reaction(*message),
+            V::ReactionAuthors { .. } => Work::ReactionAuthors,
             V::Context(id) => Work::Context(*id),
+            V::LocateUnreadAfter(marker) => Work::UnreadContext(*marker),
             V::Forward { destination, .. } => Work::Forward(*destination),
             V::Reminder { message, .. } => Work::Reminder(*message),
             V::CancelScheduled(id) => Work::CancelScheduled(*id),
+            V::EditScheduled { id, .. } => Work::EditScheduled(*id),
+            V::Translate { message, .. } => Work::Translate(*message),
             _ => Work::Action,
         };
         if work == Work::Send
@@ -697,12 +884,32 @@ impl Accounts {
         } else {
             None
         };
+        let author_target = match &action {
+            V::ReactionAuthors { message, emoji } => {
+                if self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.reaction_authors_load.is_some())
+                {
+                    return Err(SubmitError::Busy);
+                }
+                Some((*message, emoji.clone()))
+            }
+            _ => None,
+        };
         let command = match action {
+            V::SetFavorite(_)
+            | V::SetArchived(_)
+            | V::SetNotificationLevel(_)
+            | V::VotePoll { .. } => return Err(SubmitError::StaleScope),
+            V::Summarize | V::DismissSummary => return Err(SubmitError::StaleScope),
             V::RetryQueued(_) | V::DiscardQueued(_) => return Err(SubmitError::StaleScope),
             V::PickUpload
             | V::Download { .. }
             | V::DismissUpload
             | V::StageFiles(_)
+            | V::StageClipboardImage { .. }
             | V::SendFiles { .. }
             | V::RemoveFile(_)
             | V::RetryFile(_)
@@ -720,10 +927,34 @@ impl Accounts {
                     .path
                     .clone(),
                 caption,
+                options: Default::default(),
+                voice_message: false,
             },
             V::Thread(root) => W::History {
                 before: None,
                 thread: Some(message_id(context, root)?),
+            },
+            V::ThreadOlder(root) => W::History {
+                before: Some(message_id(
+                    context,
+                    self.snapshot
+                        .message_panel
+                        .as_ref()
+                        .filter(|panel| panel.context == context && panel.thread_root == Some(root))
+                        .and_then(|panel| panel.thread_older)
+                        .ok_or(SubmitError::StaleScope)?,
+                )?),
+                thread: Some(message_id(context, root)?),
+            },
+            V::ThreadRoot(root) => W::Context(message_id(context, root)?),
+            V::ThreadInfo(root) => W::Thread(message_id(context, root)?),
+            V::RenameThread { root, title } => W::RenameThread {
+                root: message_id(context, root)?,
+                title,
+            },
+            V::ThreadNotifications { root, level } => W::ThreadNotifications {
+                root: message_id(context, root)?,
+                level,
             },
             V::Older => W::History {
                 before: Some(
@@ -742,9 +973,14 @@ impl Accounts {
                 thread: None,
             },
             V::Context(id) => W::Context(message_id(context, id)?),
+            V::LocateUnreadAfter(marker) => W::UnreadAfter(
+                (marker > 0)
+                    .then(|| message_id(context, marker))
+                    .transpose()?,
+            ),
             V::Send { body, target } => W::Send {
                 text: text(body.as_str()),
-                options: options(context, target)?,
+                options: options(context, target, body.as_str())?,
             },
             V::Edit { message, body } => W::Edit {
                 message: message_id(context, message)?,
@@ -760,8 +996,22 @@ impl Accounts {
                 emoji,
                 add,
             },
+            V::ReactionAuthors { message, emoji } => W::ReactionAuthors {
+                message: message_id(context, message)?,
+                emoji,
+            },
             V::MarkRead(id) => W::MarkRead(message_id(context, id)?),
             V::MarkUnread => W::MarkUnread,
+            V::MarkUnreadFrom(_) => {
+                let Work::UnreadFrom(previous) = work else {
+                    return Err(SubmitError::StaleScope);
+                };
+                if previous == 0 {
+                    W::MarkUnreadFromStart
+                } else {
+                    W::MarkUnreadFrom(message_id(context, previous)?)
+                }
+            }
             V::Typing(v) => W::Typing(v),
             V::Mentions(v) => W::Mentions(v),
             V::Search(query) => {
@@ -800,10 +1050,35 @@ impl Accounts {
             } => W::Schedule {
                 text: text(body.as_str()),
                 send_at: timestamp,
-                options: options(context, target)?,
+                options: {
+                    if target.new_thread {
+                        return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+                    }
+                    options(context, target, body.as_str())?
+                },
             },
             V::Scheduled => W::Scheduled,
+            V::EditScheduled {
+                id,
+                body,
+                timestamp,
+                silent,
+            } => W::EditScheduled {
+                id: message_id(context, id)?,
+                text: text(body.as_str()),
+                send_at: timestamp,
+                silent,
+            },
             V::CancelScheduled(id) => W::CancelScheduled(message_id(context, id)?),
+            V::Translate {
+                message,
+                source,
+                language,
+            } => W::Translate {
+                message: message_id(context, message)?,
+                source,
+                language,
+            },
             V::Forward {
                 message,
                 destination,
@@ -823,14 +1098,63 @@ impl Accounts {
                     destination: destination.conversation,
                 }
             }
-            V::ShareFile { path, caption } => W::ShareFile { path, caption },
+            V::ShareFile { path, caption } => W::ShareFile {
+                path,
+                caption,
+                options: Default::default(),
+                voice_message: false,
+            },
         };
+        let cached_thread = thread_root.and_then(|root| {
+            self.history.get(context).and_then(|history| {
+                history
+                    .thread(root)
+                    .map(|rows| (rows.clone(), history.thread_root(root).cloned()))
+            })
+        });
         self.start_message(request, context, command, work)?;
+        if let Some(change) = optimistic_thread
+            && let Some(panel) = self
+                .snapshot
+                .message_panel
+                .as_mut()
+                .filter(|panel| panel.context == context)
+        {
+            super::thread_change::begin(panel, request, change);
+        }
+        if let Work::ThreadInfo(root) = work
+            && let Some(panel) = self
+                .snapshot
+                .message_panel
+                .as_mut()
+                .filter(|panel| panel.context == context && panel.thread_root == Some(root))
+        {
+            panel.thread_details_request = Some(request);
+        }
+        if let Some((message, emoji)) = author_target
+            && let Some(panel) = self
+                .snapshot
+                .message_panel
+                .as_mut()
+                .filter(|panel| panel.context == context)
+        {
+            panel.reaction_authors_load = Some(view::ReactionAuthorsLoad {
+                request,
+                message,
+                emoji,
+            });
+        }
         if let Some(root) = thread_root
             && let Some(panel) = self.snapshot.message_panel.as_mut()
         {
             if panel.thread_root != Some(root) {
-                panel.thread_messages = Page::empty();
+                let (rows, root_message) = cached_thread.unwrap_or_else(|| (Page::empty(), None));
+                panel.thread_messages = rows;
+                panel.thread_details = None;
+                panel.thread_details_request = None;
+                panel.thread_following_intent = None;
+                panel.thread_root_state = RemoteState::Idle;
+                panel.thread_root_message = root_message;
             }
             panel.thread_root = Some(root);
         }
@@ -844,6 +1168,16 @@ impl Accounts {
         work: Work,
         reply: Result<RuntimeReply, IdentityError>,
     ) {
+        let reply = if let Work::Translate(message) = work {
+            self.translation_reply(request, context, operation, message, reply)
+        } else if matches!(
+            work,
+            Work::SummaryStart | Work::SummaryStatus | Work::SummaryContinue
+        ) {
+            self.summary_reply(request, context, operation, work, reply)
+        } else {
+            reply
+        };
         let event = diagnostic_result(diagnostic_request, context, operation, work, &reply);
         if self.current(context.account).is_err() {
             self.outbox.lost_scope(operation);
@@ -861,7 +1195,11 @@ impl Accounts {
                 .get(context)
                 .is_some_and(|h| h.loaded && h.latest.is_none());
         let before = self.history.get(context).map(|h| h.offline);
+        let thread_error = reply.as_ref().err().copied();
         self.apply_message(request, context, operation, work, reply);
+        if matches!(work, Work::Thread | Work::ThreadOlder(_)) {
+            self.settle_thread_read(context, request, work, thread_error, Instant::now());
+        }
         let after = self.history.get(context).map(|h| h.offline);
         if let Some(event) = event {
             // Empty successful polls and repeated offline failures are silent.
@@ -907,6 +1245,40 @@ impl Accounts {
         // Retire obsolete cache tickets as no-effect cancellations below, so
         // neither a stale success nor failure changes rows or current feedback.
         let current_target = match work {
+            Work::ThreadRoot(root) => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel.thread_root == Some(root)
+                            && panel.thread_root_state == RemoteState::Loading(request)
+                    })
+            }
+            Work::ThreadInfo(root) => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel.thread_root == Some(root)
+                            && panel.thread_details_request == Some(request)
+                    })
+            }
+            Work::ThreadChange(root) => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel.thread_root == Some(root)
+                            && panel.state == RemoteState::Saving(request)
+                    })
+            }
+            Work::ReactionAuthors => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel
+                                .reaction_authors_load
+                                .as_ref()
+                                .is_some_and(|load| load.request == request)
+                    })
+            }
             Work::Thread => {
                 self.snapshot.selected == Some(context)
                     && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
@@ -914,7 +1286,15 @@ impl Accounts {
                             && panel.thread_state == RemoteState::Loading(request)
                     })
             }
-            Work::Context(target) => {
+            Work::ThreadOlder(root) => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel.thread_root == Some(root)
+                            && panel.thread_state == RemoteState::Loading(request)
+                    })
+            }
+            Work::Context(target) | Work::UnreadContext(target) => {
                 self.snapshot.selected == Some(context)
                     && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
                         panel.context == context
@@ -996,26 +1376,39 @@ impl Accounts {
                 Ok(result)
             }
             Err(IdentityError::Request(ErrorKind::WrongScope | ErrorKind::Cancelled))
-                if work.foreground_result() =>
+                if work.foreground_result() || matches!(work, Work::ThreadQueued(_)) =>
             {
                 Err(Completion::Uncertain)
             }
             Err(error) => Err(completion_error(error)),
-            _ if work.foreground_result() => Err(Completion::Uncertain),
+            _ if work.foreground_result() || matches!(work, Work::ThreadQueued(_)) => {
+                Err(Completion::Uncertain)
+            }
             _ => Err(Completion::Failed(UnavailableReason::PolicyStale)),
         };
-        let mut result = if matches!(work, Work::Thread | Work::Context(_))
-            && !matches!(&result, Ok(wire::MessagingResult::Messages { .. }) | Err(_))
-        {
-            Err(Completion::Failed(UnavailableReason::PolicyStale))
-        } else {
-            result
-        };
+        let mut result =
+            if matches!(
+                work,
+                Work::Thread
+                    | Work::ThreadOlder(_)
+                    | Work::ThreadRoot(_)
+                    | Work::Context(_)
+                    | Work::UnreadContext(_)
+            ) && !matches!(&result, Ok(wire::MessagingResult::Messages { .. }) | Err(_))
+            {
+                Err(Completion::Failed(UnavailableReason::PolicyStale))
+            } else {
+                result
+            };
         if result.is_ok()
             && !match (work, &result) {
                 (Work::Search, Ok(wire::MessagingResult::Search { .. }))
                 | (Work::Reminders, Ok(wire::MessagingResult::Reminders(_)))
                 | (Work::Scheduled, Ok(wire::MessagingResult::Scheduled(_)))
+                | (Work::ThreadActivity, Ok(wire::MessagingResult::Threads(_)))
+                | (Work::ScheduledPoll, Ok(wire::MessagingResult::Scheduled(_)))
+                | (Work::TranslationOptions, Ok(wire::MessagingResult::TranslationLanguages(_)))
+                | (Work::Translate(_), Ok(wire::MessagingResult::Translation { .. }))
                 | (
                     Work::Files | Work::Pins | Work::Metadata,
                     Ok(wire::MessagingResult::Messages { .. }),
@@ -1024,6 +1417,10 @@ impl Accounts {
                     Work::Search
                     | Work::Reminders
                     | Work::Scheduled
+                    | Work::ThreadActivity
+                    | Work::ScheduledPoll
+                    | Work::TranslationOptions
+                    | Work::Translate(_)
                     | Work::Files
                     | Work::Pins
                     | Work::Metadata,
@@ -1037,6 +1434,28 @@ impl Accounts {
         if let Work::Reaction(target) = work
             && !matches!(&result, Ok(wire::MessagingResult::Reactions { message, .. })
                 if u128::from(message.sequence) == target)
+            && result.is_ok()
+        {
+            result = Err(Completion::Uncertain);
+        }
+        if let Work::ThreadInfo(root) | Work::ThreadChange(root) | Work::ThreadQueued(root) = work
+            && result.is_ok()
+            && !matches!(&result, Ok(wire::MessagingResult::Thread(thread)) if thread.root.conversation == context.conversation && u128::from(thread.root.sequence) == root)
+        {
+            result = Err(if matches!(work, Work::ThreadQueued(_)) {
+                Completion::Uncertain
+            } else {
+                Completion::Failed(UnavailableReason::PolicyStale)
+            });
+        }
+        if work == Work::Unread
+            && result.is_ok()
+            && !matches!(&result, Ok(wire::MessagingResult::Changed))
+        {
+            result = Err(Completion::Uncertain);
+        }
+        if let Work::EditScheduled(target) = work
+            && !matches!(&result, Ok(wire::MessagingResult::Schedule(value)) if u128::from(value.id.sequence) == target)
             && result.is_ok()
         {
             result = Err(Completion::Uncertain);
@@ -1057,6 +1476,9 @@ impl Accounts {
         }
         self.history
             .reconcile_reactions(context, operation, work, &mut result);
+        if let Work::Reminder(message) = work {
+            self.observe_reminder_result(context, message, &result);
+        }
         let queued = self.outbox_result(operation, &result);
         if !self.history.complete(
             context,
@@ -1075,6 +1497,23 @@ impl Accounts {
             self.invalidate_history(context, ContentState::Denied);
             return;
         }
+        // A selected federated room can establish its first remote capability
+        // observation while the account list still has only an unknown policy.
+        if self.snapshot.selected == Some(context)
+            && self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|room| room.context == context && room.send == Decision::Unknown)
+            && matches!(&result, Ok(wire::MessagingResult::Messages { capabilities: Some(capabilities), .. })
+                if capabilities.actions.as_slice().iter().any(|(feature, availability)|
+                    *feature == wire::MessagingFeature::Send && availability.implemented
+                    && availability.server == protocol::FeatureSupport::Supported
+                    && availability.allowed == Decision::Allowed))
+        {
+            self.invalidate_account(context.account, protocol::AccountChange::Conversations);
+        }
         // A switched-away room still receives its admitted canonical updates.
         // Mutation receipts also settle without changing another room's panels.
         if self.snapshot.selected != Some(context) {
@@ -1086,6 +1525,11 @@ impl Accounts {
         self.history.expire(history::now_unix());
         self.observed_deliberate_read(context, work, result.is_ok());
         self.project_history(context);
+        let canonical_messages = self
+            .history
+            .get(context)
+            .map(|history| history.visible_messages())
+            .unwrap_or_else(|| self.snapshot.messages.clone());
         let changed: Vec<u128> = match &result {
             Ok(wire::MessagingResult::Messages { messages, .. })
                 if matches!(
@@ -1097,6 +1541,7 @@ impl Accounts {
                         | Work::Poll
                         | Work::Metadata
                         | Work::Context(_)
+                        | Work::UnreadContext(_)
                 ) =>
             {
                 messages
@@ -1121,7 +1566,14 @@ impl Accounts {
         else {
             return;
         };
+        // Apply observations to the canonical thread window, then replay all
+        // queued intents. This also keeps failed overlays out of cached pages.
+        if let Some(history) = self.history.get(context) {
+            history.project_open_thread(panel);
+        }
         let mut reload = false;
+        let mut thread_changed = false;
+        let mut confirmed_read_state = None;
         let completion = match result {
             Ok(result) => {
                 let mut completion = Completion::ServerAccepted;
@@ -1129,8 +1581,24 @@ impl Accounts {
                     wire::MessagingResult::Capabilities(capabilities) => {
                         project_capabilities(panel, &capabilities);
                     }
-                    wire::MessagingResult::Messages { messages, .. } => {
-                        if let Work::Context(id) = work {
+                    wire::MessagingResult::Messages {
+                        messages, cursor, ..
+                    } => {
+                        if let Work::UnreadContext(marker) = work {
+                            if let Some(first) = messages
+                                .as_slice()
+                                .iter()
+                                .map(message_view)
+                                .filter(|message| {
+                                    message.local_id > marker && !message.metadata.pin_notice
+                                })
+                                .min_by_key(|message| message.local_id)
+                            {
+                                panel.located = Some((request, first.local_id));
+                            } else {
+                                completion = Completion::Failed(UnavailableReason::PolicyUnknown);
+                            }
+                        } else if let Work::Context(id) = work {
                             if messages
                                 .as_slice()
                                 .iter()
@@ -1149,6 +1617,12 @@ impl Accounts {
                                     .filter(|m| !m.metadata.pin_notice),
                             );
                         } else if work == Work::Thread {
+                            panel.thread_older = cursor
+                                .map(|cursor| u128::from(cursor.sequence))
+                                .filter(|cursor| {
+                                    panel.thread_root.is_some_and(|root| *cursor > root)
+                                });
+                            panel.thread_has_newer = false;
                             panel.thread_messages = page(
                                 messages
                                     .as_slice()
@@ -1156,6 +1630,56 @@ impl Accounts {
                                     .map(message_view)
                                     .filter(|m| !m.metadata.pin_notice),
                             );
+                            thread_changed = true;
+                        } else if let Work::ThreadOlder(root) = work {
+                            let rows = page(
+                                messages
+                                    .as_slice()
+                                    .iter()
+                                    .map(message_view)
+                                    .filter(|row| !row.metadata.pin_notice),
+                            );
+                            panel.thread_older = cursor
+                                .map(|cursor| u128::from(cursor.sequence))
+                                .filter(|cursor| *cursor > root);
+                            if !rows.as_slice().is_empty() {
+                                panel.thread_messages = rows;
+                                panel.thread_has_newer = true;
+                            }
+                        } else if let Work::ThreadRoot(root) = work {
+                            if let Some(message) = messages
+                                .as_slice()
+                                .iter()
+                                .find(|message| u128::from(message.message.id.sequence) == root)
+                            {
+                                panel.thread_root_message = Some(message_view(message));
+                                thread_changed = true;
+                            } else {
+                                completion = Completion::Failed(UnavailableReason::PolicyUnknown);
+                            }
+                        } else if work == Work::Poll
+                            && let Some(root) = panel.thread_root
+                        {
+                            let updates = messages
+                                .as_slice()
+                                .iter()
+                                .map(message_view)
+                                .filter(|row| {
+                                    !row.metadata.pin_notice
+                                        && ((!panel.thread_has_newer
+                                            && row.metadata.thread == Some(root))
+                                            || panel
+                                                .thread_messages
+                                                .as_slice()
+                                                .iter()
+                                                .any(|old| old.local_id == row.local_id))
+                                })
+                                .collect::<Vec<_>>();
+                            if !updates.is_empty() {
+                                panel.thread_messages =
+                                    merge_thread(&panel.thread_messages, updates);
+                                thread_changed = true;
+                            }
                         }
                     }
                     wire::MessagingResult::Message(message) if work == Work::Send => {
@@ -1165,6 +1689,19 @@ impl Accounts {
                             } else {
                                 Completion::Uncertain
                             };
+                        if completion == Completion::ServerAccepted
+                            && panel.thread_root.is_some_and(|root| {
+                                message
+                                    .thread
+                                    .is_some_and(|thread| u128::from(thread.sequence) == root)
+                            })
+                        {
+                            panel.thread_messages = merge_thread(
+                                &panel.thread_messages,
+                                std::iter::once(message_view(&message)),
+                            );
+                            thread_changed = true;
+                        }
                     }
                     wire::MessagingResult::Message(_) => (),
                     wire::MessagingResult::Reactions { message, reactions } => {
@@ -1206,6 +1743,7 @@ impl Accounts {
                     wire::MessagingResult::Mentions(mentions) => {
                         panel.mentions = page(mentions.as_slice().iter().map(|m| view::Mention {
                             identifier: m.id.clone(),
+                            author_key: m.author_key.clone(),
                             label: m.label.clone(),
                         }));
                     }
@@ -1235,30 +1773,14 @@ impl Accounts {
                                 })),
                         );
                     }
-                    wire::MessagingResult::Scheduled(schedules) => {
-                        panel.scheduled =
-                            page(schedules.as_slice().iter().map(|s| view::Scheduled {
-                                id: u128::from(s.id.sequence),
-                                body: text(s.text.as_str()),
-                                timestamp: s.send_at,
-                            }));
-                    }
-                    wire::MessagingResult::Schedule(schedule) => {
-                        panel.scheduled = page(
-                            panel
-                                .scheduled
-                                .as_slice()
-                                .iter()
-                                .filter(|s| s.id != u128::from(schedule.id.sequence))
-                                .take(99)
-                                .cloned()
-                                .chain(std::iter::once(view::Scheduled {
-                                    id: u128::from(schedule.id.sequence),
-                                    body: text(schedule.text.as_str()),
-                                    timestamp: schedule.send_at,
-                                })),
-                        );
-                    }
+                    wire::MessagingResult::Scheduled(_)
+                    | wire::MessagingResult::Schedule(_)
+                    | wire::MessagingResult::TranslationLanguages(_)
+                    | wire::MessagingResult::Translation { .. }
+                    | wire::MessagingResult::SummaryStarted { .. }
+                    | wire::MessagingResult::SummaryPending
+                    | wire::MessagingResult::SummaryPart { .. }
+                    | wire::MessagingResult::SummaryEmpty => (),
                     wire::MessagingResult::Uploaded { path, bytes } => {
                         let name = panel.upload_name.take().unwrap_or_else(|| text("File"));
                         panel.uploaded = Some(view::UploadedFile {
@@ -1281,7 +1803,10 @@ impl Accounts {
                                     .cloned(),
                             );
                         }
-                        reload = !matches!(work, Work::Read(_) | Work::Typing | Work::Unread);
+                        reload = !matches!(
+                            work,
+                            Work::Read(_) | Work::Typing | Work::Unread | Work::UnreadFrom(_)
+                        );
                         if let Work::Read(id) = work {
                             let reached_latest = self
                                 .history
@@ -1293,28 +1818,70 @@ impl Accounts {
                                         let mut row = row.clone();
                                         if row.context == context {
                                             row.unread = 0;
+                                            row.last_read_message = Some(id);
+                                            row.unread_direct_mention =
+                                                row.unread_direct_mention.map(|_| false);
+                                            row.unread_mention = Some(false);
                                         }
                                         row
                                     }),
                                 );
+                                confirmed_read_state = Some(true);
                             }
-                        } else if work == Work::Unread {
+                        } else if matches!(work, Work::Unread | Work::UnreadFrom(_)) {
                             self.snapshot.conversations =
                                 page(self.snapshot.conversations.as_slice().iter().map(|row| {
                                     let mut row = row.clone();
                                     if row.context == context {
                                         row.unread = row.unread.max(1);
+                                        if let Work::UnreadFrom(previous) = work {
+                                            row.last_read_message = Some(previous);
+                                        }
+                                        row.unread_mention = None;
                                     }
                                     row
                                 }));
+                            confirmed_read_state = Some(false);
                         }
                         if work == Work::Share {
                             panel.uploaded = None;
                         }
                     }
+                    wire::MessagingResult::ReactionAuthors(authors)
+                        if work == Work::ReactionAuthors =>
+                    {
+                        if let Some(load) = panel
+                            .reaction_authors_load
+                            .take()
+                            .filter(|load| load.request == request)
+                        {
+                            panel.reaction_authors = cache_reaction_authors(
+                                &panel.reaction_authors,
+                                view::ReactionAuthors {
+                                    message: load.message,
+                                    emoji: load.emoji,
+                                    authors,
+                                },
+                            );
+                        }
+                    }
+                    wire::MessagingResult::Thread(thread) => {
+                        // A direct fallback preserves its optimistic overlay
+                        // through projection; queued work already projected the
+                        // freshly observed baseline and later pending intents.
+                        if matches!(work, Work::ThreadChange(_))
+                            && panel.thread_change_prior.is_some()
+                        {
+                            panel.thread_details = Some(view::ThreadDetails {
+                                root: u128::from(thread.root.sequence),
+                                title: thread.title,
+                                notification_level: thread.notification_level,
+                                rename: thread.rename,
+                            });
+                        }
+                    }
                     wire::MessagingResult::ReactionAuthors(_)
-                    | wire::MessagingResult::Threads(_)
-                    | wire::MessagingResult::Thread(_) => (),
+                    | wire::MessagingResult::Threads(_) => (),
                 }
                 completion
             }
@@ -1325,13 +1892,40 @@ impl Accounts {
             Completion::Failed(reason) => RemoteState::Failed(request, reason),
             Completion::Uncertain => RemoteState::Uncertain(request),
         };
-        if work == Work::Thread {
+        if matches!(work, Work::ThreadChange(_)) {
+            super::thread_change::settle(panel, request, completion);
+        }
+        if matches!(work, Work::ThreadInfo(_)) && panel.thread_details_request == Some(request) {
+            panel.thread_details_request = None;
+        }
+        if work == Work::ReactionAuthors
+            && panel
+                .reaction_authors_load
+                .as_ref()
+                .is_some_and(|load| load.request == request)
+        {
+            panel.reaction_authors_load = None;
+        }
+        if !changed.is_empty() {
+            panel.reaction_authors = page(
+                panel
+                    .reaction_authors
+                    .as_slice()
+                    .iter()
+                    .filter(|entry| !changed.contains(&entry.message))
+                    .cloned(),
+            );
+        }
+        if matches!(work, Work::Thread | Work::ThreadOlder(_)) {
             panel.thread_state = state;
             if completion == Completion::Failed(UnavailableReason::PermissionDenied) {
                 panel.thread_messages = Page::empty();
             }
         }
-        if matches!(work, Work::Context(_))
+        if matches!(work, Work::ThreadRoot(_)) {
+            panel.thread_root_state = state;
+        }
+        if matches!(work, Work::Context(_) | Work::UnreadContext(_))
             && let Some(load) = panel.context_load.as_mut()
         {
             load.state = state;
@@ -1362,7 +1956,52 @@ impl Accounts {
                 result: completion,
             });
         }
-        reconcile_related(panel, &self.snapshot.messages, &changed);
+        reconcile_related(panel, &canonical_messages, &changed);
+        let open_thread = panel.thread_root.map(|root| {
+            (
+                root,
+                panel.thread_messages.clone(),
+                panel.thread_root_message.clone(),
+            )
+        });
+        let thread_cache = if completion == Completion::ServerAccepted
+            && !panel.thread_has_newer
+            && (thread_changed || !changed.is_empty())
+        {
+            panel.thread_root.map(|root| {
+                let root_message = panel
+                    .thread_root_message
+                    .as_ref()
+                    .filter(|message| message.local_id == root)
+                    .cloned()
+                    .or_else(|| {
+                        canonical_messages
+                            .as_slice()
+                            .iter()
+                            .find(|message| message.local_id == root)
+                            .cloned()
+                    });
+                (root, panel.thread_messages.clone(), root_message)
+            })
+        } else {
+            None
+        };
+        if let Some((root, rows, root_message)) = open_thread {
+            self.history
+                .remember_open_thread(context, root, rows, root_message);
+        }
+        if let Some((root, rows, root_message)) = thread_cache {
+            self.history
+                .remember_thread(context, root, rows, root_message);
+        }
+        self.snapshot.messages = canonical_messages;
+        self.project_outbox(context);
+        if matches!(work, Work::ThreadChange(_) | Work::ThreadQueued(_))
+            && completion == Completion::ServerAccepted
+            && self.refresh_threads(context.account).is_err()
+        {
+            self.hint_thread_refresh(context.account, Instant::now());
+        }
         if work == Work::History
             && completion != Completion::ServerAccepted
             && !self.history.get(context).is_some_and(|h| h.loaded)
@@ -1397,6 +2036,9 @@ impl Accounts {
                         })
                     };
             }
+        }
+        if let Some(read) = confirmed_read_state {
+            self.remember_cached_unread_state(context, read);
         }
         self.reconcile_content_assets();
         if reload && let Ok((command, work)) = self.live_message_request(context) {
@@ -1444,6 +2086,40 @@ impl Accounts {
         });
         self.touch();
     }
+}
+fn cache_reaction_authors(
+    cache: &Page<view::ReactionAuthors, 16>,
+    entry: view::ReactionAuthors,
+) -> Page<view::ReactionAuthors, 16> {
+    let mut values: Vec<_> = cache
+        .as_slice()
+        .iter()
+        .filter(|old| old.message != entry.message || old.emoji != entry.emoji)
+        .cloned()
+        .collect();
+    if values.len() >= 16 {
+        values.remove(0);
+    }
+    values.push(entry);
+    page(values)
+}
+fn merge_thread(
+    existing: &Page<MessageView, 50>,
+    incoming: impl IntoIterator<Item = MessageView>,
+) -> Page<MessageView, 50> {
+    let mut rows = existing.as_slice().to_vec();
+    for row in incoming.into_iter().take(50) {
+        if let Some(old) = rows.iter_mut().find(|old| old.local_id == row.local_id) {
+            *old = row;
+        } else {
+            rows.push(row);
+        }
+    }
+    rows.sort_by_key(|row| row.local_id);
+    if rows.len() > 50 {
+        rows.drain(..rows.len() - 50);
+    }
+    page(rows)
 }
 
 #[cfg(test)]
@@ -1524,6 +2200,19 @@ fn diagnostic_result(
     Some(event)
 }
 
+pub(super) fn scheduled_view(schedule: &wire::ScheduledMessage) -> view::Scheduled {
+    view::Scheduled {
+        id: u128::from(schedule.id.sequence),
+        body: text(schedule.text.as_str()),
+        timestamp: schedule.send_at,
+        failed_original_timestamp: (schedule.send_at == 0)
+            .then_some(schedule.original_send_at)
+            .flatten(),
+        editable: schedule.text.as_str().len() <= 4096,
+        silent: schedule.options.silent,
+    }
+}
+
 fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> bool {
     let message = |m: &wire::MessageDetails| {
         m.message.id.conversation == context.conversation
@@ -1562,6 +2251,17 @@ fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> 
             .as_slice()
             .iter()
             .all(|s| s.id.conversation == context.conversation),
+        wire::MessagingResult::Threads(threads) => threads.as_slice().iter().all(|thread| {
+            thread.root.conversation == context.conversation
+                && thread.root.sequence > 0
+                && thread.last_message.is_none_or(|last| {
+                    last.conversation == context.conversation
+                        && last.sequence >= thread.root.sequence
+                })
+        }),
+        wire::MessagingResult::Translation { message, .. } => {
+            message.conversation == context.conversation
+        }
         wire::MessagingResult::Search { hits, .. } => hits
             .as_slice()
             .iter()
@@ -1575,6 +2275,14 @@ fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> 
 }
 fn expire_related(panel: &mut view::MessagePanel, expired: &[u128], now: u64) {
     let mut expired = expired.to_vec();
+    if let Some(message) = panel.thread_root_message.as_ref()
+        && message
+            .metadata
+            .expires_at
+            .is_some_and(|at| at > 0 && at <= now)
+    {
+        expired.push(message.local_id);
+    }
     for messages in [
         &panel.thread_messages,
         &panel.pinned_messages,
@@ -1597,6 +2305,7 @@ fn expire_related(panel: &mut view::MessagePanel, expired: &[u128], now: u64) {
         }
         let mut message = message.clone();
         if let Some(parent) = message.metadata.parent.as_mut()
+            && !parent.external
             && expired.contains(&parent.id)
         {
             parent.unavailable = true;
@@ -1604,6 +2313,7 @@ fn expire_related(panel: &mut view::MessagePanel, expired: &[u128], now: u64) {
         }
         Some(message)
     };
+    panel.thread_root_message = panel.thread_root_message.as_ref().and_then(retain);
     panel.thread_messages = page(panel.thread_messages.as_slice().iter().filter_map(retain));
     panel.pinned_messages = page(panel.pinned_messages.as_slice().iter().filter_map(retain));
     panel.shared_files = page(panel.shared_files.as_slice().iter().filter_map(retain));
@@ -1636,6 +2346,7 @@ fn reconcile_related_reactions(
         }
         message
     };
+    panel.thread_root_message = panel.thread_root_message.as_ref().map(reconcile);
     panel.thread_messages = page(panel.thread_messages.as_slice().iter().map(reconcile));
     panel.pinned_messages = page(panel.pinned_messages.as_slice().iter().map(reconcile));
     panel.shared_files = page(panel.shared_files.as_slice().iter().map(reconcile));
@@ -1661,13 +2372,14 @@ fn reconcile_related(
             && canonical
                 .as_slice()
                 .iter()
-                .any(|m| m.local_id == parent.id && m.metadata.deleted)
+                .any(|m| !parent.external && m.local_id == parent.id && m.metadata.deleted)
         {
             parent.unavailable = true;
             parent.text = text("");
         }
         result
     };
+    panel.thread_root_message = panel.thread_root_message.as_ref().map(reconcile);
     panel.thread_messages = page(panel.thread_messages.as_slice().iter().map(reconcile));
     panel.pinned_messages = page(
         panel
@@ -1703,19 +2415,46 @@ fn reconcile_related(
 fn options(
     context: ConversationRef,
     target: view::ComposeTarget,
+    body: &str,
 ) -> Result<wire::ComposeOptions, SubmitError> {
+    // Cross-room replies require the outbox's stable-key resolution. Never
+    // degrade to an unquoted direct message when that owner is unavailable.
+    if target.private_reply.is_some()
+        || target.new_thread && (target.thread.is_some() || target.reply_to.is_some())
+    {
+        return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
+    }
     Ok(wire::ComposeOptions {
         reply_to: target
             .reply_to
             .map(|id| message_id(context, id))
             .transpose()?,
+        private_reply: None,
         thread: target
             .thread
             .map(|id| message_id(context, id))
             .transpose()?,
-        thread_title: None,
+        thread_title: target.new_thread.then(|| thread_title(body)).transpose()?,
         silent: target.silent,
     })
+}
+
+/// Talk creates a new thread only while posting its root. Use the first
+/// meaningful line as a short, Unicode-safe title; users can rename it later.
+pub(super) fn thread_title(body: &str) -> Result<Text<256>, SubmitError> {
+    let line = body
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))?;
+    let mut title = String::new();
+    for character in line.chars().take(80) {
+        if title.len() + character.len_utf8() > 256 {
+            break;
+        }
+        title.push(character);
+    }
+    Text::new(&title).map_err(|_| SubmitError::Busy)
 }
 fn message_id(context: ConversationRef, id: u128) -> Result<protocol::MessageId, SubmitError> {
     Ok(protocol::MessageId {
@@ -1729,6 +2468,7 @@ pub(super) fn project_capabilities(
 ) {
     panel.pin_change = capabilities.pin_change;
     panel.file_limit = capabilities.file_limit;
+    panel.media_caption = capabilities.media_caption;
     panel.message_limit = capabilities.message_limit.unwrap_or(4096).min(4096);
     panel.features = page(
         capabilities
@@ -1753,8 +2493,9 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
         own: m.own,
         delivery: DeliveryState::Received,
         attachments: Page::empty(),
-        reply_count: 0,
+        reply_count: m.thread_replies.unwrap_or(0).min(u32::from(u16::MAX)) as u16,
         metadata: view::MessageMetadata {
+            prepared: None,
             local_operation: m.message.own_operation.map(OperationId::as_local),
             local_order: None,
             author_key: m.author_key.clone(),
@@ -1764,15 +2505,21 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
             edited: m.message.edited_at.is_some(),
             deleted,
             system: m.message.kind == protocol::MessageKind::System,
+            voice_message: m.message.kind == protocol::MessageKind::VoiceMessage,
             system_event: system_event(m),
             pin_notice: m.message.kind == protocol::MessageKind::System
                 && m.system.as_ref().is_some_and(|kind| {
-                    matches!(kind.as_str(), "message_pinned" | "message_unpinned")
+                    matches!(
+                        kind.as_str(),
+                        "message_pinned" | "message_unpinned" | "poll_voted" | "poll_closed"
+                    )
                 }),
             read_through: None,
+            unread_after: None,
             replyable: m.replyable == Some(true) && !deleted,
             parent: m.parent.as_ref().map(|p| view::Reply {
                 id: u128::from(p.id.sequence),
+                external: p.external,
                 author: p.author.clone(),
                 text: if p.unavailable {
                     text("")
@@ -1877,6 +2624,7 @@ pub(super) fn merge(
         .collect();
     for message in &mut messages {
         if let Some(parent) = message.metadata.parent.as_mut()
+            && !parent.external
             && unavailable.contains(&parent.id)
         {
             parent.unavailable = true;
@@ -1891,6 +2639,7 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
     Some(match f {
         W::React => V::React,
         W::Reply => V::Reply,
+        W::PrivateReply => V::PrivateReply,
         W::Edit => V::Edit,
         W::Delete => V::Delete,
         W::Threads => V::Threads,
@@ -1899,11 +2648,17 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
         W::Search => V::Search,
         W::Pins => V::Pins,
         W::Reminders => V::Reminders,
+        W::UpcomingReminders => V::UpcomingReminders,
         W::Schedule => V::Schedules,
         W::Forward => V::Forward,
         W::Files => V::Files,
+        W::Voice => V::Voice,
         W::Typing => V::Typing,
         W::ReadReceipts => V::ReadReceipts,
+        W::MarkUnread => V::MarkUnread,
+        W::UnreadFrom => V::UnreadFrom,
+        W::Translation => V::Translation,
+        W::Summary => V::Summary,
         _ => return None,
     })
 }
@@ -1914,6 +2669,60 @@ pub(super) fn time_label(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_thread_title_uses_a_bounded_unicode_safe_first_line() {
+        assert_eq!(
+            thread_title("\n  Design review  \nDetails")
+                .unwrap()
+                .as_str(),
+            "Design review"
+        );
+        let title = thread_title(&"🦀".repeat(100)).unwrap();
+        assert!(title.as_str().len() <= 256);
+        assert_eq!(title.as_str().chars().count(), 64);
+        assert!(thread_title(" \n ").is_err());
+    }
+
+    #[test]
+    fn live_thread_updates_replace_rows_and_bound_the_page() {
+        let initial = page((1..=50).map(|id| row(id, "before")));
+        let merged = merge_thread(&initial, [row(25, "edited"), row(51, "new")]);
+        assert_eq!(merged.as_slice().len(), 50);
+        assert_eq!(merged.as_slice()[0].local_id, 2);
+        assert_eq!(
+            merged
+                .as_slice()
+                .iter()
+                .find(|row| row.local_id == 25)
+                .unwrap()
+                .body
+                .as_str(),
+            "edited"
+        );
+        assert_eq!(merged.as_slice().last().unwrap().local_id, 51);
+    }
+
+    #[test]
+    fn reaction_author_cache_is_bounded_and_replaces_matching_entry() {
+        let make = |message, name: &str| view::ReactionAuthors {
+            message,
+            emoji: text("👍"),
+            authors: page([text(name)]),
+        };
+        let mut cache = Page::empty();
+        for message in 1..=17 {
+            cache = cache_reaction_authors(&cache, make(message, "Synthetic"));
+        }
+        assert_eq!(cache.as_slice().len(), 16);
+        assert_eq!(cache.as_slice()[0].message, 2);
+        cache = cache_reaction_authors(&cache, make(10, "Updated"));
+        assert_eq!(cache.as_slice().len(), 16);
+        assert_eq!(
+            cache.as_slice().last().unwrap().authors.as_slice()[0].as_str(),
+            "Updated"
+        );
+    }
     #[test]
     fn metadata_warmup_is_single_flight_across_room_switches() {
         let mut model = super::super::tests::model();
@@ -1975,12 +2784,14 @@ mod tests {
             replyable: None,
             parent: None,
             thread: None,
+            thread_replies: Some(3),
             reactions: Page::empty(),
             rich: Page::empty(),
             system: None,
             edit: Decision::Unknown,
             delete: Decision::Unknown,
         };
+        assert_eq!(message_view(&message).reply_count, 3);
         for (serial, work, rows, cursor) in [
             (1_u64, Work::History, page([message]), None),
             (
@@ -2168,6 +2979,7 @@ mod tests {
             replyable: Some(true),
             parent: None,
             thread: None,
+            thread_replies: None,
             reactions: Page::empty(),
             rich: Page::empty(),
             system: None,
@@ -2265,6 +3077,7 @@ mod tests {
         let mut child = row(2, "reply");
         child.metadata.parent = Some(view::Reply {
             id: 1,
+            external: false,
             author: text("A"),
             text: text("secret"),
             unavailable: false,
@@ -2325,6 +3138,7 @@ mod immediate_send_tests {
                 replyable: Some(true),
                 parent: None,
                 thread: None,
+                thread_replies: None,
                 reactions: Page::empty(),
                 rich: Page::empty(),
                 system: None,

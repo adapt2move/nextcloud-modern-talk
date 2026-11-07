@@ -7,10 +7,35 @@ use talk_core::protocol::conversation::ActionAvailability;
 use talk_core::protocol::messaging::*;
 use talk_core::protocol::{FeatureSupport, Role, RoomKind};
 
+fn visible_unread_event(event: &api::models::Message, marker: u64, now: u64) -> bool {
+    let hidden = matches!(
+        event.system.as_deref(),
+        Some(
+            "reaction_deleted"
+                | "message_edited"
+                | "message_deleted"
+                | "reaction"
+                | "reaction_revoked"
+        )
+    );
+    let Some(row) = event.update.as_deref().or((!hidden).then_some(event)) else {
+        return false;
+    };
+    row.id > marker
+        && !row
+            .expires
+            .is_some_and(|expires| expires > 0 && expires <= now)
+        && !matches!(
+            row.system.as_deref(),
+            Some("message_pinned" | "message_unpinned")
+        )
+}
+
 pub(super) struct UploadName {
     conversation: ConversationId,
     path: String,
     name: String,
+    voice_message: bool,
     share: Option<OperationId>,
 }
 #[cfg(test)]
@@ -20,6 +45,7 @@ impl UploadName {
             conversation,
             path: "/draft/one".into(),
             name: "one.png".into(),
+            voice_message: false,
             share: None,
         }
     }
@@ -30,6 +56,7 @@ pub(super) fn is_mutation(c: &MessagingCommand) -> bool {
         MessagingCommand::Capabilities
             | MessagingCommand::History { .. }
             | MessagingCommand::Poll { .. }
+            | MessagingCommand::UnreadAfter(_)
             | MessagingCommand::Context(_)
             | MessagingCommand::ReconcileSend
             | MessagingCommand::ReactionAuthors { .. }
@@ -42,24 +69,33 @@ pub(super) fn is_mutation(c: &MessagingCommand) -> bool {
             | MessagingCommand::Threads
             | MessagingCommand::Thread(_)
             | MessagingCommand::SharedFiles { .. }
+            | MessagingCommand::TranslationLanguages
+            | MessagingCommand::Translate { .. }
+            | MessagingCommand::SummaryStatus { .. }
     )
 }
 fn feature(c: &MessagingCommand) -> MessagingFeature {
     use MessagingCommand as C;
     use MessagingFeature as F;
     match c {
-        C::History { .. } | C::Poll { .. } | C::Context(_) | C::ReconcileSend => F::Read,
+        C::History { .. }
+        | C::Poll { .. }
+        | C::UnreadAfter(_)
+        | C::Context(_)
+        | C::ReconcileSend => F::Read,
         C::Send { .. } => F::Send,
         C::Edit { .. } => F::Edit,
         C::Delete(_) => F::Delete,
         C::React { .. } | C::ReactionAuthors { .. } => F::React,
-        C::MarkUnread => F::Read,
+        C::MarkUnread => F::MarkUnread,
+        C::MarkUnreadFrom(_) | C::MarkUnreadFromStart => F::UnreadFrom,
         C::MarkRead(_) => F::ReadReceipts,
         C::Typing(_) => F::Typing,
         C::Mentions(_) => F::Mentions,
         C::Search { .. } => F::Search,
         C::Pin { .. } | C::Unpin(_) | C::HidePin(_) | C::Pins => F::Pins,
-        C::Reminder { .. } | C::ReadReminder(_) | C::Reminders => F::Reminders,
+        C::Reminder { .. } | C::ReadReminder(_) => F::Reminders,
+        C::Reminders => F::UpcomingReminders,
         C::Scheduled | C::Schedule { .. } | C::EditScheduled { .. } | C::CancelScheduled(_) => {
             F::Schedule
         }
@@ -67,12 +103,15 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
             F::Threads
         }
         C::Forward { .. } | C::ForwardApproved { .. } => F::Forward,
+        C::UploadVoice { .. } => F::Voice,
         C::SharedFiles { .. }
         | C::ShareFile { .. }
+        | C::ShareExistingFile { .. }
         | C::UploadFile { .. }
+        | C::UploadImage { .. }
         | C::DownloadFile { .. } => F::Files,
-        C::Translate { .. } => F::Translation,
-        C::Summarize { .. } => F::Summary,
+        C::TranslationLanguages | C::Translate { .. } => F::Translation,
+        C::Summarize { .. } | C::SummaryStatus { .. } | C::SummaryContinue { .. } => F::Summary,
         C::Capabilities => F::Read,
     }
 }
@@ -81,6 +120,7 @@ fn support(f: MessagingFeature) -> &'static str {
     match f {
         F::Read | F::Send | F::Mentions => "chat-v2",
         F::Reply => "chat-replies",
+        F::PrivateReply => "private-reply",
         F::Edit => "edit-messages",
         F::Delete => "delete-messages",
         F::React => "react-permission",
@@ -88,14 +128,18 @@ fn support(f: MessagingFeature) -> &'static str {
         F::Search => "unified-search",
         F::Pins => "pinned-messages",
         F::Reminders => "remind-me-later",
+        F::UpcomingReminders => "upcoming-reminders",
         F::Schedule => "scheduled-messages",
         F::Threads => "threads",
         F::Forward => "chat-reference-id",
         F::Files => "rich-object-sharing",
+        F::Voice => "voice-message-sharing",
         F::Typing => "typing-privacy",
         F::ReadReceipts => "chat-read-marker",
+        F::MarkUnread => "chat-unread",
+        F::UnreadFrom => "chat-read-last",
         F::Translation => "translation",
-        F::Summary => "chat-summary",
+        F::Summary => "chat-summary-api",
     }
 }
 fn availability(
@@ -107,8 +151,18 @@ fn availability(
     use MessagingFeature as F;
     let allowed = if room.unknown_restrictions {
         Decision::Unknown
-    } else if matches!(f, F::Forward | F::Translation | F::Summary) && room.classified {
+    } else if matches!(
+        f,
+        F::Forward | F::PrivateReply | F::Translation | F::Summary | F::Voice
+    ) && room.classified
+    {
         Decision::Denied
+    } else if f == F::PrivateReply {
+        if matches!(room.kind, RoomKind::Group | RoomKind::Public) && caps.has("chat-get-context") {
+            room.actions.read_messages
+        } else {
+            Decision::Denied
+        }
     } else if f == F::React {
         if room.actions.read_messages == Decision::Allowed
             && wire::integer(data.get("permissions")).is_some_and(|p| p & 256 != 0)
@@ -119,7 +173,7 @@ fn availability(
         }
     } else if matches!(
         f,
-        F::Send | F::Reply | F::Edit | F::Delete | F::Silent | F::Schedule | F::Forward
+        F::Send | F::Reply | F::Edit | F::Delete | F::Silent | F::Schedule | F::Forward | F::Voice
     ) {
         room.actions.send_message
     } else if f == F::ReadReceipts && caps.read_receipts != Some(true)
@@ -130,8 +184,24 @@ fn availability(
         room.actions.read_messages
     };
     ActionAvailability {
-        implemented: !matches!(f, F::Typing | F::Translation | F::Summary),
-        server: caps.feature(support(f)),
+        implemented: !caps.federation_verified || matches!(f, F::Read | F::Send | F::Reply),
+        server: if f == F::Translation {
+            match (caps.supported(), caps.translation_providers) {
+                (true, Some(true)) => FeatureSupport::Supported,
+                (true, Some(false)) => FeatureSupport::Unsupported,
+                _ => FeatureSupport::Unknown,
+            }
+        } else if f == F::Voice
+            && caps.feature("voice-message-sharing") == FeatureSupport::Supported
+            && (!caps.has("rich-object-sharing")
+                || !caps.has("chat-reference-id")
+                || caps.conversation_subfolders != Some(true)
+                || caps.attachments_allowed != Some(true))
+        {
+            FeatureSupport::Unsupported
+        } else {
+            caps.feature(support(f))
+        },
         allowed,
     }
 }
@@ -230,7 +300,70 @@ impl Drop for PartialDownload {
     }
 }
 impl NextcloudClient {
-    fn message_scope(&self, id: MessageId, conversation: ConversationId) -> Result<u64, PortError> {
+    pub(super) async fn download_to_file(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::FilePath,
+        destination: &str,
+        progress: &talk_core::protocol::content::TransferProgress,
+    ) -> Result<u64, PortError> {
+        let destination = std::path::PathBuf::from(destination);
+        if !destination.is_absolute() || destination.file_name().is_none() {
+            return Err(self.error(ErrorKind::Malformed));
+        }
+        let parent = destination
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new("."));
+        let temporary = parent.join(format!(".nmt-download-{:032x}.part", self.opaque()?));
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options
+            .open(&temporary)
+            .await
+            .map_err(|_| self.error(ErrorKind::StorageUnavailable))?;
+        let partial = PartialDownload(temporary);
+        self.transport.validate(c)?;
+        let progress_copy = progress.clone();
+        let cancellation = c.cancellation.clone();
+        let observe = move |received, total| {
+            progress_copy.update(received, total);
+            if progress_copy.is_cancelled() {
+                cancellation.cancel();
+            }
+        };
+        let length = self
+            .transport
+            .download_file(c, path, &mut file, &observe)
+            .await?;
+        if progress.is_cancelled() {
+            return Err(self.error(ErrorKind::Cancelled));
+        }
+        progress.committing();
+        file.sync_all()
+            .await
+            .map_err(|_| self.error(ErrorKind::StorageUnavailable))?;
+        drop(file);
+        self.transport.validate(c)?;
+        tokio::fs::hard_link(&partial.0, &destination)
+            .await
+            .map_err(|e| {
+                self.error(if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    ErrorKind::Conflict
+                } else {
+                    ErrorKind::StorageUnavailable
+                })
+            })?;
+        progress.published();
+        Ok(length)
+    }
+    pub(super) fn message_scope(
+        &self,
+        id: MessageId,
+        conversation: ConversationId,
+    ) -> Result<u64, PortError> {
         if id.conversation != conversation || id.sequence == 0 {
             return Err(self.error(ErrorKind::WrongScope));
         }
@@ -248,6 +381,7 @@ impl NextcloudClient {
             F::Read,
             F::Send,
             F::Reply,
+            F::PrivateReply,
             F::Edit,
             F::Delete,
             F::React,
@@ -256,12 +390,16 @@ impl NextcloudClient {
             F::Search,
             F::Pins,
             F::Reminders,
+            F::UpcomingReminders,
             F::Schedule,
             F::Threads,
             F::Forward,
             F::Files,
+            F::Voice,
             F::Typing,
             F::ReadReceipts,
+            F::MarkUnread,
+            F::UnreadFrom,
             F::Translation,
             F::Summary,
         ] {
@@ -283,8 +421,34 @@ impl NextcloudClient {
             },
             message_limit: caps.message_limit,
             file_limit: api::files::MAX_FILE_BYTES,
+            media_caption: caps.has("media-caption"),
             read_receipts: caps.read_receipts,
             typing_status: caps.typing_status,
+            summary_offer: if matches!(
+                availability(F::Summary, room, data, caps),
+                ActionAvailability {
+                    implemented: true,
+                    server: FeatureSupport::Supported,
+                    allowed: Decision::Allowed
+                }
+            ) {
+                caps.summary_threshold
+                    .filter(|threshold| *threshold > 0)
+                    .and_then(|threshold| {
+                        let unread =
+                            u32::try_from(wire::integer(data.get("unreadMessages"))?).ok()?;
+                        let sequence = wire::integer(data.get("summaryOffset"))?;
+                        (unread >= threshold).then_some(SummaryOffer {
+                            from: MessageId {
+                                conversation: room.id,
+                                sequence,
+                            },
+                            unread,
+                        })
+                    })
+            } else {
+                None
+            },
         })
     }
     fn message_action(
@@ -379,6 +543,7 @@ impl NextcloudClient {
                     conversation: id,
                     sequence: p.id,
                 },
+                external: p.external,
                 author: if unavailable {
                     snippet("")
                 } else {
@@ -396,6 +561,9 @@ impl NextcloudClient {
             conversation: id,
             sequence,
         });
+        let thread_replies = message
+            .thread_replies
+            .and_then(|count| u32::try_from(count).ok());
         let replyable = message.replyable;
         let system = message
             .system
@@ -403,14 +571,12 @@ impl NextcloudClient {
             .map(|s| Text::new(s))
             .transpose()
             .map_err(|_| self.error(ErrorKind::TooLarge))?;
-        // Length-prefix the actor type so guest/user namespaces cannot collide.
-        // Unknown or oversized identity remains ungroupable, never name-based.
+        // Correlate an author with a member without exposing the wire actor ID.
         let author_key = message
             .actor_type
             .as_deref()
             .zip(message.actor_id.as_deref())
-            .filter(|(kind, id)| !kind.is_empty() && !id.is_empty())
-            .and_then(|(kind, id)| Text::new(&format!("{}:{kind}:{id}", kind.len())).ok());
+            .and_then(|(kind, actor)| actor_key(id, kind, actor));
         let message = self.message(&message.project(), id)?;
         Ok(MessageDetails {
             message,
@@ -420,6 +586,7 @@ impl NextcloudClient {
             replyable,
             parent,
             thread,
+            thread_replies,
             reactions,
             rich,
             system,
@@ -475,6 +642,11 @@ impl NextcloudClient {
         data: &Value,
         caps: &Capabilities,
     ) -> Result<api::chat::ComposeOptions, PortError> {
+        if o.private_reply.is_some()
+            && (o.reply_to.is_some() || o.thread.is_some() || o.thread_title.is_some())
+        {
+            return Err(self.error(ErrorKind::Malformed));
+        }
         if o.silent {
             self.message_action(MessagingFeature::Silent, room, data, caps)?
         }
@@ -484,10 +656,55 @@ impl NextcloudClient {
         if let Some(parent) = o.reply_to {
             self.message_scope(parent, id)?;
             self.message_action(MessagingFeature::Reply, room, data, caps)?;
-            if self.target(c, parent).await?.replyable != Some(true) {
+            let target = self.target(c, parent).await?;
+            if target.replyable != Some(true) {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
+            if let Some(thread) = o.thread
+                && target.id != thread.sequence
+                && target.thread_id != Some(thread.sequence)
+            {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
         }
+        let private_token = if let Some(parent) = o.private_reply.as_deref().copied() {
+            if !caps.has("private-reply") || !caps.has("chat-get-context") {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            if parent.conversation.account != id.account
+                || parent.conversation == id
+                || parent.sequence == 0
+                || room.kind != RoomKind::Direct
+            {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
+            let source_data = self.room_data(c, parent.conversation).await?;
+            let source_room = wire::room(&source_data, parent.conversation, caps)
+                .map_err(|kind| self.error(kind))?;
+            if !matches!(source_room.kind, RoomKind::Group | RoomKind::Public)
+                || source_room.classified
+                || source_room.unknown_restrictions
+                || source_room.actions.read_messages != Decision::Allowed
+            {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            let original = self.target(c, parent).await?;
+            if original.replyable != Some(true)
+                || original.actor_type.as_deref() != Some("users")
+                || original
+                    .actor_id
+                    .as_deref()
+                    .is_none_or(|actor| actor.is_empty() || actor == self.transport.user())
+            {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            Some(
+                api::models::RoomToken::parse(self.check_room(parent.conversation)?)
+                    .map_err(|kind| self.error(transport::kind(kind)))?,
+            )
+        } else {
+            None
+        };
         if let Some(thread) = o.thread {
             self.message_scope(thread, id)?;
             let token = api::models::RoomToken::parse(self.check_room(id)?)
@@ -503,8 +720,18 @@ impl NextcloudClient {
                 .await?;
         }
         Ok(api::chat::ComposeOptions {
-            reply_to: o.reply_to.map(|m| m.sequence),
-            thread: o.thread.map(|m| m.sequence),
+            reply_to: o
+                .reply_to
+                .or(o.private_reply.as_deref().copied())
+                .map(|m| m.sequence),
+            reply_to_token: private_token,
+            // Talk derives the thread from the quoted parent and ignores the
+            // threadId parameter in that case. Validate the parent above, then
+            // send only replyTo so the pinned wire contract stays unambiguous.
+            thread: o
+                .thread
+                .filter(|_| o.reply_to.is_none())
+                .map(|m| m.sequence),
             thread_title: o.thread_title.as_ref().map(|s| s.as_str().into()),
             silent: o.silent,
         })
@@ -602,7 +829,7 @@ impl NextcloudClient {
                 if let Some(send) = self.sends.iter_mut().find(|s| s.operation == operation) {
                     send.state = state
                 }
-                Ok((SendReceipt { operation, state }, Some(message)))
+                Ok((SendReceipt { operation, state }, Some(*message)))
             }
             Ok(_) => Err(self.error(ErrorKind::Uncertain)),
             Err(e) => {
@@ -737,6 +964,26 @@ impl NextcloudClient {
         use MessagingCommand as C;
         use MessagingResult as R;
         let data = self.room_data(c, id).await?;
+        let effective_caps;
+        let caps = if wire::is_federated(&data) {
+            effective_caps = self
+                .federation_capabilities_for_room(c, id, caps, is_mutation(&command))
+                .await?;
+            if !matches!(
+                command,
+                C::Capabilities
+                    | C::History { .. }
+                    | C::Poll { .. }
+                    | C::Context(_)
+                    | C::ReconcileSend
+                    | C::Send { .. }
+            ) {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            &effective_caps
+        } else {
+            caps
+        };
         let room = wire::room(&data, id, caps).map_err(|k| self.error(k))?;
         if command == C::Capabilities {
             return Ok(R::Capabilities(
@@ -744,12 +991,175 @@ impl NextcloudClient {
             ));
         }
         self.message_action(feature(&command), &room, &data, caps)?;
+        if matches!(
+            command,
+            C::Summarize { .. } | C::SummaryStatus { .. } | C::SummaryContinue { .. }
+        ) {
+            return self.summary(c, id, operation, command).await;
+        }
+        if command == C::TranslationLanguages {
+            let api::Reply::TranslationLanguages(languages) = self
+                .transport
+                .api_request(c, api::Request::TranslationLanguages)
+                .await?
+            else {
+                return Err(self.error(ErrorKind::Malformed));
+            };
+            let mut targets = Page::empty();
+            if languages.detection {
+                for target in languages.targets {
+                    targets
+                        .try_push(Text::new(&target).map_err(|_| self.error(ErrorKind::TooLarge))?)
+                        .map_err(|_| self.error(ErrorKind::TooLarge))?;
+                }
+            }
+            return Ok(R::TranslationLanguages(targets));
+        }
+        if let C::Translate {
+            message,
+            language,
+            source,
+        } = &command
+        {
+            self.message_scope(*message, id)?;
+            let original = self.target(c, *message).await?;
+            if original.kind.as_deref() != Some("comment")
+                || !original.rich.is_empty()
+                || original.message.as_deref() != Some(source.as_str())
+            {
+                return Err(self.error(ErrorKind::Conflict));
+            }
+            let api::Reply::TranslationLanguages(languages) = self
+                .transport
+                .api_request(c, api::Request::TranslationLanguages)
+                .await?
+            else {
+                return Err(self.error(ErrorKind::Malformed));
+            };
+            if !languages.detection
+                || !languages
+                    .targets
+                    .iter()
+                    .any(|target| target.eq_ignore_ascii_case(language.as_str()))
+            {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            let api::Reply::Translated(translated) = self
+                .transport
+                .api_request(
+                    c,
+                    api::Request::Translate {
+                        text: source.as_str().to_owned(),
+                        to_language: language.as_str().to_owned(),
+                    },
+                )
+                .await?
+            else {
+                return Err(self.error(ErrorKind::Malformed));
+            };
+            return Ok(R::Translation {
+                message: *message,
+                source: source.clone(),
+                language: language.clone(),
+                text: Text::new(&translated).map_err(|_| self.error(ErrorKind::TooLarge))?,
+            });
+        }
         if command == C::ReconcileSend {
             return self
                 .reconcile_durable_send(c, id, operation, &room, caps)
                 .await;
         }
-        if matches!(command, C::UploadFile { .. } | C::ShareFile { .. }) {
+        if let C::ShareExistingFile {
+            voice_message,
+            path,
+            caption,
+            options,
+        } = &command
+        {
+            self.message_action(MessagingFeature::Send, &room, &data, caps)?;
+            if room.classified || room.sensitive || caps.attachments_allowed != Some(true) {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            if (*voice_message && !caps.has("voice-message-sharing"))
+                || !caps.has("chat-reference-id")
+                || ((!caption.as_str().is_empty() || options.silent) && !caps.has("media-caption"))
+                || (options.thread.is_some() && !caps.has("threads"))
+                || options.thread_title.is_some()
+            {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            if options.reply_to.is_some() {
+                self.message_action(MessagingFeature::Reply, &room, &data, caps)?;
+            }
+            let reply_to = options
+                .reply_to
+                .map(|m| self.message_scope(m, id))
+                .transpose()?;
+            let thread = options
+                .thread
+                .map(|m| self.message_scope(m, id))
+                .transpose()?;
+            let path = api::files::FilePath::parse(path.as_str())
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            let token = api::models::RoomToken::parse(self.check_room(id)?)
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            if self.sends.len() >= 100 {
+                if let Some(index) = self
+                    .sends
+                    .iter()
+                    .position(|s| s.state != SendState::Uncertain)
+                {
+                    self.sends.remove(index);
+                } else {
+                    return Err(self.error(ErrorKind::Busy));
+                }
+            }
+            self.admit_action(id, operation)?;
+            let reference = send_reference(operation);
+            self.sends.push(PendingSend {
+                operation,
+                conversation: id,
+                reference: reference.clone(),
+                state: SendState::Uncertain,
+            });
+            let options = api::files::ShareOptions {
+                caption: caption.as_str().to_owned(),
+                reply_to,
+                thread,
+                silent: options.silent,
+                voice_message: *voice_message,
+            };
+            let result = self
+                .transport
+                .share_existing_file(c, &token, &path, &reference, &options)
+                .await;
+            if let Err(error) = &result
+                && matches!(
+                    error.kind,
+                    ErrorKind::PermissionDenied
+                        | ErrorKind::NotFound
+                        | ErrorKind::Unsupported
+                        | ErrorKind::ReauthenticationRequired
+                        | ErrorKind::Conflict
+                        | ErrorKind::TooLarge
+                )
+                && let Some(send) = self
+                    .sends
+                    .iter_mut()
+                    .find(|s| s.operation == operation && s.conversation == id)
+            {
+                send.state = SendState::Rejected;
+            }
+            self.settle_action(operation, result.as_ref().err());
+            return result.map(|_| R::Changed);
+        }
+        if matches!(
+            command,
+            C::UploadFile { .. }
+                | C::UploadImage { .. }
+                | C::UploadVoice { .. }
+                | C::ShareFile { .. }
+        ) {
             self.message_action(MessagingFeature::Send, &room, &data, caps)?;
             if caps.conversation_subfolders != Some(true) {
                 return Err(self.error(ErrorKind::Unsupported));
@@ -758,29 +1168,73 @@ impl NextcloudClient {
                 return Err(self.error(ErrorKind::Unsupported));
             }
         }
-        if let C::UploadFile {
-            local_path,
-            name,
-            progress,
-        } = &command
-        {
+        if matches!(
+            &command,
+            C::UploadFile { .. } | C::UploadImage { .. } | C::UploadVoice { .. }
+        ) {
             if caps.attachments_allowed != Some(true) || room.classified {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
             if self.uploads.len() >= 100 {
                 return Err(self.error(ErrorKind::Busy));
             }
-            let file = tokio::fs::File::open(local_path.as_str())
-                .await
-                .map_err(|_| self.error(ErrorKind::NotFound))?;
-            let metadata = file
-                .metadata()
-                .await
-                .map_err(|_| self.error(ErrorKind::Transport))?;
-            if !metadata.is_file() {
-                return Err(self.error(ErrorKind::Unsupported));
-            }
-            let size = metadata.len();
+            let (file, size, name, progress, voice_message): (
+                Box<dyn tokio::io::AsyncRead + Send + Unpin>,
+                u64,
+                &Text<255>,
+                &talk_core::protocol::content::TransferProgress,
+                bool,
+            ) = match &command {
+                C::UploadFile {
+                    local_path,
+                    name,
+                    progress,
+                } => {
+                    let file = tokio::fs::File::open(local_path.as_str())
+                        .await
+                        .map_err(|_| self.error(ErrorKind::NotFound))?;
+                    let metadata = file
+                        .metadata()
+                        .await
+                        .map_err(|_| self.error(ErrorKind::Transport))?;
+                    if !metadata.is_file() {
+                        return Err(self.error(ErrorKind::Unsupported));
+                    }
+                    (Box::new(file), metadata.len(), name, progress, false)
+                }
+                C::UploadVoice {
+                    bytes,
+                    name,
+                    progress,
+                } => {
+                    if !caps.has("voice-message-sharing") {
+                        return Err(self.error(ErrorKind::Unsupported));
+                    }
+                    (
+                        Box::new(std::io::Cursor::new(bytes.shared())),
+                        bytes.len() as u64,
+                        name,
+                        progress,
+                        true,
+                    )
+                }
+                C::UploadImage {
+                    name,
+                    image,
+                    progress,
+                } => {
+                    let bytes = image.as_slice().to_vec();
+                    let size = bytes.len() as u64;
+                    (
+                        Box::new(std::io::Cursor::new(bytes)),
+                        size,
+                        name,
+                        progress,
+                        false,
+                    )
+                }
+                _ => return Err(self.error(ErrorKind::Malformed)),
+            };
             if size > api::files::MAX_FILE_BYTES {
                 return Err(self.error(ErrorKind::TooLarge));
             }
@@ -823,6 +1277,7 @@ impl NextcloudClient {
                 conversation: id,
                 path: path.clone(),
                 name: name.as_str().into(),
+                voice_message,
                 share: None,
             });
             return Ok(R::Uploaded {
@@ -853,60 +1308,13 @@ impl NextcloudClient {
                 .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
             let path = api::files::FilePath::parse(&format!("/{}", raw.trim_start_matches('/')))
                 .map_err(|k| self.error(transport::kind(k)))?;
-            let destination = std::path::PathBuf::from(destination.as_str());
-            let parent = destination
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .unwrap_or(std::path::Path::new("."));
-            let temporary = parent.join(format!(".nmt-download-{:032x}.part", self.opaque()?));
-            let mut options = tokio::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            options.mode(0o600);
-            let mut file = options
-                .open(&temporary)
-                .await
-                .map_err(|_| self.error(ErrorKind::StorageUnavailable))?;
-            let partial = PartialDownload(temporary);
-            self.transport.validate(c)?;
             self.admit_action(id, operation)?;
-            let result = async {
-                let progress_copy = progress.clone();
-                let cancellation = c.cancellation.clone();
-                let observe = move |received, total| {
-                    progress_copy.update(received, total);
-                    if progress_copy.is_cancelled() {
-                        cancellation.cancel();
-                    }
-                };
-                let length = self
-                    .transport
-                    .download_file(c, path, &mut file, &observe)
-                    .await?;
-                if progress.is_cancelled() {
-                    return Err(self.error(ErrorKind::Cancelled));
-                }
-                progress.committing();
-                file.sync_all()
-                    .await
-                    .map_err(|_| self.error(ErrorKind::StorageUnavailable))?;
-                drop(file);
-                self.transport.validate(c)?;
-                tokio::fs::hard_link(&partial.0, &destination)
-                    .await
-                    .map_err(|e| {
-                        self.error(if e.kind() == std::io::ErrorKind::AlreadyExists {
-                            ErrorKind::Conflict
-                        } else {
-                            ErrorKind::StorageUnavailable
-                        })
-                    })?;
-                progress.published();
-                Ok(R::FileSaved {
+            let result = self
+                .download_to_file(c, path, destination.as_str(), progress)
+                .await
+                .map(|length| R::FileSaved {
                     bytes: length as u32,
-                })
-            }
-            .await;
+                });
             self.settle_action(operation, result.as_ref().err());
             return result;
         }
@@ -983,6 +1391,35 @@ impl NextcloudClient {
                 None => Ok(R::Send(receipt)),
             };
         }
+        if let C::MarkUnreadFrom(message) = command {
+            self.message_scope(message, id)?;
+            let token = api::models::RoomToken::parse(self.check_room(id)?)
+                .map_err(|k| self.error(transport::kind(k)))?;
+            self.transport
+                .api_request(
+                    c,
+                    api::Request::MarkRead {
+                        room: token,
+                        message: message.sequence,
+                    },
+                )
+                .await?;
+            if let Some(binding) = self.rooms.iter_mut().find(|binding| binding.id == id) {
+                binding.read_through = Some(message.sequence);
+            }
+            return Ok(R::Changed);
+        }
+        if matches!(command, C::MarkUnreadFromStart) {
+            let token = api::models::RoomToken::parse(self.check_room(id)?)
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            self.transport
+                .api_request(c, api::Request::MarkUnreadFromStart { room: token })
+                .await?;
+            if let Some(binding) = self.rooms.iter_mut().find(|binding| binding.id == id) {
+                binding.read_through = Some(0);
+            }
+            return Ok(R::Changed);
+        }
         if let C::MarkRead(message) = command {
             self.message_scope(message, id)?;
             let observed = wire::integer(data.get("lastReadMessage"));
@@ -1028,6 +1465,13 @@ impl NextcloudClient {
             C::Poll { after, thread } => WireCommand::Poll {
                 after: self.message_scope(*after, id)?,
                 thread: thread.map(|m| self.message_scope(m, id)).transpose()?,
+            },
+            C::UnreadAfter(Some(after)) => WireCommand::UnreadAfter {
+                after: Some(self.message_scope(*after, id)?),
+            },
+            C::UnreadAfter(None) => WireCommand::History {
+                before: None,
+                thread: None,
             },
             C::Context(m) => WireCommand::Context(self.message_scope(*m, id)?),
             C::Edit { message, text } => {
@@ -1143,21 +1587,57 @@ impl NextcloudClient {
                 object_type: "file".into(),
                 before: before.map(|m| self.message_scope(m, id)).transpose()?,
             },
-            C::ShareFile { path, caption } => {
+            C::ShareFile {
+                path,
+                caption,
+                options,
+                voice_message,
+            } => {
                 if caps.attachments_allowed != Some(true) {
                     return Err(self.error(ErrorKind::PermissionDenied));
                 }
+                if ((!caption.as_str().is_empty() || options.silent) && !caps.has("media-caption"))
+                    || (options.thread.is_some() && !caps.has("threads"))
+                    || options.thread_title.is_some()
+                {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                if options.reply_to.is_some() {
+                    self.message_action(MessagingFeature::Reply, &room, &data, caps)?;
+                }
+                if *voice_message && !caps.has("voice-message-sharing") {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                if *voice_message && !caption.as_str().is_empty() {
+                    return Err(self.error(ErrorKind::Malformed));
+                }
+                let upload = self
+                    .uploads
+                    .iter()
+                    .find(|u| u.conversation == id && u.path == path.as_str())
+                    .ok_or_else(|| self.error(ErrorKind::WrongScope))?;
+                if upload.voice_message != *voice_message {
+                    return Err(self.error(ErrorKind::WrongScope));
+                }
                 WireCommand::ShareAttachment {
                     path: path.as_str().into(),
-                    file_name: self
-                        .uploads
-                        .iter()
-                        .find(|u| u.conversation == id && u.path == path.as_str())
-                        .ok_or_else(|| self.error(ErrorKind::WrongScope))?
-                        .name
-                        .clone(),
+                    file_name: upload.name.clone(),
                     caption: caption.as_str().into(),
                     reference: send_reference(operation),
+                    options: api::chat::ComposeOptions {
+                        reply_to_token: None,
+                        reply_to: options
+                            .reply_to
+                            .map(|m| self.message_scope(m, id))
+                            .transpose()?,
+                        thread: options
+                            .thread
+                            .map(|m| self.message_scope(m, id))
+                            .transpose()?,
+                        thread_title: None,
+                        silent: options.silent,
+                    },
+                    voice_message: *voice_message,
                 }
             }
             _ => return Err(self.error(ErrorKind::Unconfigured)),
@@ -1235,6 +1715,93 @@ impl NextcloudClient {
             }
             r => r?,
         };
+        if matches!(command, C::UnreadAfter(None)) {
+            // Released Talk treats a future offset of zero as an empty poll.
+            // Find the start by walking backwards, retaining only the oldest
+            // visible page, and require an exhausted page before calling it first.
+            let mut before = None;
+            let mut oldest = None;
+            for index in 0..=4 {
+                let api::Reply::History {
+                    messages,
+                    last_given,
+                    ..
+                } = &response
+                else {
+                    return Err(self.error(ErrorKind::Malformed));
+                };
+                if messages.is_empty() && last_given.is_none() {
+                    response = oldest.unwrap_or(response);
+                    break;
+                }
+                let next = last_given
+                    .filter(|next| *next > 0 && before.is_none_or(|previous| *next < previous))
+                    .ok_or_else(|| self.error(ErrorKind::Malformed))?;
+                if index == 4 {
+                    return Err(self.error(ErrorKind::TooLarge));
+                }
+                if messages
+                    .iter()
+                    .any(|event| visible_unread_event(event, 0, now_unix()))
+                {
+                    oldest = Some(response);
+                }
+                before = Some(next);
+                response = self
+                    .transport
+                    .api_request(
+                        c,
+                        api::Request::Chat {
+                            room: api::models::RoomToken::parse(self.check_room(id)?)
+                                .map_err(|kind| self.error(transport::kind(kind)))?,
+                            command: WireCommand::History {
+                                before,
+                                thread: None,
+                            },
+                        },
+                    )
+                    .await?;
+            }
+        } else if let C::UnreadAfter(Some(after)) = &command {
+            // Edits, reactions and pin notices can occupy a whole forward page
+            // without producing a visible new row. Follow their server cursor,
+            // with the same deadline and a strict limit on additional reads.
+            let marker = after.sequence;
+            let mut cursor = marker;
+            for _ in 0..3 {
+                let api::Reply::History {
+                    messages,
+                    last_given,
+                    ..
+                } = &response
+                else {
+                    break;
+                };
+                let visible = messages
+                    .iter()
+                    .any(|event| visible_unread_event(event, marker, now_unix()));
+                let Some(next) = last_given.filter(|next| *next > cursor) else {
+                    break;
+                };
+                if visible {
+                    break;
+                }
+                cursor = next;
+                response = self
+                    .transport
+                    .api_request(
+                        c,
+                        api::Request::Chat {
+                            room: api::models::RoomToken::parse(self.check_room(id)?)
+                                .map_err(|kind| self.error(transport::kind(kind)))?,
+                            command: WireCommand::UnreadAfter {
+                                after: Some(cursor),
+                            },
+                        },
+                    )
+                    .await?;
+            }
+        }
         if let C::Reminder { message, timestamp } = &command {
             // POST/DELETE acknowledge the write without returning a reminder.
             // Read the created value once under the same deadline; never turn
@@ -1424,7 +1991,7 @@ impl NextcloudClient {
                 })
             }
             api::Reply::Message(message) => Ok(R::Message(Box::new(
-                self.details(message, id, &room, caps)?,
+                self.details(*message, id, &room, caps)?,
             ))),
             api::Reply::Chat(WireResponse::Mentions(values)) => {
                 let mut out = Page::empty();
@@ -1439,6 +2006,7 @@ impl NextcloudClient {
                         continue;
                     }
                     out.try_push(Mention {
+                        author_key: actor_key(id, &v.source, &v.actor_id),
                         id: Text::new(&v.id).map_err(|_| self.error(ErrorKind::TooLarge))?,
                         label: Text::new(&v.label).map_err(|_| self.error(ErrorKind::TooLarge))?,
                         source: Text::new(&v.source)
@@ -1490,18 +2058,47 @@ impl NextcloudClient {
                 Ok(R::Scheduled(out))
             }
             api::Reply::Chat(WireResponse::Schedule(v)) => {
-                Ok(R::Schedule(Box::new(self.scheduled(v, id)?)))
+                let scheduled = self.scheduled(v, id)?;
+                let matches_request = match &command {
+                    C::Schedule {
+                        text,
+                        send_at,
+                        options,
+                    } => {
+                        scheduled.text == *text
+                            && scheduled.send_at == *send_at
+                            && scheduled.options.reply_to == options.reply_to
+                            && scheduled.options.thread == options.thread
+                            && scheduled.options.silent == options.silent
+                    }
+                    C::EditScheduled {
+                        id,
+                        text,
+                        send_at,
+                        silent,
+                    } => {
+                        scheduled.id == *id
+                            && scheduled.text == *text
+                            && scheduled.send_at == *send_at
+                            && scheduled.options.silent == *silent
+                    }
+                    _ => false,
+                };
+                if !matches_request {
+                    return Err(self.error(ErrorKind::Uncertain));
+                }
+                Ok(R::Schedule(Box::new(scheduled)))
             }
             api::Reply::Chat(WireResponse::Threads(values)) => {
                 let mut out = Page::empty();
                 for v in values {
-                    out.try_push(self.thread(v, id)?)
+                    out.try_push(self.thread(v, id, Some(&room))?)
                         .map_err(|_| self.error(ErrorKind::TooLarge))?
                 }
                 Ok(R::Threads(out))
             }
             api::Reply::Chat(WireResponse::Thread(v)) => {
-                Ok(R::Thread(Box::new(self.thread(v, id)?)))
+                Ok(R::Thread(Box::new(self.thread(v, id, Some(&room))?)))
             }
             api::Reply::Chat(WireResponse::Search { hits, cursor }) => {
                 let mut out = Page::empty();
@@ -1562,8 +2159,10 @@ impl NextcloudClient {
             id: mid(s.id),
             text: Text::new(&s.message).map_err(|_| self.error(ErrorKind::TooLarge))?,
             send_at: s.send_at,
+            original_send_at: s.original_send_at,
             options: ComposeOptions {
                 reply_to: s.options.reply_to.map(mid),
+                private_reply: None,
                 thread: s.options.thread.map(mid),
                 thread_title: s
                     .options
@@ -1575,16 +2174,91 @@ impl NextcloudClient {
             },
         })
     }
-    fn thread(&self, t: api::chat::Thread, id: ConversationId) -> Result<Thread, PortError> {
+    pub(super) async fn subscribed_threads(
+        &mut self,
+        context: &OperationContext,
+        offset: u32,
+    ) -> Result<(Page<Thread, 50>, bool), PortError> {
+        let reply = self
+            .transport
+            .api_request(context, api::Request::SubscribedThreads { offset })
+            .await?;
+        let api::Reply::Chat(WireResponse::Threads(threads)) = reply else {
+            return Err(self.error(ErrorKind::Malformed));
+        };
+        // Pagination follows the raw server page, even when some rooms are not
+        // in the bounded local room registry and must not enter the projection.
+        let has_next = threads.len() == 50;
+        let mut result = Page::empty();
+        for thread in threads {
+            // A server token alone does not grant room authority. Only use bindings
+            // established by the account's conversation owner.
+            let Some(id) = self
+                .rooms
+                .iter()
+                .find(|room| room.token == thread.token)
+                .map(|room| room.id)
+            else {
+                continue;
+            };
+            result
+                .try_push(self.thread(thread, id, None)?)
+                .map_err(|_| self.error(ErrorKind::TooLarge))?;
+        }
+        Ok((result, has_next))
+    }
+
+    fn thread(
+        &self,
+        t: api::chat::Thread,
+        id: ConversationId,
+        room: Option<&Conversation>,
+    ) -> Result<Thread, PortError> {
+        // Talk permits the root author or a non-guest moderator to rename, even
+        // after the root expires. ThreadController calls hasModeratorPermissions(false).
+        // The account feed has no current room authority, so it stays unknown.
+        let rename = match room {
+            None => Decision::Unknown,
+            Some(room) if room.unknown_restrictions => Decision::Unknown,
+            Some(room) if room.actions.read_messages != Decision::Allowed => {
+                room.actions.read_messages
+            }
+            Some(room) if matches!(room.role, Role::Owner | Role::Moderator) => Decision::Allowed,
+            Some(_) => match t.first_actor.as_ref() {
+                Some((kind, actor))
+                    if kind == "users" && actor.as_str() == self.transport.user() =>
+                {
+                    Decision::Allowed
+                }
+                Some(_) => Decision::Denied,
+                None => Decision::Unknown,
+            },
+        };
         Ok(Thread {
             root: MessageId {
                 conversation: id,
                 sequence: t.id,
             },
+            last_message: t.last_message.map(|sequence| MessageId {
+                conversation: id,
+                sequence,
+            }),
+            last_reply: t
+                .last_reply
+                .map(|last| {
+                    Ok(talk_core::protocol::messaging::ThreadReplyActivity {
+                        author: Text::new(&last.author)
+                            .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                        timestamp: last.timestamp,
+                        expires: last.expires,
+                    })
+                })
+                .transpose()?,
             title: Text::new(&t.title).map_err(|_| self.error(ErrorKind::TooLarge))?,
             replies: t.replies,
             unread: None,
             notification_level: t.notification_level.and_then(|n| i8::try_from(n).ok()),
+            rename,
         })
     }
 }
@@ -1628,6 +2302,32 @@ fn reaction_counts(
         result.try_push(reaction).map_err(|_| ErrorKind::TooLarge)?;
     }
     Ok(result)
+}
+
+/// A room-bound correlation value, not a permission or a wire identity.
+pub(super) fn actor_key(room: ConversationId, kind: &str, actor: &str) -> Option<Text<256>> {
+    use sha2::{Digest, Sha256};
+    if kind.is_empty()
+        || actor.is_empty()
+        || kind.chars().any(char::is_control)
+        || actor.chars().any(char::is_control)
+    {
+        return None;
+    }
+    let mut hash = Sha256::new();
+    hash.update(b"talk-room-author-v1");
+    hash.update(room.account.as_local().to_be_bytes());
+    hash.update(room.host.as_local().to_be_bytes());
+    hash.update(room.local.to_be_bytes());
+    hash.update((kind.len() as u64).to_be_bytes());
+    hash.update(kind.as_bytes());
+    hash.update(actor.as_bytes());
+    let value: String = hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Text::new(&value).ok()
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@
     {
       "original_sha256": "7106499142d5416edaf44168da5c7dcd778c527398cb86e487131ba6689b94ff",
       "path": "src/platform.rs",
-      "sha256": "eaacf171e3a396d9315c7eb8ccf0e91addce909bf013ec51fd597a560d6b2607"
+      "sha256": "b22012eea0b0e4c063c5cd67cdde0bcadacfa159210fd18cacddd4a4e520877a"
     },
     {
       "original_sha256": "d6407a0e8685e03621e671fbbf52402217e6aacd1b1b5a285ec6693a980d7b2b",
@@ -26,6 +26,26 @@
       "original_sha256": "507b6fc7e69ce1fa2703b510f65f5aa2740c061f85e523220b742a65f18d8498",
       "path": "src/platform/blade/shaders.wgsl",
       "sha256": "7cbf7d4b277b39c76365327ddb9b61e0a39160df600f4c587527b5e686dff0dc"
+    },
+    {
+      "original_sha256": "abb2a5145c680d5064491c0039124257c96f84dd11c8c3af2dc5ccf26b01b8d3",
+      "path": "src/platform/linux/wayland/clipboard.rs",
+      "sha256": "d7f5c595e89d1c9fdee9128a2448f45925675bbcbf0793103d38ee047c279acc"
+    },
+    {
+      "path": "src/platform/linux/x11/client.rs",
+      "original_sha256": "1ea168b018e764fff2cc427ee12b8633db5a8ef061ce70d85bf1b9b2d598da2f",
+      "sha256": "6436a6ec6860f61365b14111972b7c5ea043b2bf373122d9d20b20d4eb5af323"
+    },
+    {
+      "original_sha256": "bf6d02d8075dd24be413e65294dcca36410a6c17b01526c6f62b2cd59336c2ab",
+      "path": "src/platform/linux/x11/clipboard.rs",
+      "sha256": "fca4eb372ae9e3e43a51eae3bd39bf9b935aa02358789063ccccd516903dbe2a"
+    },
+    {
+      "path": "src/platform/linux/x11/window.rs",
+      "original_sha256": "5fc415607c7b06c004d044ed39c62a89ac3a5fb3a0516c38315f8ce5bd2911fb",
+      "sha256": "846c15a6559bf4cd69985eb2f4431babb637ab24c3923c6d4b60dc09bbd26c7c"
     },
     {
       "original_sha256": "cec6bf0c2fb32124f605a73d57bf11d5aa884c4c09904ee94d34b9ebfab9208b",
@@ -53,6 +73,11 @@
       "sha256": "ab37b6527dbe9ad4bbc7168ad250266cd412649b2fd8fd3cafe73b916762d421"
     },
     {
+      "original_sha256": "fa8808028922940c929cdcdcb487dae1baf65e82a756563582e4e57585da148d",
+      "path": "src/platform/mac/platform.rs",
+      "sha256": "4d8ac5bac786f45d7297ecaea4caa0d511a3dafdc509b43fdbca990e6b502352"
+    },
+    {
       "original_sha256": "0061a0eccdb8467e89eaeacedc7d5d010be956a5c778fff0ad7d3b30bb736334",
       "path": "src/platform/mac/shaders.metal",
       "sha256": "7eb58b2716d6221bc750bf499ecb8c40f08191aa216bbbe36abbb07900e17721"
@@ -61,6 +86,11 @@
       "original_sha256": "c21da3de36159b51e62f02666b335359d5fff8c20ddf79c4fc9e3195047c3f35",
       "path": "src/platform/mac/window.rs",
       "sha256": "ca8e4247b41dd67ea2a68280cbe1081fd57c74d7a730026e1684a0c8c947ac7a"
+    },
+    {
+      "original_sha256": "410a0d3e3e2c443643859bdb4a240beca8fb012a391dc4b8f9191eb217a466cd",
+      "path": "src/platform/windows/clipboard.rs",
+      "sha256": "e27760d8bed91a438ead11ad74970bdd05d2bae20d5b9ecff889438d329325db"
     },
     {
       "original_sha256": "b4b10b48cd3c31c1fa1390ca7eeb70c2c184db59ce1aeb387ca06563b342b010",

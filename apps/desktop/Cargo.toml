@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+dev-probes = ["talk-adapters/backend-test"]
+
 [dependencies]
 talk-core.workspace = true
 talk-adapters.workspace = true

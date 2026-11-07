@@ -35,7 +35,11 @@ impl Render for DragLabel {
 pub(super) fn previewable(object: &RichObject) -> bool {
     matches!(object.mime_type.as_ref().map(|mime| mime.as_str()), Some(mime) if mime.starts_with("image/") || mime == "video/mp4" || mime == "video/webm" || mime == "application/pdf")
 }
-pub(super) fn file_detail(name: &str, bytes: Option<u64>) -> String {
+pub(super) fn file_detail(
+    locale: talk_core::preferences::Locale,
+    name: &str,
+    bytes: Option<u64>,
+) -> String {
     let extension = name
         .rsplit_once('.')
         .map(|(_, extension)| extension)
@@ -47,15 +51,80 @@ pub(super) fn file_detail(name: &str, bytes: Option<u64>) -> String {
         .unwrap_or("FILE")
         .to_ascii_uppercase();
     match bytes {
-        Some(bytes) if bytes >= 1024 * 1024 => {
-            format!("{extension} · {:.1} MiB", bytes as f64 / (1024. * 1024.))
-        }
-        Some(bytes) if bytes >= 1024 => format!("{extension} · {:.1} KiB", bytes as f64 / 1024.),
-        Some(bytes) => format!("{extension} · {bytes} B"),
+        Some(_) => format!(
+            "{extension} · {}",
+            super::localization::file_size(locale, bytes)
+        ),
         None => extension,
     }
 }
 impl Desktop {
+    pub(super) fn paste_clipboard_attachment(
+        &mut self,
+        pasted: &super::input::PastedContent,
+        cx: &mut Context<Self>,
+    ) {
+        if self.overlay.is_some()
+            || self.background_inert
+            || !self.composer_available()
+            || self.snapshot.content != talk_core::ui::presentation::ContentState::Ready
+            || !self
+                .selected()
+                .is_some_and(|room| room.send == talk_core::ui::Decision::Allowed)
+            || !self.message_feature_enabled(MessageFeature::Files)
+        {
+            return;
+        }
+        let Some(context) = self.snapshot.selected else {
+            return;
+        };
+        if self.drafts.target(context).new_thread
+            || self.drafts.target(context).private_reply.is_some()
+        {
+            return;
+        }
+        let (extension, image) = match pasted {
+            super::input::PastedContent::None => return,
+            super::input::PastedContent::Unsupported => {
+                self.feedback = Some(
+                    Feedback::error("Diese Dateiauswahl wird nicht unterstützt.")
+                        .in_conversation(context),
+                );
+                cx.notify();
+                return;
+            }
+            super::input::PastedContent::TooLarge => {
+                self.feedback = Some(
+                    Feedback::error("Das Bild aus der Zwischenablage ist zu groß.")
+                        .in_conversation(context),
+                );
+                cx.notify();
+                return;
+            }
+            super::input::PastedContent::TooMany => {
+                self.feedback = Some(
+                    Feedback::error("Du kannst höchstens 8 Dateien auf einmal anhängen.")
+                        .in_conversation(context),
+                );
+                cx.notify();
+                return;
+            }
+            super::input::PastedContent::Files(paths) => {
+                self.submit_message(MessageAction::StageFiles(paths.clone()));
+                cx.notify();
+                return;
+            }
+            super::input::PastedContent::Image(extension, image) => (extension, image),
+        };
+        let name = self.lf("Zwischenablage.{extension}", &[("extension", extension)]);
+        if let Ok(name) = Text::new(&name) {
+            self.submit_message(MessageAction::StageClipboardImage {
+                name,
+                image: image.clone(),
+            });
+        }
+        cx.notify();
+    }
     pub(super) fn stage_dropped_files(
         &mut self,
         context: ConversationRef,
@@ -63,7 +132,9 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.snapshot.selected != Some(context)
+        if !self.composer_available()
+            || self.snapshot.content != talk_core::ui::presentation::ContentState::Ready
+            || self.snapshot.selected != Some(context)
             || self.overlay.is_some()
             || self.background_inert
             || !self.message_feature_enabled(MessageFeature::Files)
@@ -272,7 +343,11 @@ impl Desktop {
                                 .text_size(self.sp(13.))
                                 .child(source.name.as_str().to_owned()),
                         )
-                        .child(self.hint(&file_detail(source.name.as_str(), source.size))),
+                        .child(self.hint(&file_detail(
+                            self.locale,
+                            source.name.as_str(),
+                            source.size,
+                        ))),
                 ),
             )
             .child(self.attachment_download(reference, group, cx))

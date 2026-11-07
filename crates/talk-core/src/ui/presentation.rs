@@ -1,5 +1,6 @@
 //! Native presentation projection. Producers own policy, identity and operation lifetimes.
 //! All collections/text are bounded. No transport DTO, endpoint, secret or frame is exported.
+use super::messaging::ComposerDraft;
 use super::{
     AccountId, AccountScope, CallScope, ConversationId, Decision, MediaIntent, Page, SubmitError,
     Text, UnavailableReason, UserIntent,
@@ -340,6 +341,8 @@ pub struct OrganizationResult {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConversationView {
+    /// Scoped action failure; never cached or used as permission evidence.
+    pub action_error: Option<super::messaging::MessageActionError>,
     pub context: ConversationRef,
     pub navigation_key: Option<NavigationRoomKey>,
     pub title: Text<256>,
@@ -348,6 +351,11 @@ pub struct ConversationView {
     pub updated_label: Text<32>,
     pub kind: ConversationKind,
     pub unread: u32,
+    pub unread_direct_mention: Option<bool>,
+    pub last_read_message: Option<u128>,
+    pub unread_mention: Option<bool>,
+    pub notification_muted: Option<bool>,
+    pub last_activity: Option<u64>,
     pub favorite: Option<bool>,
     pub organization: ConversationOrganization,
     pub tags: Option<Page<TagRef, 20>>,
@@ -355,7 +363,12 @@ pub struct ConversationView {
     pub archived: Option<bool>,
     pub archive: Decision,
     pub presence: Presence,
+    /// Ephemeral status text returned for a direct conversation.
+    pub status_icon: Option<Text<64>>,
+    pub status_message: Option<Text<320>>,
     pub participants: Option<u16>,
+    /// A small, session-only index of names observed with participant permission.
+    pub participant_names: Page<Text<256>, 16>,
     pub send: Decision,
     pub attach: Decision,
     /// Explicit clipboard-export privacy policy, not a generic server permission
@@ -363,6 +376,8 @@ pub struct ConversationView {
     /// Classified/unknown restrictions MUST project Denied/Unknown; never infer from send.
     pub draft_clipboard: Decision,
     pub call: Decision,
+    /// Server observation; unknown does not imply that a call is active.
+    pub call_active: Option<bool>,
     /// Allocated/revalidated by the call owner; a row click never creates a call.
     pub call_scope: Option<CallScope>,
 }
@@ -408,6 +423,13 @@ pub struct ParticipantView {
     pub role_label: Text<64>,
     pub presence: Presence,
     pub self_user: bool,
+    pub raised_hand: bool,
+    /// Recent decoded audio exceeds the local indication threshold.
+    pub speaking: bool,
+    pub call_can_mute: bool,
+    /// Last observed call flags, absent outside the call projection.
+    pub call_microphone: Option<bool>,
+    pub call_camera: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -442,6 +464,91 @@ pub enum MediaState {
     Denied,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallTileKind {
+    Camera,
+    Screen,
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ScreenShareState {
+    #[default]
+    Idle,
+    Choosing,
+    Starting,
+    Sharing,
+    Failed(ScreenShareFailure),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScreenShareFailure {
+    Unavailable,
+    Cancelled,
+    SourceClosed,
+    TimedOut,
+    PermissionDenied,
+}
+/// Frame-free stream metadata. `local_id` addresses the media image handoff;
+/// `participant` identifies the camera/participant tile belonging to this source.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallStreamView {
+    pub local_id: u128,
+    pub participant: u128,
+    pub participant_name: Text<128>,
+    pub kind: CallTileKind,
+    pub dimensions: Option<(u32, u32)>,
+    pub flowing: bool,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallTileId {
+    pub local_id: u128,
+    pub kind: CallTileKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallScreenStage {
+    pub tile: CallTileId,
+    pub name: Text<128>,
+    pub dimensions: Option<(u32, u32)>,
+    pub flowing: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallRecordingState {
+    Inactive,
+    Starting,
+    Active,
+    Stopping,
+    Failed,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallReactionView {
+    pub sequence: u64,
+    pub participant: Option<u128>,
+    pub emoji: Text<64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallInviteeView {
+    pub local_id: u128,
+    pub ring_allowed: bool,
+    pub name: Text<128>,
+    pub initials: Text<16>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallRingOutcome {
+    Pending,
+    Requested,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallRingStatus {
+    pub target: u128,
+    pub outcome: CallRingOutcome,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallView {
     pub scope: CallScope,
@@ -452,7 +559,60 @@ pub struct CallView {
     pub microphone: MediaState,
     pub camera: MediaState,
     pub share: MediaState,
-    pub participants: Page<ParticipantView, 16>,
+    pub sharing: ScreenShareState,
+    pub streams: Page<CallStreamView, 16>,
+    /// True only when the owner observed an automatic same-call generation replacement.
+    pub replacement_generation: bool,
+    /// Decoded remote audio packets in this generation; video flow is in `streams`.
+    pub remote_audio_received: u64,
+    pub recording: CallRecordingState,
+    /// Some(true) starts, Some(false) stops; None hides unsupported controls.
+    pub recording_control: Option<bool>,
+    pub recording_pending: bool,
+    pub recording_uncertain: bool,
+    pub hand_supported: bool,
+    pub hand_raised: bool,
+    pub reactions: Page<Text<64>, 32>,
+    pub latest_reaction: Option<CallReactionView>,
+    pub invitees_loaded: bool,
+    pub invitees: Page<CallInviteeView, 100>,
+    pub ring_status: Option<CallRingStatus>,
+    pub mute_status: Option<CallRingStatus>,
+    pub can_end_everyone: bool,
+    pub end_pending: bool,
+    pub end_failed: bool,
+    /// Up to sixteen remote participants plus the local call participant.
+    pub participants: Page<ParticipantView, 17>,
+}
+
+impl CallView {
+    /// Resolve a participant's camera without conflating actor and stream IDs.
+    pub fn camera_tile(&self, participant: u128) -> Option<CallTileId> {
+        let stream = self.streams.as_slice().iter().find(|stream| {
+            stream.kind == CallTileKind::Camera && stream.participant == participant
+        })?;
+        Some(CallTileId {
+            local_id: stream.local_id,
+            kind: stream.kind,
+        })
+    }
+    /// A presentation projection of the admitted stream; never separate authority.
+    pub fn screen_stage(&self) -> Option<CallScreenStage> {
+        let stream = self
+            .streams
+            .as_slice()
+            .iter()
+            .find(|s| s.kind == CallTileKind::Screen)?;
+        Some(CallScreenStage {
+            tile: CallTileId {
+                local_id: stream.local_id,
+                kind: stream.kind,
+            },
+            name: stream.participant_name.clone(),
+            dimensions: stream.dimensions,
+            flowing: stream.flowing,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -510,9 +670,14 @@ pub struct AccountRemovalResult {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PresentationSnapshot {
+    /// Accepted changes awaiting dispatch for the active durable account.
+    pub pending_intents: u16,
     pub content_panel: super::content::ContentPanel,
     pub file_export: Option<super::content::FileExportView>,
     pub create_panel: Option<super::conversation::CreatePanel>,
+    pub discover_panel: Option<super::discover::Panel>,
+    pub search_panel: Option<super::search::Panel>,
+    pub reference_previews: super::reference::Previews,
     pub revision: u64,
     pub login: LoginView,
     pub accounts: Page<AccountView, 8>,
@@ -521,11 +686,15 @@ pub struct PresentationSnapshot {
     /// Correlated local removal/cleanup outcome, retained until acknowledged.
     pub account_removal: Option<AccountRemovalResult>,
     pub active_account: Option<AccountScope>,
-    pub conversations: Page<ConversationView, 100>,
+    pub conversations: Page<ConversationView, 256>,
+    pub threads: ThreadList,
     pub conversation_list: ConversationListState,
     pub tags: Page<TagView, 102>,
     pub tag_state: ContentState,
     pub organization_result: Option<OrganizationResult>,
+    /// Upcoming reminders belong to the active account, independently of selection.
+    pub account_reminders: Option<AccountRemindersView>,
+    pub federation_invitations: Option<FederationInvitationsView>,
     /// History/files/participants below belong to exactly this runtime+host context.
     pub selected: Option<ConversationRef>,
     pub content: ContentState,
@@ -540,6 +709,39 @@ pub struct PresentationSnapshot {
     pub mutation: Option<ConversationMutationResult>,
 }
 
+/// Account-scoped, bounded subscribed-thread observation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadList {
+    pub account: Option<AccountScope>,
+    pub support: FeatureSupport,
+    pub content: ContentState,
+    pub entries: Page<ThreadView, 50>,
+    pub offset: u32,
+    pub has_next: bool,
+}
+impl Default for ThreadList {
+    fn default() -> Self {
+        Self {
+            account: None,
+            support: FeatureSupport::Unknown,
+            content: ContentState::Unconfigured,
+            entries: Page::empty(),
+            offset: 0,
+            has_next: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadView {
+    pub context: ConversationRef,
+    pub root: u128,
+    pub title: Text<256>,
+    pub replies: u32,
+    /// Last reply when the server supplies one; zero-reply threads use their root.
+    pub last_message: Option<u128>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ConversationListState {
     pub content: ContentState,
@@ -548,7 +750,61 @@ pub struct ConversationListState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountReminderView {
+    pub context: ConversationRef,
+    pub message: u128,
+    pub timestamp: u64,
+    /// Available only when the bounded room history already contains the message.
+    pub preview: Option<Text<160>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountRemindersView {
+    pub scope: AccountScope,
+    pub support: FeatureSupport,
+    pub state: ContentState,
+    /// False if the server limit was reached or a reminder's room is unavailable.
+    pub complete: bool,
+    pub reminders: Page<AccountReminderView, 100>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FederationInvitationView {
+    pub id: u128,
+    pub room: Text<256>,
+    pub inviter: Text<256>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FederationInvitationsView {
+    pub scope: AccountScope,
+    pub support: FeatureSupport,
+    pub invitations: Page<FederationInvitationView, 100>,
+    pub pending: bool,
+    pub failed: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiIntent {
+    RefreshThreads(AccountScope),
+    PageThreads {
+        account: AccountScope,
+        offset: u32,
+    },
+    /// Mark a listed room unread without changing the selected conversation.
+    MarkRoomUnread {
+        request: RequestId,
+        context: ConversationRef,
+    },
+    Discover {
+        account: AccountScope,
+        request: RequestId,
+        action: super::discover::Action,
+    },
+    AccountSearch {
+        account: AccountScope,
+        request: RequestId,
+        action: super::search::Action,
+    },
     /// Acknowledge or cancel only this native promise, including after navigation.
     FinishFileExport {
         request: RequestId,
@@ -561,6 +817,13 @@ pub enum UiIntent {
         message: u128,
         source: Text<4096>,
         ordinal: u16,
+    },
+    /// Open only a currently displayed, validated geo-location object.
+    OpenLocation {
+        context: ConversationRef,
+        message: u128,
+        placeholder: Text<128>,
+        id: Text<1024>,
     },
     Content {
         request: RequestId,
@@ -585,6 +848,11 @@ pub enum UiIntent {
         request: RequestId,
         context: ConversationRef,
         action: super::messaging::MessageAction,
+    },
+    /// Recent local composing activity; the account signaling owner throttles it.
+    Typing {
+        context: ConversationRef,
+        active: bool,
     },
     AcknowledgeRoom {
         request: RequestId,
@@ -638,6 +906,25 @@ pub enum UiIntent {
     },
     SelectAccount(AccountScope),
     OpenConversation(ConversationRef),
+    RefreshAccountReminders(AccountScope),
+    RefreshFederationInvitations(AccountScope),
+    ChangeFederationInvitation {
+        scope: AccountScope,
+        invitation: u128,
+        accept: bool,
+    },
+    OpenReminder {
+        request: RequestId,
+        context: ConversationRef,
+        message: u128,
+    },
+    /// Native activation is only navigation; the account owner revalidates the
+    /// runtime and room before loading this message context.
+    OpenNotificationMessage {
+        request: RequestId,
+        context: ConversationRef,
+        message: u128,
+    },
     SetArchived {
         request: RequestId,
         context: ConversationRef,
@@ -690,9 +977,31 @@ pub enum UiIntent {
         call: CallScope,
         enabled: bool,
     },
+    EndCallForEveryone(CallScope),
+    SetCallRecording {
+        call: CallScope,
+        start: bool,
+    },
+    MuteCallParticipant {
+        call: CallScope,
+        target: u128,
+    },
+    RingCallParticipant {
+        call: CallScope,
+        target: u128,
+    },
+    SetCallHand {
+        call: CallScope,
+        raised: bool,
+    },
+    SendCallReaction {
+        call: CallScope,
+        emoji: Text<64>,
+    },
     ShareScreen(CallScope),
     StopScreen(CallScope),
     ReconnectCall(CallScope),
+    RecoverCallMedia(CallScope),
     ResolveRequiredGate {
         call: CallScope,
         gate: RequiredGate,
@@ -706,6 +1015,23 @@ pub enum UiIntent {
 /// One coalesced snapshot and at most 64 queued intents; priority leave/logout must
 /// remain independently admissible as required by ADR-002.
 pub trait NativeDesktopPort {
+    /// Debug observation of prepared render content, not display presentation.
+    #[cfg(debug_assertions)]
+    fn observe_rendered(&mut self, _snapshot: &PresentationSnapshot) {}
+    #[cfg(debug_assertions)]
+    fn enable_latency_probe(&mut self) {}
+
+    fn composer_drafts(&self, _context: ConversationRef) -> Page<ComposerDraft, 32> {
+        Page::empty()
+    }
+    fn save_composer_draft(
+        &mut self,
+        _context: ConversationRef,
+        _draft: ComposerDraft,
+    ) -> Result<(), SubmitError> {
+        Err(SubmitError::Unavailable(UnavailableReason::Unsupported))
+    }
+
     fn try_submit(&mut self, intent: UiIntent) -> Result<(), SubmitError>;
     fn take_snapshot(&mut self) -> Option<PresentationSnapshot>;
 }

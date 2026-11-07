@@ -693,6 +693,7 @@ impl Desktop {
     pub(crate) fn close_room_dialog_state(&mut self) {
         self.cancel_member_csv_pick();
         self.room_ui.confirmation = None;
+        self.room_ui.avatar_picker_open = false;
         self.room_ui.members.reset();
         self.room_ui.pending_member_focus = None;
     }
@@ -893,7 +894,7 @@ impl Desktop {
                     panel.members_loaded || !panel.members.as_slice().is_empty(),
                 )
             {
-                return body.child(self.collection_skeleton(Skeleton::Rows));
+                return body.child(self.collection_skeleton(Skeleton::Rows, "members-initial"));
             }
             return body.child(self.hint(self.l(unavailable(availability))));
         }
@@ -901,7 +902,7 @@ impl Desktop {
             Some(panel.state),
             panel.members_loaded || !panel.members.as_slice().is_empty(),
         ) {
-            return body.child(self.collection_skeleton(Skeleton::Rows));
+            return body.child(self.collection_skeleton(Skeleton::Rows, "members-pending"));
         }
         if panel.members_loaded && panel.members.as_slice().is_empty() {
             body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
@@ -914,27 +915,43 @@ impl Desktop {
                     .items_start()
                     .gap_2()
                     .py_1()
-                    .child(self.content_avatar(
-                        talk_core::ui::content::AssetTarget::ParticipantAvatar {
-                            context: panel.context,
-                            participant: member.id.local,
-                        },
-                        &person_initials(member.name.as_str()),
-                        30.,
-                    ))
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .w_full()
-                                    .whitespace_normal()
-                                    .child(member.name.as_str().to_owned()),
-                            )
-                            .child(self.hint(self.l(role_label(member.role)))),
+                        self.person_trigger(
+                            crate::presentation::people_card::Source::Member(member.id),
+                            div()
+                                .flex()
+                                .items_start()
+                                .gap_2()
+                                .child(self.avatar_with_presence(
+                                    self.content_avatar(
+                                        talk_core::ui::content::AssetTarget::ParticipantAvatar {
+                                            context: panel.context,
+                                            participant: member.id.local,
+                                        },
+                                        &person_initials(member.name.as_str()),
+                                        30.,
+                                    ),
+                                    member.presence,
+                                    30.,
+                                    self.theme.surface,
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .min_w_0()
+                                        .items_start()
+                                        .child(
+                                            div()
+                                                .whitespace_normal()
+                                                .child(member.name.as_str().to_owned()),
+                                        )
+                                        .child(self.hint(self.l(role_label(member.role)))),
+                                ),
+                            cx,
+                        )
+                        .flex_1()
+                        .min_w_0(),
                     )
                     .when(!choices(member).is_empty(), |row| {
                         row.child(self.member_menu_trigger(member, cx))
@@ -1051,7 +1068,7 @@ impl Desktop {
             Some(panel.bots_state),
             panel.bots_loaded || !panel.bots.as_slice().is_empty(),
         ) {
-            return body.child(self.collection_skeleton(Skeleton::Rows));
+            return body.child(self.collection_skeleton(Skeleton::Rows, "guests"));
         }
         for bot in panel.bots.as_slice() {
             let availability = if bot.enabled.is_some() {
@@ -1158,7 +1175,7 @@ impl Desktop {
         }
         let loading = self.room_ui.members.preview_loading(panel.state);
         if loading && !self.room_ui.members.preview_visible() {
-            return body.child(self.collection_skeleton(Skeleton::Rows));
+            return body.child(self.collection_skeleton(Skeleton::Rows, "invitations"));
         }
         if !self.room_ui.members.preview_visible() {
             return body;
@@ -1291,6 +1308,10 @@ mod tests {
         Member {
             id: person(),
             name: Text::new("Synthetic participant").unwrap(),
+            author_key: None,
+            presence: talk_core::ui::presentation::Presence::Unknown,
+            status_icon: None,
+            status_message: None,
             role,
             source: DirectorySource::User,
             permissions: None,

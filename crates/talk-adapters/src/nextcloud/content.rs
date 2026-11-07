@@ -9,10 +9,16 @@ use talk_core::protocol::{FeatureSupport, Role, RoomKind};
 pub(super) fn is_mutation(command: &ContentCommand) -> bool {
     matches!(
         command,
-        ContentCommand::Poll {
-            command: PollCommand::Create(_) | PollCommand::Vote { .. } | PollCommand::Close(_),
-            ..
-        }
+        ContentCommand::DownloadCloudFile { .. }
+            | ContentCommand::Poll {
+                command: PollCommand::Create(_)
+                    | PollCommand::SaveDraft(_)
+                    | PollCommand::UpdateDraft { .. }
+                    | PollCommand::DeleteDraft(_)
+                    | PollCommand::Vote { .. }
+                    | PollCommand::Close(_),
+                ..
+            }
     )
 }
 fn poll_availability(room: &Conversation, caps: &Capabilities, create: bool) -> ActionAvailability {
@@ -72,6 +78,139 @@ impl NextcloudClient {
     ) -> Result<ContentResult, PortError> {
         let revalidate = matches!(&command, ContentCommand::RevalidateAvatar(_));
         match command {
+            ContentCommand::DownloadCloudFile {
+                path,
+                destination,
+                progress,
+            } => {
+                let path = api::files::FilePath::parse(path.as_str())
+                    .map_err(|kind| self.error(transport::kind(kind)))?;
+                let bytes = self
+                    .download_to_file(c, path, destination.as_str(), &progress)
+                    .await?;
+                Ok(ContentResult::CloudFileSaved(bytes))
+            }
+            ContentCommand::OpenCloudFile(file) => {
+                let link = self.transport.file_link(file)?;
+                Ok(ContentResult::CloudLink(
+                    Text::new(&link).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                ))
+            }
+            ContentCommand::ListFiles { .. }
+            | ContentCommand::ListFilesPage { .. }
+            | ContentCommand::SearchFiles { .. }
+            | ContentCommand::FavoriteFiles => {
+                let (entries, pagination, folder_page) = match command {
+                    ContentCommand::ListFiles { path } => {
+                        let path = api::files::DirectoryPath::parse(path.as_str())
+                            .map_err(|kind| self.error(transport::kind(kind)))?;
+                        (self.transport.list_files(c, path).await?, None, false)
+                    }
+                    ContentCommand::ListFilesPage { path, offset } => {
+                        let path = api::files::DirectoryPath::parse(path.as_str())
+                            .map_err(|kind| self.error(transport::kind(kind)))?;
+                        let page = self.transport.list_files_page(c, path, offset).await?;
+                        (page.entries, page.pagination, true)
+                    }
+                    ContentCommand::SearchFiles { query } => (
+                        self.transport
+                            .search_files(c, query.as_ref().map(Text::as_str))
+                            .await?,
+                        None,
+                        false,
+                    ),
+                    ContentCommand::FavoriteFiles => {
+                        (self.transport.favorite_files(c).await?, None, false)
+                    }
+                    _ => unreachable!(),
+                };
+                let mut files = Page::empty();
+                for entry in entries {
+                    files
+                        .try_push(CloudFile {
+                            name: Text::new(&entry.name)
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            path: Text::new(&entry.path)
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            directory: entry.is_directory,
+                            size: entry.size,
+                            modified: entry
+                                .modified
+                                .as_deref()
+                                .map(Text::new)
+                                .transpose()
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            modified_unix: entry.modified_unix,
+                            mime: entry
+                                .content_type
+                                .as_deref()
+                                .map(Text::new)
+                                .transpose()
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            file_id: entry
+                                .file_id
+                                .as_deref()
+                                .map(Text::new)
+                                .transpose()
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                        })
+                        .map_err(|_| self.error(ErrorKind::TooLarge))?;
+                }
+                if folder_page {
+                    Ok(ContentResult::FilePage { files, pagination })
+                } else {
+                    Ok(ContentResult::Files(files))
+                }
+            }
+            ContentCommand::VoiceAudio {
+                message,
+                placeholder,
+            } => {
+                let target = self.target(c, message).await?;
+                if target.kind.as_deref() != Some("voice-message") {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                let object = self.attachment(c, message, &placeholder, caps).await?;
+                // Android's AAC-in-MP4 recorder currently names files .mp3;
+                // its DAV MIME may therefore be audio/mpeg. The native player
+                // still identifies the container from bounded bytes.
+                // https://github.com/nextcloud/talk-android/blob/master/app/src/main/java/com/nextcloud/talk/chat/data/io/MediaRecorderManager.kt
+                if !matches!(
+                    object.mime_type.as_deref(),
+                    Some(
+                        "audio/wav"
+                            | "audio/x-wav"
+                            | "audio/ogg"
+                            | "application/ogg"
+                            | "audio/opus"
+                            | "audio/mpeg"
+                            | "audio/webm"
+                            | "audio/mp4"
+                            | "audio/x-m4a"
+                            | "video/mp4"
+                    )
+                ) {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                if object
+                    .size
+                    .is_some_and(|size| size > api::files::MAX_FILE_BYTES)
+                {
+                    return Err(self.error(ErrorKind::TooLarge));
+                }
+                let raw = object
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
+                let path =
+                    api::files::FilePath::parse(&format!("/{}", raw.trim_start_matches('/')))
+                        .map_err(|kind| self.error(transport::kind(kind)))?;
+                let bytes = self.transport.voice_audio(c, path).await?;
+                self.transport.validate(c)?;
+                Ok(ContentResult::VoiceAudio(
+                    VideoBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                ))
+            }
             ContentCommand::Video {
                 message,
                 placeholder,
@@ -168,6 +307,19 @@ impl NextcloudClient {
                 let mut room_key = None;
                 let mut room_identity = None;
                 let image = match request {
+                    AssetRequest::CloudFile(file) => {
+                        if file == 0 {
+                            return Err(self.error(ErrorKind::Malformed));
+                        }
+                        let bytes = self
+                            .transport
+                            .image(c, I::FilePreview { file, large: false })
+                            .await?;
+                        self.transport.validate(c)?;
+                        return Ok(ContentResult::Image(
+                            ImageBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                        ));
+                    }
                     AssetRequest::SelfAvatar => I::UserAvatar {
                         user: self.transport.user().to_owned(),
                     },
@@ -449,16 +601,108 @@ impl NextcloudClient {
         use api::poll::Command as W;
         let room = self.content_room(c, id, caps).await?;
         let create = poll_availability(&room, caps, true);
+        let manage = ActionAvailability {
+            implemented: true,
+            server: caps.feature("talk-polls-drafts"),
+            allowed: if matches!(
+                room.role,
+                Role::Owner | Role::Moderator | Role::GuestModerator
+            ) {
+                create.allowed
+            } else {
+                Decision::Denied
+            },
+        };
+        let edit = ActionAvailability {
+            server: caps.feature("edit-draft-poll"),
+            ..manage
+        };
         if command == PollCommand::Capabilities {
-            return Ok(ContentResult::PollCapabilities(create));
+            return Ok(ContentResult::PollCapabilities {
+                create,
+                drafts: manage,
+                edit_draft: edit,
+            });
         }
         if !caps.has("talk-polls") {
             return Err(self.error(ErrorKind::Unsupported));
         }
         let token = api::models::RoomToken::parse(self.check_room(id)?)
             .map_err(|k| self.error(transport::kind(k)))?;
+        if command == PollCommand::ListDrafts {
+            if !caps.has("talk-polls-drafts") {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            self.allowed(manage.allowed)?;
+            let drafts = self.transport.poll_drafts(c, &token).await?;
+            let mut result = Page::empty();
+            for draft in drafts {
+                result
+                    .try_push(self.project_poll_draft(draft)?)
+                    .map_err(|_| self.error(ErrorKind::TooLarge))?;
+            }
+            return Ok(ContentResult::PollDrafts(result));
+        }
+        if matches!(
+            command,
+            PollCommand::SaveDraft(_)
+                | PollCommand::UpdateDraft { .. }
+                | PollCommand::DeleteDraft(_)
+        ) {
+            if !caps.has("talk-polls-drafts") {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            self.allowed(manage.allowed)?;
+            if matches!(command, PollCommand::UpdateDraft { .. }) && !caps.has("edit-draft-poll") {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            self.admit_action(id, operation)?;
+            let result = match &command {
+                PollCommand::DeleteDraft(poll) => self
+                    .transport
+                    .delete_poll_draft(c, &token, *poll)
+                    .await
+                    .map(|()| ContentResult::PollDraftDeleted(*poll)),
+                PollCommand::SaveDraft(draft) | PollCommand::UpdateDraft { draft, .. } => {
+                    let question = draft.question.as_str().to_owned();
+                    let options = draft
+                        .options
+                        .as_slice()
+                        .iter()
+                        .map(|s| s.as_str().to_owned())
+                        .collect();
+                    let wire = match &command {
+                        PollCommand::UpdateDraft { poll, .. } => W::UpdateDraft {
+                            poll: *poll,
+                            question,
+                            options,
+                            hidden_results: draft.hidden_results,
+                            max_votes: draft.max_votes,
+                        },
+                        _ => W::CreateDraft {
+                            question,
+                            options,
+                            hidden_results: draft.hidden_results,
+                            max_votes: draft.max_votes,
+                        },
+                    };
+                    self.transport
+                        .poll_draft_mutation(c, &token, wire)
+                        .await
+                        .and_then(|draft| self.project_poll_draft(draft))
+                        .map(|draft| ContentResult::PollDraftSaved(Box::new(draft)))
+                }
+                _ => Err(self.error(ErrorKind::Malformed)),
+            };
+            self.settle_action(operation, result.as_ref().err());
+            return result;
+        }
         let wire = match &command {
-            PollCommand::Capabilities => return Err(self.error(ErrorKind::Malformed)),
+            PollCommand::Capabilities
+            | PollCommand::ListDrafts
+            | PollCommand::SaveDraft(_)
+            | PollCommand::UpdateDraft { .. }
+            | PollCommand::DeleteDraft(_) => return Err(self.error(ErrorKind::Malformed)),
             PollCommand::Read(n) => W::Read(*n),
             PollCommand::Create(draft) => {
                 self.allowed(create.allowed)?;
@@ -471,7 +715,7 @@ impl NextcloudClient {
                         .map(|s| s.as_str().into())
                         .collect(),
                     hidden_results: draft.hidden_results,
-                    max_votes: if draft.multiple { 0 } else { 1 },
+                    max_votes: draft.max_votes,
                 }
             }
             PollCommand::Vote { poll, options } => {
@@ -518,6 +762,25 @@ impl NextcloudClient {
             self.settle_action(operation, result.as_ref().err());
         }
         result
+    }
+    fn project_poll_draft(&self, draft: api::poll::Draft) -> Result<PollDraftEntry, PortError> {
+        let mut options = Page::empty();
+        for option in draft.options {
+            options
+                .try_push(Text::new(&option).map_err(|_| self.error(ErrorKind::TooLarge))?)
+                .map_err(|_| self.error(ErrorKind::TooLarge))?;
+        }
+        Ok(PollDraftEntry {
+            id: draft.id,
+            draft: PollDraft {
+                question: Text::new(&draft.question)
+                    .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                options,
+                max_votes: draft.max_votes,
+                hidden_results: draft.hidden_results,
+            },
+            max_votes: draft.max_votes,
+        })
     }
     fn poll_close(&self, poll: &api::poll::Poll, room: &Conversation) -> Decision {
         if poll.status == 0

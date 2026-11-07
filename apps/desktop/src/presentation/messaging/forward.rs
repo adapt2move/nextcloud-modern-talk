@@ -548,18 +548,21 @@ impl Desktop {
         for room in &rows {
             let selected = approval.destination == Some(room.context);
             list = list.child(
-                self.control(
-                    destination_id(target, room.context),
-                    ButtonStyle::Quiet,
-                    Availability::available(),
-                    action(Action::Select(target, room.context)),
-                    cx,
+                self.style_list_row(
+                    self.control(
+                        destination_id(target, room.context),
+                        ButtonStyle::Quiet,
+                        Availability::available(),
+                        action(Action::Select(target, room.context)),
+                        cx,
+                    ),
+                    crate::presentation::controls::RowSize::Detailed,
                 )
                 .w_full()
                 .justify_start()
-                .min_h(self.sp(44.))
+                .min_h(self.sp(44.).max(px(48.)))
                 .gap_3()
-                .bg(if selected { t.selected } else { t.surface })
+                .bg(self.selected_row_color(selected, t.surface))
                 .child(self.scaled_icon("chat", 18., t.muted))
                 .child(
                     div()
@@ -595,7 +598,7 @@ impl Desktop {
             .flex_1()
             .overflow_y_scroll()
             .track_scroll(&self.message_ui.forward.body_scroll)
-            .p_5()
+            .p_4()
             .flex()
             .flex_col()
             .gap_3()
@@ -663,31 +666,22 @@ impl Desktop {
                 denied.filter(|denial| *denial != Denial::Selection),
                 |body, denial| body.child(self.hint(self.l(denial_label(denial)))),
             );
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(t.scrim)
-            .flex()
+        self.dialog_scrim()
             .items_center()
             .justify_center()
             .p_5()
             .child(
-                div()
+                self.dialog_shell_surface()
                     .w_full()
                     .max_w(px(560.))
-                    .max_h(
+                    .h(
                         (window.viewport_size().height - px(window_chrome::HEIGHT + 48.))
+                            .min(px(632.))
                             .max(px(1.)),
                     )
                     .min_h_0()
                     .flex()
                     .flex_col()
-                    .bg(t.surface)
-                    .rounded(px(13.))
-                    .border_1()
-                    .border_color(t.border)
-                    .shadow_lg()
                     .track_focus(&self.modal_focus)
                     .tab_group()
                     .key_context("ForwardDialog")
@@ -700,17 +694,8 @@ impl Desktop {
                         }
                     }))
                     .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap_3()
-                            .px_5()
-                            .py_4()
-                            .border_b_1()
-                            .border_color(t.border)
-                            .child(self.title(self.l("Weiterleiten")))
+                        self.dialog_header()
+                            .child(self.style_dialog_title(div()).child(self.l("Weiterleiten")))
                             .child(self.icon_button(
                                 dialog_id("forward-close", target),
                                 ("x", "Schließen"),
@@ -731,20 +716,11 @@ impl Desktop {
                         )
                     })
                     .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .flex_wrap()
-                            .justify_end()
-                            .gap_3()
-                            .px_5()
-                            .py_4()
-                            .border_t_1()
-                            .border_color(t.border)
+                        self.dialog_footer()
                             .child(self.button(
                                 dialog_id("forward-cancel", target),
                                 "Abbrechen",
-                                ButtonStyle::Secondary,
+                                ButtonStyle::Quiet,
                                 Availability::available(),
                                 action(Action::Cancel(target)),
                                 cx,

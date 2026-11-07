@@ -1,11 +1,15 @@
 //! Nextcloud HTTP/OCS deep module. Wire identifiers, authenticated transport and
 //! correlation journals stay here; core receives bounded normalized observations.
+mod avatar_upload;
 pub(crate) mod avatars;
 mod call_policy;
 mod content;
 mod conversation;
+mod creation;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod diagnostics;
+mod discover;
+mod federation;
 mod live;
 mod meeting;
 mod meeting_runtime;
@@ -16,12 +20,17 @@ mod pdf_preview;
 mod people;
 mod preferences;
 mod projection;
+mod references;
+mod reminders;
+mod search;
+mod summary;
 mod tags;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod test_support;
 #[cfg(test)]
 mod tests;
 mod transport;
+mod typing;
 mod wire;
 
 pub use transport::NetworkRuntime;
@@ -86,6 +95,10 @@ struct RoomBinding {
     token: String,
     server_id: Option<u64>,
     read_through: Option<u64>,
+    federated_capabilities: Option<(
+        std::time::Instant,
+        nextcloud_talk_api::federation::RemoteCapabilities,
+    )>,
 }
 struct PendingSend {
     operation: OperationId,
@@ -115,10 +128,19 @@ pub struct NextcloudClient {
     sends: Vec<PendingSend>,
     actions: Vec<conversation::PendingAction>,
     uploads: Vec<messaging::UploadName>,
+    summaries: Vec<summary::Binding>,
+    invitations: Vec<federation::Binding>,
+    invitation_actions: federation::Journal,
+    breakout_rooms: Vec<conversation::BreakoutBinding>,
     members: Vec<conversation::MemberBinding>,
     recipients: Vec<conversation::RecipientBinding>,
     people: Vec<people::PersonBinding>,
+    creation_people: Vec<people::PersonBinding>,
+    creation_presets: Option<Vec<nextcloud_talk_api::creation::Preset>>,
+    listed_rooms: Vec<discover::ListedRoom>,
+    listed_join_uncertain: Option<ConversationId>,
     direct_attempts: Vec<people::DirectAttempt>,
+    typing_watch: Option<(ConversationId, nextcloud_talk_api::typing::Watch)>,
     integrations: Vec<conversation::IntegrationBinding>,
     active: Option<ActiveConversation>,
     observed_call: Option<CallScope>,
@@ -216,10 +238,19 @@ impl NextcloudClient {
             sends: Vec::new(),
             actions: Vec::new(),
             uploads: Vec::new(),
+            summaries: Vec::new(),
+            invitations: Vec::new(),
+            invitation_actions: federation::Journal::default(),
+            breakout_rooms: Vec::new(),
             members: Vec::new(),
             recipients: Vec::new(),
             people: Vec::new(),
+            creation_people: Vec::new(),
+            creation_presets: None,
+            listed_rooms: Vec::new(),
+            listed_join_uncertain: None,
             direct_attempts: Vec::new(),
+            typing_watch: None,
             integrations: Vec::new(),
             active: None,
             observed_call: None,
@@ -309,6 +340,7 @@ impl NextcloudClient {
             token: token.to_owned(),
             server_id,
             read_through: None,
+            federated_capabilities: None,
         });
         Ok(id)
     }
@@ -447,6 +479,7 @@ impl NextcloudClient {
             .ok_or_else(|| self.error(ErrorKind::Malformed))?;
         let kind = match data.get("messageType").and_then(Value::as_str) {
             Some("comment") => MessageKind::Comment,
+            Some("voice-message") => MessageKind::VoiceMessage,
             Some("comment_deleted") => MessageKind::Deleted,
             Some("system") => MessageKind::System,
             _ => MessageKind::Unsupported,
@@ -685,16 +718,34 @@ impl NextcloudClient {
             self.diagnostic_signaling.invalidate();
         }
         validation?;
+        // Retire an active watch before a potentially slow capabilities request.
+        // Turning sharing off must stop local signaling immediately.
+        if matches!(
+            &request,
+            ProtocolRequest::SetPreference {
+                change: talk_core::preferences::account::AccountPreferenceChange::ShareTypingStatus(
+                    false
+                ),
+                ..
+            }
+        ) {
+            self.typing_watch = None;
+        }
         let room_id = match &request {
             ProtocolRequest::ReconcileConversation(id)
             | ProtocolRequest::Participants(id)
+            | ProtocolRequest::JoinOpenConversation(id)
             | ProtocolRequest::LeaveConversation(id)
             | ProtocolRequest::ActivateConversation(id)
-            | ProtocolRequest::DeactivateConversation(id) => Some(*id),
+            | ProtocolRequest::DeactivateConversation(id)
+            | ProtocolRequest::WatchTyping(id)
+            | ProtocolRequest::PollTyping(id) => Some(*id),
             ProtocolRequest::History { conversation, .. }
             | ProtocolRequest::Messaging { conversation, .. }
             | ProtocolRequest::ConversationSettings { conversation, .. } => Some(*conversation),
-            ProtocolRequest::SetArchived { conversation, .. } => Some(*conversation),
+            ProtocolRequest::SetArchived { conversation, .. }
+            | ProtocolRequest::TypingActivity { conversation, .. } => Some(*conversation),
+            ProtocolRequest::ResolveReference { message, .. } => Some(message.conversation),
             ProtocolRequest::Send(send) => Some(send.conversation),
             ProtocolRequest::MarkRead(id) => Some(id.conversation),
             ProtocolRequest::ObserveCall(call)
@@ -711,10 +762,35 @@ impl NextcloudClient {
             self.check_room(id)?;
         }
         match request {
+            ProtocolRequest::WatchTyping(id) => return self.watch_typing(context, id),
+            ProtocolRequest::StopTyping => {
+                self.typing_watch = None;
+                return Ok(ProtocolReply::TypingAccepted);
+            }
+            ProtocolRequest::TypingActivity {
+                conversation,
+                active,
+            } => return self.typing_activity(context, conversation, active),
+            ProtocolRequest::PollTyping(id) => return self.poll_typing(context, id),
             ProtocolRequest::Meeting(command) => return self.meeting(context, command).await,
             ProtocolRequest::PollIncomingCalls => return self.poll_incoming_calls(context).await,
             ProtocolRequest::PollMessageNotifications => {
                 return self.poll_message_notifications(context).await;
+            }
+            ProtocolRequest::UpcomingReminders => {
+                return self.upcoming_reminders(context).await;
+            }
+            ProtocolRequest::FederationInvitations => {
+                return self.federation_invitations(context).await;
+            }
+            ProtocolRequest::ChangeFederationInvitation {
+                operation,
+                invitation,
+                accept,
+            } => {
+                return self
+                    .change_federation_invitation(context, operation, invitation, accept)
+                    .await;
             }
             ProtocolRequest::PollLiveEvents => {
                 return self
@@ -783,6 +859,39 @@ impl NextcloudClient {
         let caps = self.capabilities(context).await?;
         self.supported(&caps)?;
         match request {
+            ProtocolRequest::SubscribedThreads { offset } => {
+                if !caps.has("threads") {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                self.subscribed_threads(context, offset)
+                    .await
+                    .map(|(threads, has_next)| ProtocolReply::SubscribedThreads {
+                        threads,
+                        has_next,
+                    })
+            }
+            ProtocolRequest::InspectCreation => self.inspect_creation(context, &caps).await,
+            ProtocolRequest::StageCreationPerson(person) => {
+                self.stage_creation_person(context, person)
+            }
+            ProtocolRequest::UnstageCreationPerson(person) => {
+                self.unstage_creation_person(context, person)
+            }
+            ProtocolRequest::CreateConversation(room) => {
+                self.create_conversation(context, room, &caps).await
+            }
+            ProtocolRequest::SearchMessages(query) => {
+                self.account_search(context, query, &caps).await
+            }
+            ProtocolRequest::ResolveReference { message, url } => {
+                self.resolve_reference(context, message, url, &caps).await
+            }
+            ProtocolRequest::ListOpenConversations { query } => {
+                self.list_open_conversations(context, query, &caps).await
+            }
+            ProtocolRequest::JoinOpenConversation(id) => {
+                self.join_open_conversation(context, id, &caps).await
+            }
             ProtocolRequest::Content { operation, command } => Ok(ProtocolReply::Content {
                 operation,
                 result: self.content(context, operation, command, &caps).await?,
@@ -810,13 +919,18 @@ impl NextcloudClient {
                     .await?,
             }),
             ProtocolRequest::ListConversations => {
+                let mut query = vec![("noStatusUpdate", "1".into())];
+                if caps.user_status_enabled == Some(true) {
+                    query.push(("includeStatus", "true".into()));
+                }
+                self.cleanup_listed_join(context).await;
                 let response = self
                     .transport
                     .ocs(
                         context,
                         Method::GET,
                         "ocs/v2.php/apps/spreed/api/v4/room",
-                        &[("noStatusUpdate", "1".into())],
+                        &query,
                         &[],
                         false,
                     )
@@ -825,7 +939,7 @@ impl NextcloudClient {
                     .data
                     .as_array()
                     .ok_or_else(|| self.error(ErrorKind::Malformed))?;
-                if list.len() > 100 {
+                if list.len() > 256 {
                     return Err(self.error(ErrorKind::TooLarge));
                 }
                 let mut rooms = Page::empty();
@@ -834,14 +948,28 @@ impl NextcloudClient {
                     if rooms.as_slice().iter().any(|r: &Conversation| r.id == id) {
                         return Err(self.error(ErrorKind::Malformed));
                     }
-                    let mut room = wire::room(data, id, &caps).map_err(|k| self.error(k))?;
-                    self.project_call(&mut room, data, &caps)?;
-                    self.project_room_tags(&mut room, data, &caps)?;
+                    let room_caps = self
+                        .cached_federation_capabilities(id, &caps)
+                        .unwrap_or_else(|| caps.clone());
+                    let room_caps = if wire::is_federated(data) {
+                        &room_caps
+                    } else {
+                        &caps
+                    };
+                    let mut room = wire::room(data, id, room_caps).map_err(|k| self.error(k))?;
+                    self.project_call(&mut room, data, room_caps)?;
+                    self.project_room_tags(&mut room, data, room_caps)?;
                     rooms
                         .try_push(room)
                         .map_err(|_| self.error(ErrorKind::TooLarge))?;
                 }
                 self.transport.validate(context)?;
+                if self
+                    .listed_join_uncertain
+                    .is_some_and(|id| rooms.as_slice().iter().any(|room| room.id == id))
+                {
+                    self.listed_join_uncertain = None;
+                }
                 let retained_avatars: Vec<_> = rooms
                     .as_slice()
                     .iter()
@@ -870,7 +998,7 @@ impl NextcloudClient {
             ProtocolRequest::ReadPreferences { request } => Ok(ProtocolReply::Preferences(
                 talk_core::preferences::account::AccountPreferenceResult {
                     request,
-                    values: caps.account_preferences(context.scope),
+                    values: self.read_account_preferences(context, &caps).await?,
                 },
             )),
             ProtocolRequest::SetPreference { request, change } => {
@@ -965,6 +1093,14 @@ impl NextcloudClient {
                 recipient,
             } => {
                 self.create_direct(context, operation, recipient, &caps)
+                    .await
+            }
+            ProtocolRequest::CreateDirectForMember { operation, member } => {
+                self.create_direct_for_member(context, operation, member, &caps)
+                    .await
+            }
+            ProtocolRequest::CreatePrivateReply { operation, source } => {
+                self.create_private_reply(context, operation, source, &caps)
                     .await
             }
             ProtocolRequest::CreateGroup { name } => {
@@ -1118,6 +1254,7 @@ impl NextcloudPort for NextcloudClient {
                 request => matches!(
                     request,
                     ProtocolRequest::Send(_)
+                        | ProtocolRequest::ChangeFederationInvitation { .. }
                         | ProtocolRequest::SetPreference { .. }
                         | ProtocolRequest::SetArchived { .. }
                         | ProtocolRequest::SetFavorite { .. }
@@ -1128,7 +1265,10 @@ impl NextcloudPort for NextcloudClient {
                         | ProtocolRequest::ReorderTags { .. }
                         | ProtocolRequest::SetConversationTags { .. }
                         | ProtocolRequest::CreateGroup { .. }
+                        | ProtocolRequest::CreateConversation(_)
                         | ProtocolRequest::CreateDirect { .. }
+                        | ProtocolRequest::CreateDirectForMember { .. }
+                        | ProtocolRequest::CreatePrivateReply { .. }
                         | ProtocolRequest::MarkRead(_)
                         | ProtocolRequest::LeaveConversation(_)
                         | ProtocolRequest::ActivateConversation(_)

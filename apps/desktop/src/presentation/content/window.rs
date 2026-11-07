@@ -154,9 +154,13 @@ mod tests {
     fn snapshot() -> PresentationSnapshot {
         let context = room(1, 1);
         PresentationSnapshot {
+            pending_intents: 0,
             content_panel: Default::default(),
             file_export: None,
             create_panel: None,
+            discover_panel: None,
+            search_panel: None,
+            reference_previews: Page::empty(),
             revision: 1,
             login: LoginView {
                 phase: LoginPhase::Ready,
@@ -172,6 +176,7 @@ mod tests {
             account_removal: None,
             active_account: Some(context.account),
             conversations: Page::empty(),
+            threads: Default::default(),
             conversation_list: ConversationListState {
                 content: ContentState::Ready,
                 complete: true,
@@ -179,6 +184,8 @@ mod tests {
             tags: Page::empty(),
             tag_state: ContentState::Ready,
             organization_result: None,
+            account_reminders: None,
+            federation_invitations: None,
             selected: Some(context),
             content: ContentState::Ready,
             messages: Page::empty(),

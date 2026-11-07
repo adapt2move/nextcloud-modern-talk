@@ -1,13 +1,13 @@
 //! Notice timing only. Raw reachability still governs admission and queued work.
 use super::{ButtonStyle, Desktop, LocalAction, controls::Availability};
-use gpui::{Context, Div, div, prelude::*, px};
+use gpui::{Context, Div, prelude::*, px};
 use std::time::{Duration, Instant};
 use talk_core::ui::{
     AccountScope,
     presentation::{ConnectionFailure, ContentState, ConversationRef, UiIntent},
 };
 
-const OFFLINE_GRACE: Duration = Duration::from_secs(4);
+const OFFLINE_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy)]
 enum Observation {
@@ -106,13 +106,19 @@ impl Desktop {
         self.offline_notice.visible(self.snapshot.active_account)
     }
 
-    pub(super) fn offline_footer(
-        &self,
-        context: ConversationRef,
-        cx: &Context<Self>,
-    ) -> Option<Div> {
-        self.offline_notice_visible()
-            .then(|| self.connection_line(context, None, cx))
+    pub(super) fn connection_banner(&self) -> Option<gpui::Stateful<Div>> {
+        self.offline_notice_visible().then(|| {
+            self.banner(
+                super::controls::BannerRole::Warning,
+                self.l(if self.snapshot.pending_intents > 0 {
+                    "Offline – Änderungen werden gesendet, sobald du wieder online bist"
+                } else {
+                    "Verbindung wird wiederhergestellt …"
+                }),
+            )
+            .id("connection-status")
+            .flex_none()
+        })
     }
 
     pub(super) fn connection_failure_footer(
@@ -132,36 +138,41 @@ impl Desktop {
     ) -> Div {
         let (label, detail) = failure
             .map(super::state::connection_failure_copy)
-            .unwrap_or(("Offline", ""));
-        let tint = if failure.is_some() {
-            self.theme.danger
-        } else {
-            self.theme.muted
-        };
+            .unwrap_or((
+                if self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .is_some_and(|p| p.queued_actions > 0)
+                {
+                    "Offline – Änderungen werden gesendet, sobald du wieder online bist"
+                } else {
+                    "Verbindung wird wiederhergestellt …"
+                },
+                "",
+            ));
         let availability = Availability::available().help(detail);
         let id = super::controls::scoped_id("connection-retry", context, 0, 0);
-        div()
-            .min_h(px(28.))
-            .flex()
-            .items_center()
-            .gap_2()
-            .text_size(self.sp(12.))
-            .line_height(self.sp(18.))
-            .text_color(tint)
-            .child(self.scaled_icon(if failure.is_some() { "info" } else { "cloud" }, 14., tint))
-            .child(div().flex_1().min_w_0().child(self.l(label)))
-            .child(
-                self.icon_button(
-                    id,
-                    ("refresh", "Erneut laden"),
-                    ButtonStyle::Quiet,
-                    availability,
-                    LocalAction::Intent(UiIntent::Refresh(context)),
-                    cx,
-                )
-                .size(px(28.))
-                .min_h(px(28.)),
+        self.banner(
+            if failure.is_some() {
+                super::controls::BannerRole::Error
+            } else {
+                super::controls::BannerRole::Warning
+            },
+            self.l(label),
+        )
+        .child(
+            self.icon_button(
+                id,
+                ("refresh", "Erneut laden"),
+                ButtonStyle::Quiet,
+                availability,
+                LocalAction::Intent(UiIntent::Refresh(context)),
+                cx,
             )
+            .size(px(28.))
+            .min_h(px(28.)),
+        )
     }
 }
 

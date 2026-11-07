@@ -24,7 +24,8 @@ GLib headers while omitting the OCR, capture and desktop-portal tools.
 
 Linux browser login uses the session's `org.freedesktop.portal.OpenURI` service and a registered default HTTPS browser. Minimal desktop sessions need a portal backend (GTK in the command above), `xdg-mime` from `xdg-utils`, and `update-desktop-database` from `desktop-file-utils` when registering a browser's desktop entry. Xvfb alone does not supply this browser handoff.
 
-Linux screen-sharing capability checks use ashpd over the session bus, without the `gdbus` command or additional native build prerequisites. Actual ScreenCast availability requires a portal backend matching the desktop/compositor; installing the GTK backend for browser login does not establish ScreenCast support. Checks never open a source picker or capture session. Private portal fixtures require `dbus-run-session`, `dbus-daemon` and GNU `timeout` (coreutils); they use isolated buses with service activation disabled.
+Linux screen-sharing capability checks use ashpd over the session bus, without the `gdbus` command or additional native build prerequisites. Actual ScreenCast availability requires a portal backend matching the desktop/compositor; installing the GTK backend for browser login does not establish ScreenCast support. Permission checks never open a source picker or capture session. In-call sharing
+uses that portal session and requires the `gstreamer1.0-pipewire` runtime plugin. Private portal fixtures require `dbus-run-session`, `dbus-daemon` and GNU `timeout` (coreutils); they use isolated buses with service activation disabled.
 
 On Apple Silicon macOS, install full Xcode and its macOS/Metal toolchain, select
 its developer directory, and verify `xcrun --sdk macosx --find metal` and
@@ -109,7 +110,7 @@ on a matching native host with the pinned SDK:
 
 ```sh
 task package -- --target aarch64-apple-darwin \
-  --version 0.0.10 --output /absolute/new/package-directory
+  --version 0.0.12 --output /absolute/new/package-directory
 ```
 
 This delegates to the existing
@@ -141,6 +142,16 @@ Use `login-account-store-busy`, `login-account-store-device-changed` and
 destination and expose storage actions instead of a browser-login retry. These
 fixtures never reopen or repair an actual profile.
 
+Use `connection-reconnecting`, `offline-with-queue` and `startup-from-cache` for
+fictional offline/restart presentation. The capture tool waits through the normal
+five-second grace period for connection scenarios. These fixtures perform no server
+request and do not establish cache restoration, replay or native performance.
+
+Use `chat-message-tools` for fictional location, reminder and scheduled-message
+rows; `chat-reminder-menu`, `chat-reminder-time` and `chat-schedule-time`
+show the message menu and date/time choosers; `lobby-settings` shows the
+moderator lobby timer. These scenarios do not contact a server.
+
 Use `chat-send-pending` for the fictional pending-send presentation, repeated Enter and aligned delivery indicators on grouped, edited and wrapped messages. It deliberately leaves the send unconfirmed and does not qualify transport admission.
 
 Use `chat-busy` to inspect rejected automatic read receipts and explicit sends under fictional local backpressure. Automatic requests remain quiet; a rejected send keeps its draft and shows a scoped notice for at most eight seconds. This fixture performs no server request.
@@ -156,6 +167,18 @@ Remove chips, hover/focus Download and drop multiple local files into the chat.
 The fixture shows a pending send rather than fabricating upload success. It has
 no file or server I/O. Native Finder promises require a real macOS account-connected
 run; an isolated Cocoa binding check or Linux UI run does not qualify them.
+
+Use `chat-presence` to inspect fictional direct-message presence and custom status
+in the sidebar and header. `status-picker` opens a fictional account-status
+menu, and `status-message` opens its fictional status-message editor. These
+fixtures do not query a server.
+
+Use `call-gallery`, `call-speaker`, `call-screen-stage`, `call-dock`,
+`call-participants-raised` and `call-recording` for fictional call presentation.
+These fixtures do not connect screen streams or prove signaling, media, operating
+system integration or accessibility. The screen stage keeps camera and screen
+identities separate; the production media owner supplies scoped screen frames through the same stream metadata.
+Use `search-navigation` for the fictional quick switcher, `account-search` for grouped message results and filters, `discover` for open-conversation browsing, and `search-filter` for the sidebar filters and muted-room indicator. These previews do not query a directory or establish server behavior.
 
 Use `chat-ux` and `chat-ux-call` for the header, search, reply and tooltip fixtures. They use fictional conversations and do not authorize a server send or call. Short transitions respect the observed system Reduce Motion preference; an unknown preference suppresses decorative motion. On Linux, observation uses the desktop's GNOME or KDE settings. The emoji action uses the system character palette on macOS, the Windows emoji picker, or an available Linux desktop picker. Linux picker selection may require an explicit copy and paste.
 
@@ -221,3 +244,24 @@ User macOS testing is final-only after the assigned agent-side work and a prepar
 ## Maintaining pins
 
 [Action metadata](../tools/release/actions.json) records workflow pins; update commits only after checking official upstream source and runtime requirements. Retain actual runner image/SDK versions. Dependency changes need their owner's coordination and affected verification. See GitHub's [workflow security guidance](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions).
+
+The default-off `dev-probes` desktop feature provides a private lab profile and
+bounded native latency/frame probes. Build the ordinary release profile with
+assertions enabled (`RUSTFLAGS="-C debug-assertions=yes"`) and
+`--features dev-probes`; this diagnostic build is not a distribution artifact.
+`--dev-seed PROFILE FIXTURE` imports only an owner-private, literal-loopback
+synthetic lab account, using the ordinary private-file account provider.
+`--dev-profile PROFILE --dev-latency` opens it through normal composition and
+records content after native frame callbacks. The feature never reads fixture
+credentials into presentation or enables GPUI test support.
+
+`tests/lab/native_latency.py --state PRIVATE_LAB_STATE --binary BUILT_BINARY
+--output NEW_EVIDENCE_DIRECTORY` owns an isolated Xvfb display, two synthetic
+rooms and three request-latency modes. `--recovery` adds a separate profile,
+a disconnected relay and a 61-second SIGSTOP/SIGCONT interval; it checks catch-up
+IDs and retirement of the queued send. `--performance --samples 1` instead seeds
+200 rooms and over 1,000 mixed messages, verifies actual server counts, and runs
+three 60-second native frame workloads. Preparation is outside timed intervals.
+The runner preserves failed observations and private fixtures remain in `/run`
+until cleanup. Keep native diagnostics separate from CPU-heavy build jobs.
+See [performance](quality/performance.md) for boundaries and qualification limits.

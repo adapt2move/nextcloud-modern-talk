@@ -245,6 +245,7 @@ mod tests {
                 5 => {
                     row.metadata.parent = Some(Reply {
                         id: 7,
+                        external: false,
                         author: Text::new("Author").unwrap(),
                         text: Text::new("Quote").unwrap(),
                         unavailable: false,

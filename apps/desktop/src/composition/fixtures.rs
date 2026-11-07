@@ -3,15 +3,61 @@ mod content;
 mod dialog;
 pub(super) use content::images as content_images;
 use talk_core::ui::presentation::{
-    AccountView, CallStage, CallView, Completion, ContentState, ConversationKind, ConversationRef,
-    ConversationView, DeliveryState, FileView, LoginFailure, LoginPhase, LoginView, MediaState,
-    NativeDesktopPort, NativeStoreState, ParticipantView, Presence, PresentationSnapshot,
-    RequestId, RequiredGate, StorageStatus, SubmissionResult, UiIntent,
+    AccountView, CallStage, CallStreamView, CallTileKind, CallView, Completion, ContentState,
+    ConversationKind, ConversationRef, ConversationView, DeliveryState, FeatureSupport, FileView,
+    LoginFailure, LoginPhase, LoginView, MediaState, NativeDesktopPort, NativeStoreState,
+    ParticipantView, Presence, PresentationSnapshot, RequestId, RequiredGate, ScreenShareState,
+    StorageStatus, SubmissionResult, UiIntent,
 };
 use talk_core::ui::{
     AccountId, AccountScope, CallGeneration, CallScope, ConversationId, Decision, HostId, Page,
     RuntimeGeneration, SubmitError, Text, UnavailableReason, UserIntent,
 };
+
+/// A deterministic device inventory for the call-device scenario. It contains
+/// no physical device labels or capture handles.
+pub(super) fn call_devices() -> talk_core::preferences::devices::DeviceSnapshot {
+    use talk_core::preferences::{Revision, RuntimeState, devices::*};
+    let mut devices = Page::empty();
+    for (id, label, kind) in [
+        (
+            "fixture-mic-studio",
+            "Studiomikrofon",
+            DeviceKind::Microphone,
+        ),
+        (
+            "fixture-mic-laptop",
+            "Laptopmikrofon",
+            DeviceKind::Microphone,
+        ),
+        ("fixture-camera", "Laptopkamera", DeviceKind::Camera),
+    ] {
+        if let Ok(id) = DeviceId::new(id) {
+            let _ = devices.try_push(DeviceInfo {
+                id,
+                label: text(label),
+                kind,
+                is_default: false,
+            });
+        }
+    }
+    DeviceSnapshot {
+        runtime: RuntimeState::Running,
+        session: None,
+        inventory_revision: Revision(1),
+        devices,
+        microphone_permission: PermissionState::Unknown,
+        camera_permission: PermissionState::Unknown,
+        microphone: SelectionState::Unknown,
+        speaker: SelectionState::Unknown,
+        camera: SelectionState::Unknown,
+        microphone_level: None,
+        speaker_level: None,
+        microphone_preview: PreviewState::Stopped,
+        camera_preview: PreviewState::Stopped,
+        speaker_test: PreviewState::Stopped,
+    }
+}
 
 pub const SCENARIOS: &[&str] = &[
     "server",
@@ -42,20 +88,68 @@ pub const SCENARIOS: &[&str] = &[
     "chat-reactions",
     "chat-reactions-pending",
     "chat-reactions-denied",
+    "reaction-authors",
     "loading-conversations",
     "chat-server-denied",
     "chat-server-unavailable",
     "accounts-server-denied",
     "chat-ux",
+    "chat-presence",
+    "people-card",
+    "chat-typing",
+    "chat-typing-two",
+    "chat-typing-many",
+    "status-picker",
+    "status-message",
     "chat-ux-call",
     "chat-edit",
+    "chat-message-tools",
+    "chat-reminder-time",
+    "chat-reminder-menu",
+    "account-reminders",
+    "account-reminders-partial",
+    "federation-invitations",
+    "federation-pending",
+    "chat-schedule-time",
+    "chat-schedule-edit",
+    "chat-translation",
+    "chat-summary-offer",
+    "chat-summary-pending",
+    "chat-summary-result",
+    "lobby-settings",
+    "room-avatar",
+    "breakout-configure",
+    "breakout-create",
+    "breakout-free",
+    "breakout-assigned",
+    "breakout-help",
     "thread-error",
+    "thread-list",
+    "thread-options",
+    "thread-offline",
+    "thread-paged",
+    "thread-compose",
+    "private-reply",
+    "sidebar-unread",
+    "unread-divider",
+    "unread-jump",
     "chat-content",
+    "chat-cloud-files",
+    "chat-cloud-files-offline",
+    "chat-polls",
+    "poll-dialog",
+    "poll-drafts",
+    "poll-details",
+    "poll-settings",
+    "chat-voice",
+    "voice-recording",
+    "voice-review",
     "chat-content-progress",
     "chat-content-loading",
     "chat-content-failed",
     "chat-attachments",
     "chat-upload",
+    "chat-upload-preview",
     "chat-upload-uncertain",
     "chat-motion",
     "history",
@@ -70,9 +164,17 @@ pub const SCENARIOS: &[&str] = &[
     "files",
     "thread",
     "search",
+    "search-navigation",
+    "account-search",
+    "reference-preview",
+    "thread-reference",
+    "thread-message-tools",
+    "search-filter",
+    "sidebar-room-menu",
     "create34",
     "create35",
     "discover",
+    "discover-joining",
     "uncertain",
     "pending",
     "incoming",
@@ -85,6 +187,7 @@ pub const SCENARIOS: &[&str] = &[
     "gate-mic",
     "gate-camera",
     "gate-recording",
+    "gate-recording-direct",
     "gate-lobby",
     "connecting",
     "reconnecting",
@@ -92,6 +195,18 @@ pub const SCENARIOS: &[&str] = &[
     "call-error",
     "call-error-unknown",
     "call-controls",
+    "call-gallery",
+    "call-recovery",
+    "call-participants-raised",
+    "call-dock",
+    "call-devices",
+    "call-speaker",
+    "call-screen-stage",
+    "call-recording",
+    "call-recording-confirm",
+    "call-recording-failed",
+    "call-end-confirm",
+    "call-reactions",
     "call-active",
     "call-requested",
     "sharing",
@@ -100,6 +215,9 @@ pub const SCENARIOS: &[&str] = &[
     "voice-room",
     "prejoin-voice",
     "offline",
+    "connection-reconnecting",
+    "offline-with-queue",
+    "startup-from-cache",
     "offline-empty",
     "loading",
     "loading-retained",
@@ -156,6 +274,11 @@ fn participant(id: u128, name: &str, initials: &str, me: bool) -> ParticipantVie
         role_label: text(if me { "Du" } else { "Teilnehmend" }),
         presence: Presence::Available,
         self_user: me,
+        raised_hand: false,
+        speaking: false,
+        call_can_mute: false,
+        call_microphone: None,
+        call_camera: None,
     }
 }
 fn participants() -> [ParticipantView; 4] {
@@ -198,6 +321,500 @@ fn message(
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     if matches!(
         scenario,
+        Some("connection-reconnecting" | "offline-with-queue" | "startup-from-cache")
+    ) {
+        let mut state = snapshot(Some("offline"));
+        state.pending_intents = u16::from(scenario == Some("offline-with-queue"));
+        if let Some(context) = state.selected {
+            let mut panel = talk_core::ui::messaging::MessagePanel::new(context);
+            panel.queue_available = true;
+            panel.queued_actions = u32::from(scenario == Some("offline-with-queue"));
+            state.message_panel = Some(panel);
+        }
+        if scenario == Some("startup-from-cache") {
+            state.content = ContentState::Loading;
+            state.conversation_list.content = ContentState::Loading;
+        }
+        return state;
+    }
+
+    if scenario == Some("private-reply") {
+        let mut state = snapshot(Some("chat-ux"));
+        let direct = context(3);
+        populate(&mut state, direct);
+        state.message_panel = Some(talk_core::ui::messaging::MessagePanel::new(direct));
+        return state;
+    }
+    if scenario == Some("thread-paged") {
+        let mut state = snapshot(Some("thread"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.thread_older = Some(40);
+            panel.thread_has_newer = true;
+        }
+        return state;
+    }
+    if matches!(scenario, Some("unread-divider" | "unread-jump")) {
+        let mut state = snapshot(Some("chat-grouped"));
+        let marker = if scenario == Some("unread-divider") {
+            3
+        } else {
+            1
+        };
+        state.conversations = page(state.conversations.as_slice().iter().cloned().map(
+            |mut room| {
+                if Some(room.context) == state.selected {
+                    room.unread = 3;
+                    room.last_read_message = Some(marker);
+                    room.unread_direct_mention = Some(scenario == Some("unread-divider"));
+                }
+                room
+            },
+        ));
+        if scenario == Some("unread-divider") {
+            state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+                if row.local_id == 4 {
+                    row.metadata.unread_after = Some(marker);
+                }
+                row
+            }));
+        }
+        return state;
+    }
+    if scenario == Some("reaction-authors") {
+        let mut state = snapshot(Some("chat-reactions"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.reaction_authors = page([talk_core::ui::messaging::ReactionAuthors {
+                message: 4,
+                emoji: text("👍"),
+                authors: page([
+                    text("Mara Fischer"),
+                    text("Jonas Weber"),
+                    text("Alex Sommer"),
+                ]),
+            }]);
+        }
+        return state;
+    }
+    if scenario == Some("thread-compose") {
+        let mut state = snapshot(Some("chat-edit"));
+        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+            row.metadata.rich = Page::empty();
+            row.attachments = Page::empty();
+            row.reply_count = 0;
+            row
+        }));
+        return state;
+    }
+    if scenario == Some("sidebar-unread") {
+        let mut state = snapshot(Some("chat-ux"));
+        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+            row.metadata.rich = Page::empty();
+            row.attachments = Page::empty();
+            row.reply_count = 0;
+            row
+        }));
+        return state;
+    }
+    if scenario == Some("thread-list") {
+        let mut state = snapshot(Some("thread"));
+        if let Some(context) = state.selected {
+            state.conversations = page(state.conversations.as_slice().iter().cloned().map(
+                |mut room| {
+                    if room.context == context {
+                        room.unread = 2;
+                        room.last_read_message = Some(1);
+                    }
+                    room
+                },
+            ));
+        }
+        return state;
+    }
+    if scenario == Some("thread-options") {
+        return snapshot(Some("thread"));
+    }
+    if scenario == Some("thread-offline") {
+        let mut state = snapshot(Some("thread"));
+        state.content = ContentState::Offline;
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.queue_available = true;
+            panel.features = Page::empty();
+            if let Some(details) = panel.thread_details.as_mut() {
+                details.rename = Decision::Unknown;
+            }
+        }
+        return state;
+    }
+    if matches!(
+        scenario,
+        Some("chat-typing" | "chat-typing-two" | "chat-typing-many")
+    ) {
+        let mut state = snapshot(Some("chat-grouped"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            let count = match scenario {
+                Some("chat-typing") => 1,
+                Some("chat-typing-two") => 2,
+                _ => 3,
+            };
+            panel.typing = page(
+                [
+                    ("Mara", "fixture-mara"),
+                    ("Jonas", "fixture-jonas"),
+                    ("Lea", "fixture-lea"),
+                ]
+                .into_iter()
+                .take(count)
+                .map(|(name, key)| talk_core::ui::messaging::TypingPerson {
+                    name: text(name),
+                    author_key: text(key),
+                }),
+            );
+        }
+        return state;
+    }
+    if scenario == Some("people-card") {
+        let mut state = snapshot(Some("chat-grouped"));
+        dialog::configure(&mut state);
+        let context = state.selected.expect("fixture room");
+        let panel = state.conversation_panel.as_mut().expect("fixture details");
+        panel.members_loaded = true;
+        panel.members = page([talk_core::ui::conversation::Member {
+            id: talk_core::ui::conversation::PersonRef { context, local: 71 },
+            name: text("Mara Fischer"),
+            author_key: Some(text("5:users:mara")),
+            presence: Presence::Away,
+            status_icon: Some(text("☕")),
+            status_message: Some(text("Zurück nach der Kaffeepause")),
+            role: talk_core::ui::conversation::MemberRole::Moderator,
+            source: talk_core::ui::conversation::DirectorySource::User,
+            permissions: Some(511),
+            self_user: false,
+        }]);
+        if let Some(panel) = state.message_panel.as_mut() {
+            let _ = panel.features.try_push((
+                talk_core::ui::messaging::MessageFeature::Mentions,
+                talk_core::ui::conversation::Availability {
+                    implemented: true,
+                    server: talk_core::ui::presentation::FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            ));
+        }
+        return state;
+    }
+    if matches!(scenario, Some("status-picker" | "status-message")) {
+        let mut state = snapshot(Some("chat-presence"));
+        state.accounts = page(
+            state
+                .accounts
+                .as_slice()
+                .iter()
+                .cloned()
+                .map(|mut account| {
+                    account.connection =
+                        talk_core::ui::presentation::AccountConnectionState::Connected;
+                    account
+                }),
+        );
+        return state;
+    }
+    if scenario == Some("sidebar-room-menu") {
+        return snapshot(Some("details-ready"));
+    }
+    if scenario == Some("discover-joining") {
+        let mut state = snapshot(Some("chat"));
+        let context = context(7);
+        let mut room = state.conversations.as_slice()[0].clone();
+        room.context = context;
+        room.navigation_key = None;
+        room.title = text("Designrunde");
+        room.kind = ConversationKind::Unknown;
+        room.send = Decision::Unknown;
+        room.attach = Decision::Unknown;
+        room.call = Decision::Unknown;
+        room.call_scope = None;
+        room.draft_clipboard = Decision::Unknown;
+        room.favorite = None;
+        room.archive = Decision::Unknown;
+        room.participants = None;
+        room.unread = 0;
+        room.unread_mention = None;
+        room.notification_muted = None;
+        room.organization.category = talk_core::ui::presentation::ConversationCategory::Unknown;
+        room.organization.favorites = FeatureSupport::Unknown;
+        room.organization.favorite_change = Decision::Unknown;
+        room.organization.classified = None;
+        state.conversations =
+            page(std::iter::once(room).chain(state.conversations.as_slice().iter().cloned()));
+        state.selected = Some(context);
+        state.content = ContentState::Loading;
+        state.messages = Page::empty();
+        state.files = Page::empty();
+        state.participants = Page::empty();
+        state.conversation_panel = None;
+        state.message_panel = None;
+        state.content_panel = Default::default();
+        state.discover_panel = Some(talk_core::ui::discover::Panel {
+            account: context.account,
+            request: RequestId(1),
+            query: text(""),
+            support: FeatureSupport::Supported,
+            state: talk_core::ui::conversation::RemoteState::Saving(RequestId(1)),
+            rooms: page([talk_core::ui::discover::Room {
+                context,
+                name: text("Designrunde"),
+                description: None,
+                participants: None,
+                join: Decision::Allowed,
+            }]),
+            loaded: true,
+            joining: Some(context),
+            uncertain: false,
+        });
+        return state;
+    }
+    if scenario == Some("thread-message-tools") {
+        let mut state = snapshot(Some("thread"));
+        state.account_reminders = Some(talk_core::ui::presentation::AccountRemindersView {
+            scope: scope(),
+            support: FeatureSupport::Supported,
+            state: ContentState::Ready,
+            complete: true,
+            reminders: Page::empty(),
+        });
+        if let Some(panel) = state.message_panel.as_mut() {
+            for feature in [
+                talk_core::ui::messaging::MessageFeature::Reminders,
+                talk_core::ui::messaging::MessageFeature::Translation,
+                talk_core::ui::messaging::MessageFeature::Schedules,
+            ] {
+                let _ = panel.features.try_push((
+                    feature,
+                    talk_core::ui::conversation::Availability {
+                        implemented: true,
+                        server: FeatureSupport::Supported,
+                        allowed: Decision::Allowed,
+                    },
+                ));
+            }
+            panel.translation_targets = Some(page([text("de")]));
+            if let Some(reply) = panel.thread_messages.as_slice().first() {
+                panel.translations = page([talk_core::ui::messaging::Translation {
+                    message: reply.local_id,
+                    source: reply.body.clone(),
+                    language: text("de"),
+                    text: text("Das passt für mich."),
+                }]);
+            }
+        }
+        return state;
+    }
+    if scenario == Some("thread-reference") {
+        let mut state = snapshot(Some("thread"));
+        let context = state.selected.expect("fictional room");
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.thread_messages = page(panel.thread_messages.as_slice().iter().cloned().map(
+                |mut reply| {
+                    if reply.local_id == 40 {
+                        reply.body = text("Der Entwurf im Thread: https://example.test/studio");
+                    }
+                    reply
+                },
+            ));
+        }
+        state.reference_previews = page([talk_core::ui::reference::Preview {
+            context,
+            message: 40,
+            ordinal: 0,
+            title: text("Studiokonzept im Thread"),
+            description: Some(text("Ein Link aus der Diskussion.")),
+        }]);
+        return state;
+    }
+    if scenario == Some("reference-preview") {
+        let mut state = snapshot(Some("chat"));
+        let context = state.selected.expect("fictional room");
+        let mut first = state.messages.as_slice()[0].clone();
+        first.body = text("Hier ist der Entwurf: https://example.test/studio");
+        first.attachments = Page::empty();
+        first.metadata.rich = Page::empty();
+        state.messages =
+            page(std::iter::once(first).chain(state.messages.as_slice().iter().skip(1).cloned()));
+        state.reference_previews = page([talk_core::ui::reference::Preview {
+            context,
+            message: 1,
+            ordinal: 0,
+            title: text("Ein ruhiger Ort für neue Ideen"),
+            description: Some(text("Ein Einblick in das neue Studiokonzept.")),
+        }]);
+        state.content_panel.account = Some(context.account);
+        state.content_panel.context = Some(context);
+        state.content_panel.assets = page([talk_core::ui::content::AssetView {
+            target: talk_core::ui::content::AssetTarget::Reference {
+                context,
+                message: 1,
+                ordinal: 0,
+            },
+            state: talk_core::ui::content::AssetState::Ready { key: 42 },
+            emoji: None,
+            color: None,
+            document_pages: None,
+        }]);
+        return state;
+    }
+    if matches!(
+        scenario,
+        Some("federation-invitations" | "federation-pending")
+    ) {
+        use talk_core::ui::presentation::{
+            FeatureSupport, FederationInvitationView, FederationInvitationsView,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        if let Some(scope) = state.active_account {
+            state.federation_invitations = Some(FederationInvitationsView {
+                scope,
+                support: FeatureSupport::Supported,
+                pending: scenario == Some("federation-pending"),
+                failed: false,
+                invitations: page([
+                    FederationInvitationView {
+                        id: 101,
+                        room: text("Gemeinschaft planen"),
+                        inviter: text("Alex Morgan"),
+                    },
+                    FederationInvitationView {
+                        id: 102,
+                        room: text("Designaustausch"),
+                        inviter: text("Sam Rivera"),
+                    },
+                ]),
+            });
+        }
+        return state;
+    }
+    if matches!(
+        scenario,
+        Some("chat-summary-offer" | "chat-summary-pending" | "chat-summary-result")
+    ) {
+        use talk_core::ui::{
+            conversation::Availability,
+            messaging::{MessageFeature, Summary},
+            presentation::FeatureSupport,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            let _ = panel.features.try_push((
+                MessageFeature::Summary,
+                Availability {
+                    implemented: true,
+                    server: FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            ));
+            panel.summary = Some(match scenario {
+                Some("chat-summary-pending") => Summary::Pending {
+                    parts: Page::empty(),
+                },
+                Some("chat-summary-result") => Summary::Ready {
+                    parts: page([text(
+                        "Das Team teilt den Entwurf am Freitag. Mara sammelt bis zum nächsten Treffen die Rückmeldungen.",
+                    )]),
+                    partial: false,
+                },
+                _ => Summary::Offer {
+                    from: 12,
+                    unread: 120,
+                },
+            });
+        }
+        return state;
+    }
+    if scenario == Some("chat-translation") {
+        use talk_core::ui::{
+            conversation::Availability,
+            messaging::{MessageFeature, Translation},
+            presentation::FeatureSupport,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        if let Some(message) = state
+            .messages
+            .as_slice()
+            .iter()
+            .find(|message| {
+                !message.metadata.system
+                    && !message.metadata.deleted
+                    && matches!(
+                        message.delivery,
+                        DeliveryState::Received | DeliveryState::ServerAccepted
+                    )
+                    && !message.body.as_str().trim().is_empty()
+                    && message.metadata.rich.as_slice().is_empty()
+            })
+            .cloned()
+            && let Some(panel) = state.message_panel.as_mut()
+        {
+            let _ = panel.features.try_push((
+                MessageFeature::Translation,
+                Availability {
+                    implemented: true,
+                    server: FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            ));
+            panel.translation_targets = Some(page([text("de"), text("en"), text("es")]));
+            panel.translations = page(["de", "en", "es"].map(|language| Translation {
+                message: message.local_id,
+                source: message.body.clone(),
+                language: text(language),
+                text: text(match language {
+                    "de" => "Eine übersetzte Nachricht für das Team.",
+                    "es" => "Un mensaje traducido para el equipo.",
+                    _ => "A translated message for the team.",
+                }),
+            }));
+        }
+        return state;
+    }
+    if matches!(
+        scenario,
+        Some("account-reminders" | "account-reminders-partial")
+    ) {
+        use talk_core::ui::presentation::{
+            AccountReminderView, AccountRemindersView, FeatureSupport,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        let reminders = state
+            .conversations
+            .as_slice()
+            .iter()
+            .take(3)
+            .enumerate()
+            .map(|(index, room)| AccountReminderView {
+                context: room.context,
+                message: 45 + index as u128,
+                preview: Some(text(match index {
+                    0 => "Die neue Navigation ist bereit für einen letzten Blick.",
+                    1 => "Den Entwurf besprechen wir morgen.",
+                    _ => "Ich schicke dir die Notizen später.",
+                })),
+                timestamp: if index == 0 {
+                    1_800_003_600
+                } else {
+                    1_800_090_000
+                },
+            })
+            .collect::<Vec<_>>();
+        state.account_reminders = Some(AccountRemindersView {
+            scope: scope(),
+            support: FeatureSupport::Supported,
+            state: ContentState::Ready,
+            complete: scenario != Some("account-reminders-partial"),
+            reminders: page(reminders),
+        });
+        return state;
+    }
+    if matches!(
+        scenario,
         Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
     ) {
         let mut state = snapshot(Some("chat-send-pending"));
@@ -220,10 +837,86 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         state.messages = page(state.messages.as_slice().iter().cloned().map(|mut message| {
             if message.local_id == 5 { message.metadata.edited = true; }
             if message.local_id == 6 {
-                message.body = text("Eine längere fiktive Nachricht prüft den Umbruch und den gleichbleibenden Abstand der Bestätigung. Auch mit mehreren Textzeilen bleibt das Häkchen in derselben Spalte wie bei der vorherigen Nachricht.");
+                message.body = text("Für den nächsten Termin sammeln wir noch Ideen und besprechen gemeinsam, welche Vorschläge wir zuerst umsetzen. Ich freue mich auf eure Rückmeldungen und ergänze sie anschließend im Entwurf.");
             }
             message
         }));
+        return state;
+    }
+    if matches!(
+        scenario,
+        Some(
+            "chat-message-tools"
+                | "chat-reminder-time"
+                | "chat-reminder-menu"
+                | "chat-schedule-time"
+                | "chat-schedule-edit"
+        )
+    ) {
+        let mut state = snapshot(Some("chat-ux"));
+        let mut rows = state.messages.as_slice().to_vec();
+        let mut location = message(
+            45,
+            "Mara Fischer",
+            "MF",
+            "10:15",
+            "Hier treffen wir uns.",
+            false,
+        );
+        location.metadata.rich = page([talk_core::ui::messaging::RichObject {
+            id: Some(text("geo:52.5450511,13.3741463")),
+            mime_type: None,
+            size: None,
+            placeholder: text("location"),
+            kind: text("geo-location"),
+            name: text("Treffpunkt"),
+            link: None,
+        }]);
+        rows.push(location);
+        state.messages = page(rows);
+        if let Some(panel) = state.message_panel.as_mut() {
+            use talk_core::ui::{
+                conversation::Availability,
+                messaging::{MessageFeature, Reminder, Scheduled},
+                presentation::FeatureSupport,
+            };
+            for feature in [
+                MessageFeature::Reminders,
+                MessageFeature::UpcomingReminders,
+                MessageFeature::Schedules,
+            ] {
+                let _ = panel.features.try_push((
+                    feature,
+                    Availability {
+                        implemented: true,
+                        server: FeatureSupport::Supported,
+                        allowed: Decision::Allowed,
+                    },
+                ));
+            }
+            panel.reminders = page([Reminder {
+                message: 45,
+                timestamp: 1_800_003_600,
+            }]);
+            panel.scheduled = page([
+                Scheduled {
+                    id: 41,
+                    body: text("Nachricht für morgen"),
+                    timestamp: 1_800_090_000,
+                    failed_original_timestamp: None,
+                    editable: true,
+                    silent: false,
+                },
+                Scheduled {
+                    id: 42,
+                    body: text("Nachricht erneut prüfen"),
+                    timestamp: 0,
+                    failed_original_timestamp: Some(1_800_003_600),
+                    editable: true,
+                    silent: false,
+                },
+            ]);
+        }
         return state;
     }
     if scenario == Some("chat-busy") {
@@ -338,6 +1031,88 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }
         return state;
     }
+    if scenario == Some("thread") {
+        let mut state = snapshot(Some("chat-edit"));
+        if let Some(context) = state.selected {
+            state.threads.account = Some(context.account);
+            state.threads.support = talk_core::ui::presentation::FeatureSupport::Supported;
+            state.threads.content = ContentState::Ready;
+            state.threads.entries = page([talk_core::ui::presentation::ThreadView {
+                context,
+                root: 1,
+                title: text("Design review"),
+                replies: 2,
+                last_message: Some(41),
+            }]);
+        }
+        state.messages = page(
+            state
+                .messages
+                .as_slice()
+                .iter()
+                .cloned()
+                .map(|mut message| {
+                    message.reply_count = if message.local_id == 1 { 2 } else { 0 };
+                    if message.local_id == 1 {
+                        message.metadata.thread = Some(1);
+                        message.metadata.rich = Page::empty();
+                        message.attachments = Page::empty();
+                    }
+                    message
+                }),
+        );
+        let root = Some(1);
+        if let (Some(root), Some(panel)) = (root, state.message_panel.as_mut()) {
+            panel.thread_root = Some(root);
+            panel.thread_details = Some(talk_core::ui::messaging::ThreadDetails {
+                root,
+                title: text("Design review"),
+                notification_level: Some(0),
+                rename: Decision::Allowed,
+            });
+            for feature in [
+                talk_core::ui::messaging::MessageFeature::React,
+                talk_core::ui::messaging::MessageFeature::Mentions,
+            ] {
+                let _ = panel.features.try_push((
+                    feature,
+                    talk_core::ui::conversation::Availability {
+                        implemented: true,
+                        server: talk_core::ui::presentation::FeatureSupport::Supported,
+                        allowed: Decision::Allowed,
+                    },
+                ));
+            }
+            let mut reply = message(40, "Mara Fischer", "MF", "10:00", "Das klingt gut.", false);
+            reply.metadata.thread = Some(root);
+            reply.metadata.author_key = Some(text("5:users:mara"));
+            reply.metadata.replyable = true;
+            reply.metadata.timestamp = 1_770_000_000;
+            let _ = reply
+                .metadata
+                .reactions
+                .try_push(talk_core::ui::messaging::Reaction {
+                    emoji: text("👍"),
+                    count: 2,
+                    own: true,
+                });
+            let mut second = message(
+                41,
+                "Alex Sommer",
+                "AS",
+                "10:02",
+                "Ich aktualisiere die letzten Details.",
+                true,
+            );
+            second.metadata.thread = Some(root);
+            second.metadata.author_key = Some(text("5:users:alex"));
+            second.metadata.replyable = true;
+            second.metadata.edit = Decision::Allowed;
+            second.metadata.timestamp = 1_770_000_120;
+            panel.thread_messages = page([reply, second]);
+        }
+        return state;
+    }
     if matches!(scenario, Some("chat-edit" | "thread-error")) {
         let mut state = snapshot(Some("chat-ux"));
         if let Some(panel) = state.message_panel.as_mut() {
@@ -379,17 +1154,131 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }));
         return state;
     }
-    if scenario == Some("details-ready") {
+    if matches!(
+        scenario,
+        Some(
+            "details-ready"
+                | "room-avatar"
+                | "lobby-settings"
+                | "breakout-configure"
+                | "breakout-create"
+                | "breakout-free"
+                | "breakout-assigned"
+                | "breakout-help"
+        )
+    ) {
         let mut state = snapshot(Some("chat"));
         dialog::configure(&mut state);
+        if scenario == Some("lobby-settings")
+            && let Some(details) = state
+                .conversation_panel
+                .as_mut()
+                .and_then(|p| p.details.as_mut())
+        {
+            details.lobby = Some(true);
+            details.lobby_timer = Some(1_800_003_600);
+        }
+        if matches!(
+            scenario,
+            Some(
+                "breakout-configure"
+                    | "breakout-create"
+                    | "breakout-free"
+                    | "breakout-assigned"
+                    | "breakout-help"
+            )
+        ) && let Some(panel) = state.conversation_panel.as_mut()
+        {
+            use talk_core::ui::conversation::{
+                BreakoutMode, BreakoutRoom, DirectorySource, Member, MemberRole, PersonRef,
+                RoomSetting,
+            };
+            let context = panel.context;
+            if let Some(details) = panel.details.as_mut() {
+                details.breakout_mode = if scenario == Some("breakout-create") {
+                    None
+                } else {
+                    Some(if scenario == Some("breakout-free") {
+                        BreakoutMode::Free
+                    } else {
+                        BreakoutMode::Manual
+                    })
+                };
+                details.breakout_started = Some(true);
+                details.breakout_child = scenario == Some("breakout-help");
+                if !matches!(scenario, Some("breakout-configure" | "breakout-create")) {
+                    details.controls = page(details.controls.as_slice().iter().copied().map(
+                        |(key, mut availability)| {
+                            if key == RoomSetting::Breakouts {
+                                availability.allowed = Decision::Denied;
+                            }
+                            (key, availability)
+                        },
+                    ));
+                }
+            }
+            panel.members = page([("Mara Fischer", 11), ("Jonas Weber", 12)].map(
+                |(name, local)| Member {
+                    id: PersonRef { context, local },
+                    name: text(name),
+                    author_key: None,
+                    presence: Presence::Unknown,
+                    status_icon: None,
+                    status_message: None,
+                    role: MemberRole::Member,
+                    source: DirectorySource::User,
+                    permissions: Some(255),
+                    self_user: false,
+                },
+            ));
+            panel.members_loaded = true;
+            panel.breakout_rooms = page([
+                BreakoutRoom {
+                    context: super::fixtures::context(101),
+                    name: text("Gruppe 1"),
+                    assigned: true,
+                },
+                BreakoutRoom {
+                    context: super::fixtures::context(102),
+                    name: text("Gruppe 2"),
+                    assigned: false,
+                },
+            ]);
+            if scenario == Some("breakout-assigned") {
+                panel.breakout_rooms = page(
+                    panel
+                        .breakout_rooms
+                        .as_slice()
+                        .iter()
+                        .filter(|room| room.assigned)
+                        .cloned(),
+                );
+            }
+            panel.breakout_loaded = true;
+            if scenario == Some("breakout-create") {
+                panel.breakout_rooms = Page::empty();
+                panel.breakout_loaded = false;
+            }
+        }
         return state;
     }
     if matches!(
         scenario,
         Some(
             "chat-content"
+                | "chat-cloud-files"
+                | "chat-cloud-files-offline"
+                | "chat-polls"
+                | "poll-dialog"
+                | "poll-drafts"
+                | "poll-details"
+                | "poll-settings"
+                | "chat-voice"
+                | "voice-recording"
+                | "voice-review"
                 | "chat-attachments"
                 | "chat-upload"
+                | "chat-upload-preview"
                 | "chat-upload-uncertain"
                 | "chat-content-progress"
                 | "chat-content-loading"
@@ -398,11 +1287,51 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     ) {
         let mut state = snapshot(Some("chat-ux"));
         content::configure(&mut state);
+        if matches!(
+            scenario,
+            Some("chat-cloud-files" | "chat-cloud-files-offline")
+        ) {
+            content::cloud_files(&mut state, "/");
+            if scenario == Some("chat-cloud-files-offline") {
+                state.content = ContentState::Offline;
+                if let Some(browser) = state.content_panel.file_browser.as_mut() {
+                    browser.offline = true;
+                }
+            }
+        }
+        if matches!(
+            scenario,
+            Some("chat-polls" | "poll-dialog" | "poll-drafts" | "poll-details" | "poll-settings")
+        ) {
+            content::polls(&mut state);
+        }
+        if scenario == Some("poll-settings") {
+            dialog::configure(&mut state);
+            if let Some(details) = state
+                .conversation_panel
+                .as_mut()
+                .and_then(|panel| panel.details.as_mut())
+            {
+                details.name = text("Designteam");
+            }
+        }
+        if scenario == Some("poll-details") {
+            content::poll_details(&mut state);
+        }
+        if matches!(
+            scenario,
+            Some("chat-voice" | "voice-recording" | "voice-review")
+        ) {
+            content::voice(&mut state);
+        }
         if scenario == Some("chat-attachments") {
             content::attachments(&mut state);
         }
         if matches!(scenario, Some("chat-upload" | "chat-upload-uncertain")) {
             content::pending_upload(&mut state, scenario == Some("chat-upload-uncertain"));
+        }
+        if scenario == Some("chat-upload-preview") {
+            content::staged_image(&mut state);
         }
         if matches!(
             scenario,
@@ -441,10 +1370,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         state.messages = page((1..=30).map(|id| {
             message(
                 id,
-                "Fictional teammate",
-                "FT",
+                "Mara Fischer",
+                "MF",
                 "10:00",
-                "Fictional history row for the finite native motion fixture.",
+                "Die nächsten Schritte besprechen wir im Team.",
                 false,
             )
         }));
@@ -470,9 +1399,13 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         return ready;
     }
     let mut s = PresentationSnapshot {
+        pending_intents: 0,
         content_panel: talk_core::ui::content::ContentPanel::default(),
         file_export: None,
         create_panel: None,
+        discover_panel: None,
+        search_panel: None,
+        reference_previews: Page::empty(),
         revision: 1,
         login: LoginView {
             phase: LoginPhase::EnterServer,
@@ -488,6 +1421,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         account_removal: None,
         active_account: None,
         conversations: Page::empty(),
+        threads: Default::default(),
         conversation_list: talk_core::ui::presentation::ConversationListState {
             content: ContentState::Unconfigured,
             complete: false,
@@ -495,6 +1429,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         tags: Page::empty(),
         tag_state: ContentState::Unconfigured,
         organization_result: None,
+        account_reminders: None,
+        federation_invitations: None,
         selected: None,
         content: ContentState::Unconfigured,
         messages: Page::empty(),
@@ -580,7 +1516,12 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     }
     s.accounts = page([AccountView {
         scope: scope(),
-        navigation_key: None,
+        navigation_key: Some(
+            talk_core::preferences::navigation::NavigationAccountKey::new(
+                "a1:00000000000000000000000000000001:00000000000000000000000000000002",
+            )
+            .expect("fixture key"),
+        ),
         connection: talk_core::ui::presentation::AccountConnectionState::Disconnected,
         connection_failure: match scenario {
             "chat-server-denied" | "accounts-server-denied" => {
@@ -663,6 +1604,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     s.conversations = page(
         rows.map(
             |(id, title, initials, subtitle, kind, favorite, unread)| ConversationView {
+                action_error: None,
                 tags: None,
                 context: context(id),
                 navigation_key: None,
@@ -687,16 +1629,31 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 archived: Some(id == 6),
                 archive: Decision::Unknown,
                 unread,
-                presence: if kind == ConversationKind::Direct {
+                unread_mention: Some(id == 1),
+                notification_muted: Some(id == 4),
+                last_activity: Some(100 - id as u64),
+                unread_direct_mention: Some(id == 1 && unread > 0),
+                last_read_message: (id == 1).then_some(1),
+                presence: if scenario == "chat-presence" && id == 3 {
+                    Presence::Away
+                } else if kind == ConversationKind::Direct {
                     Presence::Available
                 } else {
                     Presence::Unknown
                 },
+                status_icon: (scenario == "chat-presence" && id == 3).then(|| text("☕")),
+                status_message: (scenario == "chat-presence" && id == 3)
+                    .then(|| text("Kaffeepause")),
                 participants: Some(if kind == ConversationKind::Direct {
                     2
                 } else {
                     7
                 }),
+                participant_names: if id == 1 {
+                    page([text("Mara Fischer"), text("Jonas Weber")])
+                } else {
+                    Page::empty()
+                },
                 send: Decision::Allowed,
                 attach: Decision::Unknown,
                 draft_clipboard: Decision::Allowed,
@@ -705,6 +1662,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 } else {
                     Decision::Allowed
                 },
+                call_active: Some(id == 2 && matches!(scenario, "call-dock" | "chat-ux-call")),
                 call_scope: if kind == ConversationKind::NoteToSelf {
                     None
                 } else {
@@ -715,16 +1673,29 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     );
     populate(
         &mut s,
-        context(if matches!(scenario, "direct-call" | "outgoing") {
-            3
-        } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
-            2
-        } else if scenario == "room" {
-            4
-        } else {
-            1
-        }),
+        context(
+            if matches!(scenario, "direct-call" | "outgoing" | "chat-presence") {
+                3
+            } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
+                2
+            } else if matches!(scenario, "room" | "prejoin") {
+                4
+            } else {
+                1
+            },
+        ),
     );
+    if scenario == "search-filter" {
+        s.conversations = page(s.conversations.as_slice().iter().cloned().map(|mut row| {
+            if row.context == context(2) {
+                row.unread_mention = None;
+            }
+            if row.context == context(1) {
+                row.unread = 1;
+            }
+            row
+        }));
+    }
     match scenario {
         "offline" => s.content = ContentState::Offline,
         "offline-empty" => {
@@ -757,6 +1728,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "gate-mic"
             | "gate-camera"
             | "gate-recording"
+            | "gate-recording-direct"
             | "gate-lobby"
             | "connecting"
             | "reconnecting"
@@ -764,15 +1736,30 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-error"
             | "call-error-unknown"
             | "call-controls"
+            | "call-gallery"
+            | "call-recovery"
+            | "call-participants-raised"
+            | "call-dock"
+            | "call-devices"
+            | "call-speaker"
+            | "call-screen-stage"
+            | "call-recording"
+            | "call-recording-confirm"
+            | "call-recording-failed"
+            | "call-end-confirm"
+            | "call-reactions"
             | "sharing"
             | "call-denied"
             | "call-active"
             | "call-requested"
     ) {
-        let direct = matches!(scenario, "incoming" | "outgoing" | "direct-call");
+        let direct = matches!(
+            scenario,
+            "incoming" | "outgoing" | "direct-call" | "gate-recording-direct"
+        );
         let id = if direct {
             3
-        } else if scenario == "voice" {
+        } else if matches!(scenario, "voice" | "call-dock") {
             2
         } else {
             1
@@ -793,7 +1780,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 "gate" => CallStage::Required(RequiredGate::SecurityPolicy),
                 "gate-mic" => CallStage::Required(RequiredGate::MicrophonePermission),
                 "gate-camera" => CallStage::Required(RequiredGate::CameraPermission),
-                "gate-recording" => CallStage::Required(RequiredGate::RecordingConsent),
+                "gate-recording" | "gate-recording-direct" => {
+                    CallStage::Required(RequiredGate::RecordingConsent)
+                }
                 "gate-lobby" => CallStage::Required(RequiredGate::Lobby),
                 "connecting" => CallStage::Connecting,
                 "reconnecting" => CallStage::Reconnecting,
@@ -831,12 +1820,144 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 MediaState::Unavailable
             },
-            participants: page(if direct || id == 2 {
-                vec![participants()[0].clone(), participants()[2].clone()]
+            sharing: if scenario == "sharing" {
+                ScreenShareState::Sharing
             } else {
-                participants().to_vec()
-            }),
+                ScreenShareState::Idle
+            },
+            streams: Page::empty(),
+            replacement_generation: scenario == "call-recovery",
+            remote_audio_received: 0,
+            recording: match scenario {
+                "call-recording" => talk_core::ui::presentation::CallRecordingState::Active,
+                "call-recording-failed" => talk_core::ui::presentation::CallRecordingState::Failed,
+                _ => talk_core::ui::presentation::CallRecordingState::Unknown,
+            },
+            recording_control: match scenario {
+                "call-participants-raised" | "call-recording-confirm" => Some(true),
+                "call-recording" => Some(false),
+                _ => None,
+            },
+            recording_pending: false,
+            recording_uncertain: false,
+            hand_supported: matches!(
+                scenario,
+                "call-gallery" | "call-participants-raised" | "call-speaker" | "call-reactions"
+            ),
+            hand_raised: false,
+            reactions: if matches!(
+                scenario,
+                "call-gallery" | "call-participants-raised" | "call-speaker" | "call-reactions"
+            ) {
+                page([text("👍"), text("🎉"), text("❤️")])
+            } else {
+                Page::empty()
+            },
+            latest_reaction: if scenario == "call-reactions" {
+                Some(talk_core::ui::presentation::CallReactionView {
+                    sequence: 1,
+                    participant: Some(1),
+                    emoji: text("🎉"),
+                })
+            } else {
+                None
+            },
+            invitees_loaded: scenario == "call-participants-raised",
+            invitees: if scenario == "call-participants-raised" {
+                page([
+                    talk_core::ui::presentation::CallInviteeView {
+                        local_id: 1001,
+                        ring_allowed: true,
+                        name: text("Robin Winter"),
+                        initials: text("RW"),
+                    },
+                    talk_core::ui::presentation::CallInviteeView {
+                        local_id: 1002,
+                        ring_allowed: false,
+                        name: text("Mina Roth"),
+                        initials: text("MR"),
+                    },
+                ])
+            } else {
+                Page::empty()
+            },
+            ring_status: None,
+            mute_status: None,
+            can_end_everyone: matches!(scenario, "call-end-confirm" | "call-participants-raised"),
+            end_pending: false,
+            end_failed: false,
+            participants: page(
+                if matches!(
+                    scenario,
+                    "call-gallery"
+                        | "call-participants-raised"
+                        | "call-screen-stage"
+                        | "call-speaker"
+                        | "call-reactions"
+                ) {
+                    let mut people = participants().to_vec();
+                    people[0].raised_hand = true;
+                    people[0].call_microphone = Some(false);
+                    people[0].call_camera = Some(false);
+                    people[1].call_microphone = Some(true);
+                    people[1].speaking = true;
+                    people[1].call_can_mute = scenario == "call-participants-raised";
+                    people[1].call_camera = Some(false);
+                    people[3].raised_hand = true;
+                    if scenario != "call-participants-raised" {
+                        people.extend([
+                            participant(5, "Nora Beck", "NB", false),
+                            participant(6, "Emil Hartmann", "EH", false),
+                            participant(7, "Samira Wolf", "SW", false),
+                            participant(8, "Luis Berger", "LB", false),
+                        ]);
+                    }
+                    people
+                } else if direct || id == 2 {
+                    vec![participants()[0].clone(), participants()[2].clone()]
+                } else {
+                    participants().to_vec()
+                },
+            ),
         });
+    }
+    if let Some(call) = s.call.as_mut() {
+        call.streams =
+            page(
+                call.participants
+                    .as_slice()
+                    .iter()
+                    .take(15)
+                    .map(|person| CallStreamView {
+                        local_id: person.local_id,
+                        participant: person.local_id,
+                        participant_name: person.name.clone(),
+                        kind: CallTileKind::Camera,
+                        dimensions: None,
+                        flowing: false,
+                    }),
+            );
+        if scenario == "call-screen-stage" {
+            let _ = call.streams.try_push(CallStreamView {
+                local_id: 9001,
+                participant: 1,
+                participant_name: text("Mara Fischer"),
+                kind: CallTileKind::Screen,
+                dimensions: Some((1280, 720)),
+                flowing: false,
+            });
+        }
+    }
+    if scenario == "gate-lobby" {
+        dialog::configure(&mut s);
+        if let Some(details) = s
+            .conversation_panel
+            .as_mut()
+            .and_then(|panel| panel.details.as_mut())
+        {
+            details.lobby = Some(true);
+            details.lobby_timer = Some(1_800_003_600);
+        }
     }
     if scenario == "call-error-unknown" {
         let mut rows = s.conversations.as_slice().to_vec();
@@ -866,7 +1987,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     if n == 40 {
                         "Neuester geladener Stand."
                     } else {
-                        "Fiktiver Verlauf für die lokale Navigation."
+                        "Notizen aus der gemeinsamen Planung."
                     }
                 ),
                 false,
@@ -879,6 +2000,130 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             panel.older = Some(101);
             s.message_panel = Some(panel);
         }
+    }
+    if scenario == "account-search" {
+        s.accounts = page(s.accounts.as_slice().iter().cloned().map(|mut account| {
+            account.connection = talk_core::ui::presentation::AccountConnectionState::Connected;
+            account
+        }));
+        s.search_panel = Some(talk_core::ui::search::Panel {
+            account: scope(),
+            request: RequestId(1),
+            term: text("Navigation"),
+            filters: talk_core::ui::search::Filters {
+                conversation: None,
+                person: None,
+                from_self: false,
+                since: None,
+                until: None,
+            },
+            state: talk_core::ui::conversation::RemoteState::Idle,
+            hits: page([
+                talk_core::ui::search::Hit {
+                    context: context(1),
+                    message: 1,
+                    title: text("Mara Fischer"),
+                    excerpt: text("Die neue Navigation ist bereit für einen letzten Blick."),
+                },
+                talk_core::ui::search::Hit {
+                    context: context(1),
+                    message: 2,
+                    title: text("Jonas Weber"),
+                    excerpt: text("Können wir die Navigation noch einmal prüfen?"),
+                },
+                talk_core::ui::search::Hit {
+                    context: context(2),
+                    message: 8,
+                    title: text("Alex Sommer"),
+                    excerpt: text("Die Navigation ist im Entwurf aktualisiert."),
+                },
+            ]),
+            loaded: true,
+            more: true,
+        });
+    }
+    if scenario == "discover" {
+        s.accounts = page(s.accounts.as_slice().iter().cloned().map(|mut account| {
+            account.connection = talk_core::ui::presentation::AccountConnectionState::Connected;
+            account
+        }));
+        s.discover_panel = Some(talk_core::ui::discover::Panel {
+            account: scope(),
+            request: RequestId(1),
+            query: text(""),
+            support: talk_core::ui::presentation::FeatureSupport::Supported,
+            state: talk_core::ui::conversation::RemoteState::Idle,
+            rooms: page([
+                talk_core::ui::discover::Room {
+                    context: context(7),
+                    name: text("Designrunde"),
+                    description: Some(text(
+                        "Ideen, Entwürfe und offene Fragen aus dem Designteam.",
+                    )),
+                    participants: Some(18),
+                    join: Decision::Allowed,
+                },
+                talk_core::ui::discover::Room {
+                    context: context(8),
+                    name: text("Kaffeepause"),
+                    description: Some(text("Ein Ort für kurze Gespräche zwischendurch.")),
+                    participants: Some(9),
+                    join: Decision::Allowed,
+                },
+                talk_core::ui::discover::Room {
+                    context: context(9),
+                    name: text("Community-Projekte"),
+                    description: Some(text("Gemeinsam an neuen Projekten arbeiten.")),
+                    participants: None,
+                    join: Decision::Allowed,
+                },
+            ]),
+            loaded: true,
+            joining: None,
+            uncertain: false,
+        });
+    }
+    if matches!(scenario, "create34" | "create35") {
+        use talk_core::ui::conversation::{
+            AccountPerson, AccountPersonRef, CreatePanel, CreationPreset,
+        };
+        let mut panel = CreatePanel::new(scope());
+        panel.group = Decision::Allowed;
+        panel.extended = talk_core::ui::presentation::FeatureSupport::Supported;
+        panel.public = talk_core::ui::presentation::FeatureSupport::Supported;
+        panel.private_allowed = true;
+        panel.public_allowed = true;
+        panel.invites = page([
+            AccountPerson {
+                id: AccountPersonRef {
+                    account: scope(),
+                    local: 1,
+                },
+                name: text("Mara Fischer"),
+                label: text("Design"),
+            },
+            AccountPerson {
+                id: AccountPersonRef {
+                    account: scope(),
+                    local: 2,
+                },
+                name: text("Jonas Weber"),
+                label: text("Produkt"),
+            },
+        ]);
+        panel.presets = page([
+            CreationPreset {
+                id: text("webinar"),
+                name: text("Webinar"),
+                description: text("Für moderierte Veranstaltungen."),
+            },
+            CreationPreset {
+                id: text("presentation"),
+                name: text("Präsentation"),
+                description: text("Für gemeinsame Präsentationen."),
+            },
+        ]);
+        s.create_panel = Some(panel);
     }
     s
 }
@@ -931,7 +2176,7 @@ fn populate(s: &mut PresentationSnapshot, selected: ConversationRef) {
             "Mara Fischer",
             "MF",
             "09:51",
-            "Hier ist Platz für unser Gespräch. Diese Inhalte sind fiktive UI-Beispiele.",
+            "Hier ist Platz für unser Gespräch.",
             false,
         )]);
     }
@@ -961,6 +2206,7 @@ fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
     let mut rows = snapshot.messages.as_slice().to_vec();
     for row in &mut rows {
         row.metadata.replyable = true;
+        row.metadata.unread_after = row.local_id.checked_sub(1).filter(|id| *id > 0);
         if row.local_id == 2 {
             row.metadata.deleted = true;
         }
@@ -977,6 +2223,8 @@ fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
             MessageFeature::Search,
             MessageFeature::Files,
             MessageFeature::Pins,
+            MessageFeature::MarkUnread,
+            MessageFeature::UnreadFrom,
         ]
         .map(|feature| {
             (
@@ -1121,6 +2369,8 @@ pub struct DevelopmentPort {
     pending: bool,
     intents: u8,
     chat_ux_send_diagnostics: u8,
+    hand_diagnostics: u8,
+    consent_diagnostics: u8,
     busy_read_diagnostics: u8,
     account_probe: bool,
     focus_probe: Option<bool>, // false: rooms; true: files
@@ -1129,6 +2379,7 @@ pub struct DevelopmentPort {
     chat_motion: bool,
     history_pagination: bool,
     chat_content: bool,
+    people_fixture: bool,
 }
 impl DevelopmentPort {
     pub fn new(scenario: Option<&str>) -> Self {
@@ -1148,12 +2399,20 @@ impl DevelopmentPort {
         Self {
             reaction_fixture: matches!(
                 scenario,
-                Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
+                Some(
+                    "chat-reactions"
+                        | "chat-reactions-pending"
+                        | "chat-reactions-denied"
+                        | "reaction-authors"
+                )
             )
             .then_some(scenario == Some("chat-reactions-pending")),
             reaction_diagnostics: 0,
             thread_fixture: match scenario {
-                Some("chat-edit") => Some(false),
+                Some(
+                    "chat-edit" | "thread" | "thread-list" | "thread-options" | "thread-offline"
+                    | "thread-paged",
+                ) => Some(false),
                 Some("thread-error") => Some(true),
                 _ => None,
             },
@@ -1163,17 +2422,41 @@ impl DevelopmentPort {
             chat_ux: matches!(
                 scenario,
                 Some(
-                    "chat-ux" | "chat-ux-call" | "chat-edit" | "thread-error" | "chat-send-pending"
+                    "chat-ux"
+                        | "chat-ux-call"
+                        | "chat-edit"
+                        | "thread"
+                        | "thread-error"
+                        | "thread-list"
+                        | "thread-options"
+                        | "thread-offline"
+                        | "thread-paged"
+                        | "chat-send-pending"
+                        | "unread-divider"
+                        | "unread-jump"
+                        | "reaction-authors"
                 )
             ),
             chat_motion: scenario == Some("chat-motion"),
+            people_fixture: scenario == Some("people-card"),
             history_pagination: scenario == Some("history-pagination"),
             chat_content: matches!(
                 scenario,
                 Some(
                     "chat-content"
+                        | "chat-cloud-files"
+                        | "chat-cloud-files-offline"
+                        | "chat-polls"
+                        | "poll-dialog"
+                        | "poll-drafts"
+                        | "poll-details"
+                        | "poll-settings"
+                        | "chat-voice"
+                        | "voice-recording"
+                        | "voice-review"
                         | "chat-attachments"
                         | "chat-upload"
+                        | "chat-upload-preview"
                         | "chat-upload-uncertain"
                         | "chat-content-progress"
                         | "chat-content-loading"
@@ -1191,6 +2474,8 @@ impl DevelopmentPort {
             ),
             intents: 0,
             chat_ux_send_diagnostics: 0,
+            hand_diagnostics: 0,
+            consent_diagnostics: 0,
             busy_read_diagnostics: 0,
         }
     }
@@ -1257,10 +2542,33 @@ impl NativeDesktopPort for DevelopmentPort {
                 _ => (),
             }
         }
+        // Background fixture dispatches can exhaust the general quota before
+        // the native call-panel keyboard probe runs. This remains bounded and
+        // records only a local room identity and the explicit hand state.
+        if self.hand_diagnostics < 8
+            && let UiIntent::SetCallHand { call, raised } = &intent
+        {
+            self.hand_diagnostics += 1;
+            println!(
+                "UI_INTENT hand room={} raised={raised}",
+                call.conversation.local
+            );
+        }
+        if self.consent_diagnostics < 4
+            && let UiIntent::ResolveRequiredGate {
+                call,
+                gate: RequiredGate::RecordingConsent,
+            } = &intent
+        {
+            self.consent_diagnostics += 1;
+            println!(
+                "UI_INTENT recording-consent room={}",
+                call.conversation.local
+            );
+        }
         // Content probes can exhaust the general quota before a user sends.
-        // Reserve four send diagnostics for the explicit chat interaction fixture.
-        if self.chat_ux
-            && self.chat_ux_send_diagnostics < 4
+        // Reserve four send diagnostics independently of automatic read probes.
+        if self.chat_ux_send_diagnostics < 4
             && let UiIntent::Message {
                 context,
                 action: talk_core::ui::messaging::MessageAction::Send { body, target, .. },
@@ -1292,6 +2600,47 @@ impl NativeDesktopPort for DevelopmentPort {
             return Err(SubmitError::Busy);
         }
         match intent {
+            UiIntent::RefreshThreads(account) if self.snapshot.threads.account == Some(account) => {
+                self.snapshot.threads.content = ContentState::Ready;
+            }
+            UiIntent::PageThreads { account, offset }
+                if self.snapshot.threads.account == Some(account) =>
+            {
+                self.snapshot.threads.offset = offset;
+            }
+            UiIntent::MarkRoomUnread { context, .. }
+                if self.snapshot.active_account == Some(context.account) =>
+            {
+                self.snapshot.conversations = page(
+                    self.snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .cloned()
+                        .map(|mut room| {
+                            if room.context == context {
+                                room.unread = room.unread.max(1);
+                            }
+                            room
+                        }),
+                );
+            }
+            UiIntent::Message {
+                context,
+                action: talk_core::ui::messaging::MessageAction::ReactionAuthors { message, emoji },
+                ..
+            } if self.reaction_fixture.is_some() && self.snapshot.selected == Some(context) => {
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_mut()
+                    .ok_or(SubmitError::StaleScope)?;
+                panel.reaction_authors = page([talk_core::ui::messaging::ReactionAuthors {
+                    message,
+                    emoji,
+                    authors: page([text("Mara Fischer"), text("Alex Sommer")]),
+                }]);
+            }
             UiIntent::Message {
                 request,
                 context,
@@ -1376,12 +2725,14 @@ impl NativeDesktopPort for DevelopmentPort {
                 }
             }
             UiIntent::Content {
-                account, action, ..
+                request,
+                account,
+                action,
             } if self.chat_content => {
                 if self.snapshot.active_account != Some(account) {
                     return Err(SubmitError::StaleScope);
                 }
-                content::action(&mut self.snapshot, action)?;
+                content::action(&mut self.snapshot, request, action)?;
             }
             UiIntent::Refresh(_) if self.chat_motion => {
                 self.probe_step = (self.probe_step + 1).min(14);
@@ -1398,17 +2749,13 @@ impl NativeDesktopPort for DevelopmentPort {
                         if !rows.iter().any(|row| row.local_id == id) {
                             rows.push(message(
                                 id,
-                                if own {
-                                    "Fictional own projection"
-                                } else {
-                                    "Fictional teammate"
-                                },
-                                if own { "FO" } else { "FT" },
+                                if own { "Alex Sommer" } else { "Mara Fischer" },
+                                if own { "AS" } else { "MF" },
                                 "10:01",
                                 if own {
-                                    "Own message projection fixture; no backend send or acceptance."
+                                    "Ich ergänze die nächsten Schritte."
                                 } else {
-                                    "New incoming message projection fixture."
+                                    "Danke, ich schaue es mir an."
                                 },
                                 own,
                             ));
@@ -1416,7 +2763,7 @@ impl NativeDesktopPort for DevelopmentPort {
                     }
                     6 => {
                         if let Some(row) = rows.last_mut() {
-                            row.body = text("Edited fictional row, same stable message ID.");
+                            row.body = text("Danke, ich schaue es mir später an.");
                             row.metadata.edited = true;
                         }
                     }
@@ -1426,33 +2773,32 @@ impl NativeDesktopPort for DevelopmentPort {
                         0,
                         message(
                             0,
-                            "Fictional teammate",
-                            "FT",
+                            "Mara Fischer",
+                            "MF",
                             "09:00",
-                            "Older loaded history fixture; no new-message entry.",
+                            "Hier sind die Notizen vom letzten Termin.",
                             false,
                         ),
                     ),
                     11 => {
-                        let mut event =
-                            message(37, "", "", "10:02", "Fictional call ended.", false);
+                        let mut event = message(37, "", "", "10:02", "Anruf beendet.", false);
                         event.metadata.system = true;
                         rows.push(event);
                     }
                     12 => {
                         if let Some(row) = rows.iter_mut().find(|row| row.local_id == 36) {
                             row.body = text(
-                                "Edited fictional message with a changed height.\n\
-                                 The reader is already at the bottom.\n\
-                                 The viewport must remain at the end.\n\
-                                 This is a presentation fixture, not a server write.",
+                                "Hier sind die überarbeiteten Notizen.\n\
+                                 Die nächsten Schritte sind abgestimmt.\n\
+                                 Ich ergänze noch den Zeitplan.\n\
+                                 Danke für eure Rückmeldungen.",
                             );
                             row.metadata.edited = true;
                         }
                     }
                     13 => {
                         if let Some(row) = rows.iter_mut().find(|row| row.local_id == 36) {
-                            row.body = text("Fictional message removed.");
+                            row.body = text("Nachricht entfernt.");
                             row.metadata.deleted = true;
                         }
                     }
@@ -1510,6 +2856,58 @@ impl NativeDesktopPort for DevelopmentPort {
                     content::configure(&mut self.snapshot);
                 }
             }
+            UiIntent::Create {
+                account,
+                request,
+                action: talk_core::ui::conversation::CreateAction::DirectMember(person),
+            } if self.people_fixture => {
+                if self.snapshot.active_account != Some(account)
+                    || self.snapshot.selected != Some(person.context)
+                    || !self
+                        .snapshot
+                        .conversation_panel
+                        .as_ref()
+                        .is_some_and(|panel| {
+                            panel.context == person.context
+                                && panel.members_loaded
+                                && !panel.details_stale
+                                && panel
+                                    .members
+                                    .as_slice()
+                                    .iter()
+                                    .any(|member| member.id == person && !member.self_user)
+                        })
+                {
+                    return Err(SubmitError::StaleScope);
+                }
+                let direct = self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .find(|row| {
+                        row.kind == ConversationKind::Direct && row.title.as_str() == "Mara Fischer"
+                    })
+                    .map(|row| row.context)
+                    .ok_or(SubmitError::StaleScope)?;
+                populate(&mut self.snapshot, direct);
+                let mut panel = talk_core::ui::conversation::CreatePanel::new(account);
+                panel.result = Some(talk_core::ui::conversation::CreationResult {
+                    request,
+                    completion: Completion::ServerAccepted,
+                    conversation: Some(direct),
+                    incomplete_invitations: false,
+                });
+                self.snapshot.create_panel = Some(panel);
+            }
+            UiIntent::AcknowledgeCreation { account, request } if self.people_fixture => {
+                if let Some(panel) = self.snapshot.create_panel.as_mut()
+                    && panel.account == account
+                    && panel.result.is_some_and(|result| result.request == request)
+                {
+                    panel.result = None;
+                }
+            }
             UiIntent::SetFavorite {
                 context, favorite, ..
             } if self.chat_ux => {
@@ -1545,6 +2943,52 @@ impl NativeDesktopPort for DevelopmentPort {
             UiIntent::ReopenBrowser(_) | UiIntent::ChooseStorage { .. } => {
                 return Err(SubmitError::Unavailable(UnavailableReason::Unconfigured));
             }
+            UiIntent::Message {
+                request,
+                context,
+                action: talk_core::ui::messaging::MessageAction::Send { body, target },
+            } if self.snapshot.content == ContentState::Offline
+                && self.thread_fixture.is_some() =>
+            {
+                if self.snapshot.selected != Some(context) || self.snapshot.submission.is_some() {
+                    return Err(SubmitError::Busy);
+                }
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_mut()
+                    .ok_or(SubmitError::StaleScope)?;
+                let root = target
+                    .thread
+                    .filter(|root| panel.thread_root == Some(*root))
+                    .ok_or(SubmitError::StaleScope)?;
+                let mut reply = message(42, "Alex Sommer", "AS", "10:03", body.as_str(), true);
+                reply.metadata.thread = Some(root);
+                reply.delivery = DeliveryState::Queued;
+                panel
+                    .thread_messages
+                    .try_push(reply)
+                    .map_err(|_| SubmitError::Busy)?;
+                self.snapshot.messages = page(
+                    self.snapshot
+                        .messages
+                        .as_slice()
+                        .iter()
+                        .cloned()
+                        .map(|mut message| {
+                            if message.local_id == root {
+                                message.reply_count = message.reply_count.saturating_add(1);
+                            }
+                            message
+                        }),
+                );
+                self.snapshot.submission = Some(SubmissionResult {
+                    request,
+                    context,
+                    result: Completion::Queued,
+                });
+                println!("UI_THREAD_FIXTURE offline_reply_queued=true no_backend=true");
+            }
             UiIntent::SendDraft {
                 request, context, ..
             }
@@ -1554,6 +2998,10 @@ impl NativeDesktopPort for DevelopmentPort {
                 action: talk_core::ui::messaging::MessageAction::Send { .. },
             } => {
                 if self.busy || self.snapshot.submission.is_some() {
+                    if self.busy && self.chat_ux_send_diagnostics < 4 {
+                        self.chat_ux_send_diagnostics += 1;
+                        println!("UI_BUSY send_rejected=true no_backend=true");
+                    }
                     return Err(SubmitError::Busy);
                 }
                 if self.snapshot.selected != Some(context) {
@@ -1603,7 +3051,7 @@ impl NativeDesktopPort for DevelopmentPort {
                             "Mara Fischer",
                             "MF",
                             "09:40",
-                            "Ältere fiktive Nachricht für die lokale Navigation.",
+                            "Hier sind die Notizen vom letzten Termin.",
                             false,
                         )
                     })
@@ -1626,12 +3074,25 @@ impl NativeDesktopPort for DevelopmentPort {
                 if Some(context) != self.snapshot.selected {
                     return Err(SubmitError::StaleScope);
                 }
+                let offline = self.snapshot.content == ContentState::Offline;
                 let panel = self
                     .snapshot
                     .message_panel
                     .as_mut()
                     .ok_or(SubmitError::StaleScope)?;
                 match action {
+                    MessageAction::MarkUnread | MessageAction::MarkUnreadFrom(_) => {
+                        panel.result = Some((request, Completion::ServerAccepted));
+                        self.snapshot.conversations =
+                            page(self.snapshot.conversations.as_slice().iter().cloned().map(
+                                |mut row| {
+                                    if row.context == context {
+                                        row.unread = row.unread.max(1);
+                                    }
+                                    row
+                                },
+                            ));
+                    }
                     MessageAction::StageFiles(paths) => {
                         use talk_core::ui::messaging::{UploadState, UploadView};
                         let mut uploads = panel.uploads.as_slice().to_vec();
@@ -1656,6 +3117,24 @@ impl NativeDesktopPort for DevelopmentPort {
                         }
                         panel.uploads = page(uploads);
                     }
+                    MessageAction::StageClipboardImage { name, image } => {
+                        use talk_core::ui::messaging::{UploadState, UploadView};
+                        let mut uploads = panel.uploads.as_slice().to_vec();
+                        if uploads.len() >= 8 {
+                            return Err(SubmitError::Busy);
+                        }
+                        uploads.push(UploadView {
+                            id: 1000 + uploads.len() as u64,
+                            name,
+                            bytes: Some(image.as_slice().len() as u64),
+                            state: UploadState::Selected,
+                            submitted: false,
+                            transferred: 0,
+                            uploaded: false,
+                            server_message: None,
+                        });
+                        panel.uploads = page(uploads);
+                    }
                     MessageAction::RemoveFile(id) => {
                         panel.uploads = page(
                             panel
@@ -1673,8 +3152,8 @@ impl NativeDesktopPort for DevelopmentPort {
                         for file in panel.uploads.as_slice().iter().filter(|f| !f.submitted) {
                             let row = message(
                                 file.message_id(),
-                                "Fictional author",
-                                "FA",
+                                "Alex Sommer",
+                                "AS",
                                 "10:00",
                                 if first { caption.as_str() } else { "" },
                                 true,
@@ -1692,6 +3171,8 @@ impl NativeDesktopPort for DevelopmentPort {
                     }
                     MessageAction::Thread(root) if self.thread_fixture.is_some() => {
                         panel.thread_root = Some(root);
+                        panel.thread_older = None;
+                        panel.thread_has_newer = false;
                         panel.thread_state = if self.thread_fixture == Some(true) {
                             talk_core::ui::conversation::RemoteState::Failed(
                                 request,
@@ -1705,12 +3186,78 @@ impl NativeDesktopPort for DevelopmentPort {
                             "Mara Fischer",
                             "MF",
                             "10:00",
-                            "Fictional thread reply for native input checks.",
+                            "Das klingt gut, danke für den Vorschlag.",
                             false,
                         );
                         row.metadata.replyable = true;
                         row.metadata.thread = Some(root);
                         panel.thread_messages = page([row]);
+                    }
+                    MessageAction::ThreadOlder(root)
+                        if self.thread_fixture.is_some()
+                            && panel.thread_root == Some(root)
+                            && panel.thread_older.is_some() =>
+                    {
+                        let mut row = message(
+                            20,
+                            "Jonas Weber",
+                            "JW",
+                            "09:55",
+                            "Hier ist meine frühere Antwort.",
+                            false,
+                        );
+                        row.metadata.thread = Some(root);
+                        panel.thread_messages = page([row]);
+                        panel.thread_older = None;
+                        panel.thread_has_newer = true;
+                        panel.thread_state = talk_core::ui::conversation::RemoteState::Idle;
+                    }
+                    MessageAction::ThreadInfo(root) if self.thread_fixture.is_some() => {
+                        panel.thread_details = Some(talk_core::ui::messaging::ThreadDetails {
+                            root,
+                            title: text("Design review"),
+                            notification_level: Some(0),
+                            rename: Decision::Allowed,
+                        });
+                    }
+                    MessageAction::RenameThread { root, title }
+                        if self.thread_fixture.is_some() =>
+                    {
+                        if let Some(details) = panel
+                            .thread_details
+                            .as_mut()
+                            .filter(|details| details.root == root)
+                        {
+                            details.title = title;
+                            panel.result = Some((
+                                request,
+                                if offline {
+                                    Completion::Queued
+                                } else {
+                                    Completion::ServerAccepted
+                                },
+                            ));
+                        }
+                    }
+                    MessageAction::ThreadNotifications { root, level }
+                        if self.thread_fixture.is_some() =>
+                    {
+                        if let Some(details) = panel
+                            .thread_details
+                            .as_mut()
+                            .filter(|details| details.root == root)
+                        {
+                            details.notification_level = Some(level);
+                            panel.thread_following_intent = Some(level != 3);
+                            panel.result = Some((
+                                request,
+                                if offline {
+                                    Completion::Queued
+                                } else {
+                                    Completion::ServerAccepted
+                                },
+                            ));
+                        }
                     }
                     MessageAction::Search(query) => {
                         let query = query.as_str().to_lowercase();
@@ -1751,6 +3298,22 @@ impl NativeDesktopPort for DevelopmentPort {
                             "UI_CHAT_UX locate room={} message={id}",
                             context.conversation.local
                         );
+                    }
+                    MessageAction::LocateUnreadAfter(marker) => {
+                        let id = self
+                            .snapshot
+                            .messages
+                            .as_slice()
+                            .iter()
+                            .filter(|row| row.local_id > marker && !row.metadata.pin_notice)
+                            .map(|row| row.local_id)
+                            .min()
+                            .ok_or(SubmitError::StaleScope)?;
+                        panel.context_load = Some(talk_core::ui::messaging::ContextLoad {
+                            target: marker,
+                            state: talk_core::ui::conversation::RemoteState::Idle,
+                        });
+                        panel.located = Some((request, id));
                     }
                     MessageAction::Files | MessageAction::Pins => {
                         println!("UI_CHAT_UX shared room={}", context.conversation.local);
@@ -1810,11 +3373,152 @@ impl NativeDesktopPort for DevelopmentPort {
                     microphone: MediaState::Unavailable,
                     camera: MediaState::Unavailable,
                     share: MediaState::Unavailable,
+                    sharing: ScreenShareState::Idle,
+                    streams: Page::empty(),
+                    replacement_generation: false,
+                    remote_audio_received: 0,
+                    recording: talk_core::ui::presentation::CallRecordingState::Unknown,
+                    recording_control: None,
+                    recording_pending: false,
+                    recording_uncertain: false,
+                    hand_supported: false,
+                    hand_raised: false,
+                    reactions: Page::empty(),
+                    latest_reaction: None,
+                    invitees_loaded: false,
+                    invitees: Page::empty(),
+                    ring_status: None,
+                    mute_status: None,
+                    can_end_everyone: false,
+                    end_pending: false,
+                    end_failed: false,
                     participants: if direct || call.conversation.local == 2 {
                         page([participants()[0].clone(), participants()[2].clone()])
                     } else {
                         page(participants())
                     },
+                });
+            }
+            UiIntent::RecoverCallMedia(call) => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view.replacement_generation
+                            && view.stage == CallStage::Active
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.replacement_generation = false;
+                view.stage = CallStage::Connecting;
+                println!(
+                    "UI_INTENT recover-call-media room={}",
+                    call.conversation.local
+                );
+            }
+            UiIntent::SetCallRecording { call, start } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view.recording_control == Some(start)
+                            && !view.recording_pending
+                            && !view.recording_uncertain
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.recording_pending = true;
+            }
+            UiIntent::EndCallForEveryone(call) => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| view.scope == call && view.can_end_everyone)
+                    .ok_or(SubmitError::StaleScope)?;
+                view.end_pending = true;
+            }
+            UiIntent::MuteCallParticipant { call, target } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view
+                                .participants
+                                .as_slice()
+                                .iter()
+                                .any(|person| person.local_id == target && person.call_can_mute)
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.mute_status = Some(talk_core::ui::presentation::CallRingStatus {
+                    target,
+                    outcome: talk_core::ui::presentation::CallRingOutcome::Pending,
+                });
+            }
+            UiIntent::RingCallParticipant { call, target } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view
+                                .invitees
+                                .as_slice()
+                                .iter()
+                                .any(|person| person.local_id == target && person.ring_allowed)
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.ring_status = Some(talk_core::ui::presentation::CallRingStatus {
+                    target,
+                    outcome: talk_core::ui::presentation::CallRingOutcome::Pending,
+                });
+            }
+            UiIntent::ResolveRequiredGate {
+                call,
+                gate: RequiredGate::RecordingConsent,
+            } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view.stage == CallStage::Required(RequiredGate::RecordingConsent)
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                // A fixture may advance to connecting; it never grants media.
+                view.stage = CallStage::Connecting;
+            }
+            UiIntent::SetCallHand { call, raised } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| view.scope == call && view.hand_supported)
+                    .ok_or(SubmitError::StaleScope)?;
+                view.hand_raised = raised;
+            }
+            UiIntent::SendCallReaction { call, emoji } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| view.scope == call && view.reactions.as_slice().contains(&emoji))
+                    .ok_or(SubmitError::StaleScope)?;
+                let sequence = view
+                    .latest_reaction
+                    .as_ref()
+                    .map_or(Some(1), |reaction| reaction.sequence.checked_add(1))
+                    .ok_or(SubmitError::Busy)?;
+                view.latest_reaction = Some(talk_core::ui::presentation::CallReactionView {
+                    sequence,
+                    participant: None,
+                    emoji,
                 });
             }
             UiIntent::Legacy(UserIntent::Leave(call)) | UiIntent::DeclineDirect(call) => {
@@ -1856,6 +3560,53 @@ impl NativeDesktopPort for DevelopmentPort {
 mod tests {
     use super::*;
     use talk_core::ui::MediaIntent;
+
+    #[test]
+    fn person_fixture_resolves_only_a_current_member_to_the_direct_room() {
+        let mut port = DevelopmentPort::new(Some("people-card"));
+        let account = port.snapshot.active_account.unwrap();
+        let person = port
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .members
+            .as_slice()[0]
+            .id;
+        let mut stale = person;
+        stale.local ^= 1;
+        let request = |member| UiIntent::Create {
+            account,
+            request: RequestId(71),
+            action: talk_core::ui::conversation::CreateAction::DirectMember(member),
+        };
+        assert_eq!(
+            port.try_submit(request(stale)),
+            Err(SubmitError::StaleScope)
+        );
+        assert_eq!(port.try_submit(request(person)), Ok(()));
+        let direct = port.snapshot.selected.unwrap();
+        assert_eq!(
+            port.snapshot
+                .create_panel
+                .as_ref()
+                .unwrap()
+                .result
+                .unwrap()
+                .conversation,
+            Some(direct)
+        );
+        assert_eq!(
+            port.snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .find(|row| row.context == direct)
+                .unwrap()
+                .kind,
+            ConversationKind::Direct
+        );
+    }
     #[test]
     fn reaction_fixture_reconciles_counts_and_keeps_pending_and_denied_distinct() {
         use talk_core::ui::{conversation::RemoteState, messaging::MessageAction};
@@ -2064,5 +3815,85 @@ mod tests {
         ))))
         .unwrap();
         assert!(port.take_snapshot().unwrap().call.is_none());
+    }
+    #[test]
+    fn fixture_screen_stage_uses_stream_identity_and_metadata() {
+        let mut snapshot = snapshot(Some("call-screen-stage"));
+        let call = snapshot.call.as_mut().unwrap();
+        let screen = call.screen_stage().unwrap();
+        assert_eq!(screen.tile.local_id, 9001);
+        assert_eq!(screen.dimensions, Some((1280, 720)));
+        assert!(!screen.flowing);
+        assert!(
+            call.participants
+                .as_slice()
+                .iter()
+                .all(|p| p.local_id != screen.tile.local_id)
+        );
+        let participant = call.participants.as_slice()[0].local_id;
+        let mut streams = call.streams.as_slice().to_vec();
+        let camera = streams
+            .iter_mut()
+            .find(|s| s.participant == participant && s.kind == CallTileKind::Camera)
+            .unwrap();
+        camera.local_id = 9002;
+        call.streams = Page::empty();
+        for stream in streams {
+            call.streams.try_push(stream).unwrap();
+        }
+        assert_eq!(
+            call.camera_tile(participant),
+            Some(talk_core::ui::presentation::CallTileId {
+                local_id: 9002,
+                kind: CallTileKind::Camera
+            })
+        );
+        call.streams = talk_core::ui::Page::empty();
+        assert!(call.screen_stage().is_none());
+        assert!(call.camera_tile(participant).is_none());
+    }
+    #[test]
+    fn offline_thread_fixture_projects_the_locally_queued_reply() {
+        use talk_core::ui::messaging::{ComposeTarget, MessageAction};
+        let mut fixture = DevelopmentPort::new(Some("thread-offline"));
+        let context = fixture.snapshot.selected.unwrap();
+        let request = RequestId(70);
+        assert_eq!(
+            fixture.try_submit(UiIntent::Message {
+                request,
+                context,
+                action: MessageAction::Send {
+                    body: text("Offline reply"),
+                    target: ComposeTarget {
+                        thread: Some(1),
+                        ..Default::default()
+                    }
+                },
+            }),
+            Ok(())
+        );
+        let snapshot = fixture.take_snapshot().unwrap();
+        assert_eq!(snapshot.submission.unwrap().result, Completion::Queued);
+        let row = snapshot
+            .message_panel
+            .unwrap()
+            .thread_messages
+            .as_slice()
+            .last()
+            .unwrap()
+            .clone();
+        assert_eq!(row.body.as_str(), "Offline reply");
+        assert_eq!(row.metadata.thread, Some(1));
+        assert_eq!(row.delivery, DeliveryState::Queued);
+        assert_eq!(
+            snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .find(|row| row.local_id == 1)
+                .unwrap()
+                .reply_count,
+            3
+        );
     }
 }

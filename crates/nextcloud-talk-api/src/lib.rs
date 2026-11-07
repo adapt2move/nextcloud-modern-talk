@@ -6,10 +6,12 @@
 pub mod chat;
 pub mod content;
 pub mod conversation;
+pub mod creation;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod diagnostics;
 mod error;
 pub mod events;
+pub mod federation;
 pub mod files;
 pub mod hpb;
 mod json;
@@ -18,9 +20,14 @@ pub mod models;
 pub mod notifications;
 pub mod poll;
 pub mod presence;
+pub mod references;
 pub mod scope;
+pub mod search;
 pub mod signaling;
+pub mod task_processing;
+pub mod translation;
 mod transport;
+pub mod typing;
 pub use error::{ErrorKind, PortError as Error, Retry};
 use models::*;
 use reqwest::Method;
@@ -28,7 +35,9 @@ use scope::*;
 pub use transport::{NetworkRuntime, ServerOrigin};
 use zeroize::Zeroizing;
 /// Maximum complete HTTP response body before JSON decoding.
-pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+/// Encoded square PNG avatar; untrusted files are decoded and bounded by the caller.
+pub const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
 
 /// Consumed once by the authenticated owner. Never Debug/Clone, and no secret getters.
 /// Only app passwords obtained/retained by the application's identity owner belong here.
@@ -65,6 +74,32 @@ impl AppCredential {
 /// Semantic operations only. There is no authenticated URL, method, header or form API.
 /// Readback/reconciliation policy and application permission decisions belong to the caller.
 pub enum Request {
+    /// Account-wide subscribed threads, paged independently of any room.
+    SubscribedThreads {
+        offset: u32,
+    },
+    /// Account-wide reminder list; it does not require an active room session.
+    UpcomingReminders,
+    FederationInvitations,
+    FederatedRoomCapabilities(RoomToken),
+    AcceptFederationInvitation {
+        id: u64,
+    },
+    DeclineFederationInvitation {
+        id: u64,
+    },
+    UploadRoomAvatar {
+        room: RoomToken,
+        png: Vec<u8>,
+    },
+    TranslationLanguages,
+    Translate {
+        text: String,
+        to_language: String,
+    },
+    TaskProcessing {
+        id: u64,
+    },
     Chat {
         room: RoomToken,
         command: chat::Command,
@@ -73,11 +108,21 @@ pub enum Request {
         room: RoomToken,
         command: conversation::Command,
     },
+    SearchProviders,
+    SearchMessages(search::Query),
+    ResolveReference(String),
     Account,
     Capabilities,
     Rooms,
+    /// Room list with direct-message status; caller must check user_status.enabled.
+    RoomsWithStatus,
+    ListedRooms {
+        search: String,
+    },
     Room(RoomToken),
     Participants(RoomToken),
+    /// Participant status is requested only when user_status is enabled.
+    ParticipantsWithStatus(RoomToken),
     History {
         room: RoomToken,
         before: Option<u64>,
@@ -91,9 +136,15 @@ pub enum Request {
         room: RoomToken,
         message: u64,
     },
+    /// Talk's explicit first-message unread sentinel, not a message ID.
+    MarkUnreadFromStart {
+        room: RoomToken,
+    },
     CreateGroup {
         name: String,
     },
+    CreationPresets,
+    CreateConversation(creation::Room),
     /// Server-filtered local users available when starting a conversation.
     FindPeople {
         search: String,
@@ -146,12 +197,20 @@ pub enum Request {
     LeaveCall(RoomToken),
 }
 pub enum Reply {
+    CreationPresets(Vec<creation::Preset>),
+    SearchProvider(Option<search::Provider>),
+    Reference(Option<references::Resolved>),
     Chat(chat::Response),
+    FederationInvitations(Vec<federation::Invitation>),
+    FederatedRoomCapabilities(federation::RemoteCapabilities),
+    TranslationLanguages(translation::Languages),
+    Translated(String),
+    TaskProcessing(task_processing::Task),
     Conversation(conversation::Response),
     Account(Account),
     Capabilities(Capabilities),
     Rooms(Vec<Room>),
-    Room(Room),
+    Room(Box<Room>),
     Participants(Vec<Participant>),
     History {
         messages: Vec<Message>,
@@ -159,7 +218,7 @@ pub enum Reply {
         /// Missing header is None; explicit unavailability is Some(0).
         common_read: Option<u64>,
     },
-    Message(Message),
+    Message(Box<Message>),
     RoomSession(RoomSession),
     Tags(Vec<Tag>),
     Tag(Tag),
@@ -187,10 +246,12 @@ pub struct Client {
     tag_creation_uncertain: bool,
     schedule_uncertain: Vec<RoomToken>,
     poll_creation_uncertain: Vec<RoomToken>,
+    directory_cursor: Option<files::DirectoryCursor>,
     hpb: Option<hpb::Owner>,
     hpb_route: Option<hpb::Route>,
     live_settings_at: Option<scope::Moment>,
     live_internal: bool,
+    typing_active: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 struct SendAttempt {
     room: RoomToken,
@@ -239,10 +300,12 @@ impl Client {
             tag_creation_uncertain: false,
             schedule_uncertain: Vec::new(),
             poll_creation_uncertain: Vec::new(),
+            directory_cursor: None,
             hpb: None,
             hpb_route: None,
             live_settings_at: None,
             live_internal: false,
+            typing_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
     pub fn validate(&self, context: &OperationContext) -> Result<(), Error> {
@@ -280,7 +343,7 @@ impl Client {
     fn observe_rooms(&mut self, reply: &Reply) -> Result<(), Error> {
         let observed = match reply {
             Reply::Rooms(rooms) => rooms.as_slice(),
-            Reply::Room(room) => std::slice::from_ref(room),
+            Reply::Room(room) => std::slice::from_ref(room.as_ref()),
             _ => return Ok(()),
         };
         let mut tokens = Vec::with_capacity(observed.len());
@@ -323,8 +386,11 @@ impl Client {
         }
         let create_room = matches!(
             request,
-            Request::CreateGroup { .. } | Request::CreateDirect { .. }
+            Request::CreateGroup { .. }
+                | Request::CreateDirect { .. }
+                | Request::CreateConversation(_)
         );
+        let full_room_list = matches!(&request, Request::Rooms);
         if let Request::CreateDirect { user } = &request
             && user == self.transport.user()
         {
@@ -477,11 +543,23 @@ impl Client {
             self.call_generation = None;
             self.room_session = None;
         }
-        let response = if matches!(
+        let response = if let Request::UploadRoomAvatar { png, .. } = &request {
+            self.transport.avatar_upload(context, &route, png).await
+        } else if matches!(
+            &request,
+            Request::Chat {
+                command: chat::Command::Summarize { .. },
+                ..
+            }
+        ) {
+            self.transport.summary(context, &route, &form).await
+        } else if matches!(
             request,
             Request::History { .. }
                 | Request::Chat {
-                    command: chat::Command::History { .. } | chat::Command::Poll { .. },
+                    command: chat::Command::History { .. }
+                        | chat::Command::Poll { .. }
+                        | chat::Command::UnreadAfter { .. },
                     ..
                 }
         ) {
@@ -544,8 +622,18 @@ impl Client {
         })?;
         // Typed decoding alone does not correlate a server response to this request.
         match (&request, &decoded) {
+            (Request::ResolveReference(expected), Reply::Reference(Some(reference)))
+                if &reference.reference != expected =>
+            {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
             (Request::Room(expected), Reply::Room(room)) if room.token != expected.as_str() => {
                 return Err(self.error(ErrorKind::WrongScope));
+            }
+            (Request::UploadRoomAvatar { room: expected, .. }, Reply::Room(room))
+                if room.token != expected.as_str() =>
+            {
+                return Err(self.error(ErrorKind::Uncertain));
             }
             (
                 Request::History { room, .. } | Request::Chat { room, .. },
@@ -568,6 +656,19 @@ impl Client {
                     || message.reference.as_ref() != Some(&attempt.reference)
                     || message.actor_type.as_deref() != Some("users")
                     || message.actor_id.as_deref() != Some(self.transport.user())
+                {
+                    return Err(self.error(ErrorKind::Uncertain));
+                }
+                if let Request::Chat {
+                    command: chat::Command::Send { options, .. },
+                    ..
+                } = &request
+                    && let Some(source) = options.reply_to_token.as_ref()
+                    && !message.parent.as_ref().is_some_and(|parent| {
+                        parent.external
+                            && parent.token.as_deref() == Some(source.as_str())
+                            && parent.source_id == options.reply_to
+                    })
                 {
                     return Err(self.error(ErrorKind::Uncertain));
                 }
@@ -599,6 +700,17 @@ impl Client {
                     ErrorKind::WrongScope
                 }));
             }
+            (
+                Request::Conversation {
+                    command: conversation::Command::SwitchBreakout(target),
+                    ..
+                },
+                Reply::Room(room),
+            ) => {
+                if room.token != target.as_str() {
+                    return Err(self.error(ErrorKind::Uncertain));
+                }
+            }
             (Request::Conversation { room: expected, .. }, Reply::Room(room))
                 if room.token != expected.as_str() =>
             {
@@ -610,6 +722,9 @@ impl Client {
             }
             (Request::Chat { room, .. }, Reply::Chat(reply)) => chat::validate(room, reply)
                 .map_err(|k| self.error(if mutation { ErrorKind::Uncertain } else { k }))?,
+            (Request::TaskProcessing { id }, Reply::TaskProcessing(task)) if task.id != *id => {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
             _ => {}
         }
         if let Reply::Account(ref account) = decoded
@@ -679,7 +794,7 @@ impl Client {
             self.sends[index].uncertain = false;
         }
         match &decoded {
-            Reply::Rooms(_) => self.creation_uncertain = false,
+            Reply::Rooms(_) if full_room_list => self.creation_uncertain = false,
             Reply::Tags(_) => self.tag_creation_uncertain = false,
             Reply::History { messages, .. } => {
                 for message in messages {
@@ -703,11 +818,20 @@ impl Client {
 }
 #[derive(Clone, Copy)]
 enum Kind {
+    CreationPresets,
+    SearchProviders,
+    Reference,
+    FederationInvitations,
+    FederatedRoomCapabilities,
     Chat(chat::ResponseKind),
+    TranslationLanguages,
+    Translation,
+    TaskProcessing,
     Conversation(conversation::ResponseKind),
     Account,
     Capabilities,
     Rooms,
+    BreakoutRooms,
     Room,
     Participants,
     History,
@@ -746,8 +870,118 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
         format!("ocs/v2.php/apps/spreed/api/v4/tags/{}{suffix}", id.as_str())
     };
     let (method, route, query, form, kind) = match request {
+        Request::SubscribedThreads { offset } => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v1/chat/subscribed-threads".into(),
+            vec![("limit", "50".into()), ("offset", offset.to_string())],
+            vec![],
+            Kind::Chat(chat::ResponseKind::Threads),
+        ),
+        Request::CreateConversation(room) => return creation::plan(room),
+        Request::CreationPresets => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v1/presets/room".into(),
+            vec![],
+            vec![],
+            Kind::CreationPresets,
+        ),
+        Request::UploadRoomAvatar { room: token, png } => {
+            if png.len() > MAX_AVATAR_BYTES {
+                return Err(ErrorKind::TooLarge);
+            }
+            if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+                return Err(ErrorKind::Malformed);
+            }
+            (
+                Method::POST,
+                room("v1/room", token, "/avatar"),
+                vec![],
+                vec![],
+                Kind::Room,
+            )
+        }
+        Request::FederatedRoomCapabilities(token) => (
+            Method::GET,
+            room("v4/room", token, "/capabilities"),
+            vec![],
+            vec![],
+            Kind::FederatedRoomCapabilities,
+        ),
+        Request::FederationInvitations => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v1/federation/invitation".into(),
+            vec![],
+            vec![],
+            Kind::FederationInvitations,
+        ),
+        Request::AcceptFederationInvitation { id }
+        | Request::DeclineFederationInvitation { id }
+            if *id > 0 =>
+        {
+            (
+                if matches!(request, Request::AcceptFederationInvitation { .. }) {
+                    Method::POST
+                } else {
+                    Method::DELETE
+                },
+                format!("ocs/v2.php/apps/spreed/api/v1/federation/invitation/{id}"),
+                vec![],
+                vec![],
+                if matches!(request, Request::AcceptFederationInvitation { .. }) {
+                    Kind::Room
+                } else {
+                    Kind::Ack
+                },
+            )
+        }
+        Request::AcceptFederationInvitation { .. }
+        | Request::DeclineFederationInvitation { .. } => return Err(ErrorKind::Malformed),
+        Request::TaskProcessing { id } if *id > 0 => (
+            Method::GET,
+            format!("ocs/v2.php/taskprocessing/task/{id}"),
+            vec![],
+            vec![],
+            Kind::TaskProcessing,
+        ),
+        Request::TaskProcessing { .. } => return Err(ErrorKind::Malformed),
+        Request::TranslationLanguages => (
+            Method::GET,
+            "ocs/v2.php/translation/languages".into(),
+            vec![],
+            vec![],
+            Kind::TranslationLanguages,
+        ),
+        Request::Translate { text, to_language } => {
+            bounded(text, 4096)?;
+            if text.trim().is_empty() || !translation::valid_language(to_language) {
+                return Err(ErrorKind::Malformed);
+            }
+            (
+                Method::POST,
+                "ocs/v2.php/translation/translate".into(),
+                vec![],
+                vec![("text", text.clone()), ("toLanguage", to_language.clone())],
+                Kind::Translation,
+            )
+        }
+        Request::UpcomingReminders => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v1/chat/upcoming-reminders".into(),
+            vec![],
+            vec![],
+            Kind::Chat(chat::ResponseKind::Reminders),
+        ),
         Request::Chat { room, command } => return chat::plan(room, command),
         Request::Conversation { room, command } => return conversation::plan(room, command),
+        Request::SearchProviders => (
+            Method::GET,
+            "ocs/v2.php/search/providers".into(),
+            vec![],
+            vec![],
+            Kind::SearchProviders,
+        ),
+        Request::SearchMessages(query) => return search::plan(query),
+        Request::ResolveReference(reference) => return references::plan(reference),
         Request::Account => (
             Method::GET,
             "ocs/v2.php/cloud/user".into(),
@@ -769,6 +1003,26 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             vec![],
             Kind::Rooms,
         ),
+        Request::RoomsWithStatus => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v4/room".into(),
+            vec![
+                ("noStatusUpdate", "1".into()),
+                ("includeStatus", "true".into()),
+            ],
+            vec![],
+            Kind::Rooms,
+        ),
+        Request::ListedRooms { search } => {
+            bounded(search, 256)?;
+            (
+                Method::GET,
+                "ocs/v2.php/apps/spreed/api/v4/listed-room".into(),
+                vec![("searchTerm", search.clone())],
+                vec![],
+                Kind::Rooms,
+            )
+        }
         Request::Room(t) => (
             Method::GET,
             room("v4/room", t, ""),
@@ -780,6 +1034,13 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             Method::GET,
             room("v4/room", t, "/participants"),
             vec![],
+            vec![],
+            Kind::Participants,
+        ),
+        Request::ParticipantsWithStatus(t) => (
+            Method::GET,
+            room("v4/room", t, "/participants"),
+            vec![("includeStatus", "true".into())],
             vec![],
             Kind::Participants,
         ),
@@ -838,6 +1099,13 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
                 Kind::Ack,
             )
         }
+        Request::MarkUnreadFromStart { room: t } => (
+            Method::POST,
+            room("v1/chat", t, "/read"),
+            vec![],
+            vec![("lastReadMessage", "-2".into())],
+            Kind::Ack,
+        ),
         Request::CreateGroup { name } => {
             bounded(name, 256)?;
             if name.trim().is_empty() {
@@ -1057,7 +1325,7 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             Kind::Ack,
         ),
     };
-    let mutation = method != Method::GET;
+    let mutation = method != Method::GET && !matches!(request, Request::Translate { .. });
     Ok((method, route, query, form, kind, mutation))
 }
 fn list<T>(
@@ -1074,7 +1342,21 @@ fn list<T>(
 fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
     let v = &r.data;
     Ok(match kind {
+        Kind::CreationPresets => return creation::decode(v),
+        Kind::SearchProviders => return search::providers(v),
+        Kind::Reference => return references::decode(v),
+        Kind::FederationInvitations => {
+            Reply::FederationInvitations(list(v, 100, federation::Invitation::decode)?)
+        }
+        Kind::FederatedRoomCapabilities => {
+            Reply::FederatedRoomCapabilities(federation::RemoteCapabilities::decode(v)?)
+        }
         Kind::Chat(kind) => return chat::decode(kind, v),
+        Kind::TranslationLanguages => {
+            Reply::TranslationLanguages(translation::Languages::decode(v)?)
+        }
+        Kind::Translation => Reply::Translated(translation::translated(v)?),
+        Kind::TaskProcessing => Reply::TaskProcessing(task_processing::Task::decode(v)?),
         Kind::Conversation(kind) => return conversation::decode(kind, v),
         Kind::Account => Reply::Account(Account::decode(v)?),
         Kind::Capabilities => Reply::Capabilities(Capabilities::decode(v)?),
@@ -1084,21 +1366,31 @@ fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
             if r.status != 200 {
                 return Err(ErrorKind::Malformed);
             }
-            Reply::Rooms(list(v, 100, Room::decode)?)
+            Reply::Rooms(list(v, 256, Room::decode)?)
         }
-        Kind::Room => Reply::Room(Room::decode(v)?),
+        Kind::BreakoutRooms => {
+            if !matches!(r.status, 200 | 201) {
+                return Err(ErrorKind::Malformed);
+            }
+            Reply::Rooms(list(v, 21, Room::decode)?)
+        }
+        Kind::Room => {
+            let mut room = Room::decode(v)?;
+            room.incomplete_invitations |= r.status == 202;
+            Reply::Room(Box::new(room))
+        }
         Kind::Participants => Reply::Participants(list(v, 100, Participant::decode)?),
         Kind::History => Reply::History {
             messages: list(v, 50, Message::decode)?,
             last_given: r.last_given,
             common_read: r.common_read,
         },
-        Kind::Message => Reply::Message(Message::decode(v)?),
+        Kind::Message => Reply::Message(Box::new(Message::decode(v)?)),
         Kind::OptionalMessage => {
             if v.is_null() {
                 Reply::Acknowledged
             } else {
-                Reply::Message(Message::decode(v)?)
+                Reply::Message(Box::new(Message::decode(v)?))
             }
         }
         Kind::Session => {

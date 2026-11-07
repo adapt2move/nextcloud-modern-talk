@@ -1658,8 +1658,11 @@ fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
     let retained_room = format!("r-{:064x}", 2);
     a.put(&lost_room, b"removed-room", 103).unwrap();
     a.put(&retained_room, b"retained-room", 103).unwrap();
-    a.retain_rooms(std::slice::from_ref(&retained_room))
-        .unwrap();
+    let allowed: Vec<_> = (2..=257).map(|number| format!("r-{number:064x}")).collect();
+    a.retain_rooms(&allowed).unwrap();
+    let mut oversized = allowed.clone();
+    oversized.push(format!("r-{:064x}", 258));
+    assert!(a.retain_rooms(&oversized).is_err());
     assert!(a.get(&lost_room, 104).unwrap().is_none());
     assert_eq!(
         a.get(&retained_room, 104).unwrap().unwrap().0,

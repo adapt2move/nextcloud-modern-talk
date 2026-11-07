@@ -4,6 +4,8 @@ use talk_core::{identity::StorageBackend, ids::LoginAttemptId};
 
 #[path = "metadata_tests.rs"]
 mod metadata_tests;
+#[path = "presence_tests.rs"]
+mod presence_tests;
 #[path = "thumbnail_tests.rs"]
 mod thumbnail_tests;
 
@@ -84,11 +86,15 @@ fn room(key: &NavigationRoomKey, saved_at: u64) -> CacheRoom {
         favorite: Some(true),
         archived: Some(false),
         unread: 2,
+        unread_direct_mention: Some(true),
+        last_read_message: Some(1),
+        unread_mention: None,
         participant_count: Some(3),
         participant_count_at: Some(saved_at),
         last_activity: Some(saved_at),
         saved_at,
         observation: None,
+        user_status: None,
     }
 }
 fn page<T, const N: usize>(values: impl IntoIterator<Item = T>) -> Page<T, N> {
@@ -110,18 +116,21 @@ fn message(id: u64) -> CachedMessage {
         edited: true,
         deleted: false,
         system: false,
+        voice_message: false,
         system_event: None,
         pin_notice: false,
         truncated: false,
         replyable: true,
         parent: None,
         thread: None,
+        thread_replies: 0,
         reactions: page([CachedReaction {
             emoji: text("❤️"),
             count: 1,
             own: true,
         }]),
         attachments: Page::empty(),
+        locations: Page::empty(),
     }
 }
 
@@ -169,17 +178,62 @@ fn pin_notice_metadata_roundtrips_and_legacy_history_defaults_to_visible() {
     assert!(legacy.system);
     assert_eq!(legacy.text, row.text);
 }
+#[test]
+fn voice_marker_roundtrips_and_old_history_remains_non_voice() {
+    let mut row = message(7);
+    row.voice_message = true;
+    let mut encoded = serde_json::to_value(&row).unwrap();
+    let decoded: CachedMessage = serde_json::from_value(encoded.clone()).unwrap();
+    assert!(decoded.voice_message);
+    encoded.as_object_mut().unwrap().remove("voice_message");
+    let legacy: CachedMessage = serde_json::from_value(encoded).unwrap();
+    assert!(!legacy.voice_message);
+}
 fn history(key: &NavigationRoomKey, saved_at: u64) -> CacheHistory {
     CacheHistory {
         room: key.clone(),
         messages: page([message(7)]),
         pins: page([7]),
         pin_messages: Page::empty(),
+        threads: Page::empty(),
         pins_loaded: true,
         older: Some(7),
         latest: Some(9),
         saved_at,
     }
+}
+
+#[test]
+fn cached_thread_history_is_backward_compatible_and_purges_expired_quotes() {
+    let fixture = Fixture::new();
+    let mut history = history(&fixture.room, 100);
+    let mut expired = message(8);
+    expired.thread = Some(7);
+    expired.expires_at = Some(90);
+    let mut reply = message(9);
+    reply.thread = Some(7);
+    reply.parent = Some(CachedReply {
+        id: 8,
+        external: false,
+        author: text("Synthetic actor"),
+        text: text("Expired"),
+        unavailable: false,
+    });
+    history.threads = page([CachedThread {
+        root: 7,
+        root_message: Some(message(7)),
+        replies: page([expired, reply]),
+    }]);
+    let clean = clean_history(&history, 100).unwrap();
+    let rows = clean.threads.as_slice()[0].replies.as_slice();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].parent.as_ref().unwrap().unavailable);
+    assert!(rows[0].parent.as_ref().unwrap().text.as_str().is_empty());
+
+    let mut legacy = serde_json::to_value(history).unwrap();
+    legacy.as_object_mut().unwrap().remove("threads");
+    let restored: CacheHistory = serde_json::from_value(legacy).unwrap();
+    assert!(restored.threads.as_slice().is_empty());
 }
 fn record(key: &NavigationRoomKey, id: u128) -> OutboxRecord {
     OutboxRecord {
@@ -305,14 +359,14 @@ fn cache_eviction_and_expiry_leave_pending_effects_owned() {
     let fixture = Fixture::new();
     let store = fixture.store();
     let mut rooms = Page::empty();
-    for id in 1..=10 {
+    for id in 1..=(CACHE_HISTORY_LIMIT + 2) as u64 {
         let key = fixture.key(id);
         rooms.try_push(room(&key, 100 + id)).unwrap();
     }
-    store.put_rooms(&rooms, 110).unwrap();
+    store.put_rooms(&rooms, 140).unwrap();
     for value in rooms.as_slice() {
         store
-            .put_history(&history(&value.key, value.saved_at), 110)
+            .put_history(&history(&value.key, value.saved_at), 140)
             .unwrap();
     }
     let mut action = record(&fixture.room, 1);
@@ -321,9 +375,9 @@ fn cache_eviction_and_expiry_leave_pending_effects_owned() {
     store
         .set_phase(action.operation, OutboxPhase::Dispatched)
         .unwrap();
-    let snapshot = store.load(110).unwrap();
+    let snapshot = store.load(140).unwrap();
     assert_eq!(snapshot.histories.as_slice().len(), CACHE_HISTORY_LIMIT);
-    let snapshot = store.load(110 + CACHE_LIFETIME).unwrap();
+    let snapshot = store.load(140 + CACHE_LIFETIME).unwrap();
     assert_eq!(
         snapshot.rooms.as_slice().len(),
         1,
@@ -352,6 +406,7 @@ fn expiry_and_deletion_remove_text_reactions_quotes_and_pins() {
     let mut reply = message(3);
     reply.parent = Some(CachedReply {
         id: 1,
+        external: false,
         author: text("Fixture"),
         text: text("expired canary"),
         unavailable: false,
@@ -578,7 +633,7 @@ fn malformed_or_future_records_fail_without_silently_dropping_durable_intents() 
     {
         let (_ledger, db) = store.connection().unwrap();
         db.execute("UPDATE outbox SET payload='{}'", []).unwrap();
-        db.execute_batch("PRAGMA user_version=4").unwrap();
+        db.execute_batch("PRAGMA user_version=5").unwrap();
     }
     assert_eq!(store.load(100).unwrap_err(), DataError::Corrupt);
 }
@@ -886,4 +941,156 @@ fn replacement_insert_failure_rolls_back_the_retirement_of_the_failed_source() {
     assert_eq!(reopened.as_slice()[0].record.operation, previous);
     assert_eq!(reopened.as_slice()[0].record.phase, OutboxPhase::Failed);
     assert_eq!(reopened.as_slice()[0].record.intent().unwrap(), intent);
+}
+
+#[test]
+fn scheduled_edit_encoding_does_not_alias_existing_unread_and_thread_intents() {
+    for (kind, code) in [
+        (OutboxKind::MarkUnread, 9),
+        (OutboxKind::RenameThread, 10),
+        (OutboxKind::ThreadNotifications, 11),
+        (OutboxKind::EditScheduled, 12),
+    ] {
+        assert_eq!(kind.code(), code);
+        assert_eq!(OutboxKind::parse(code).unwrap(), kind);
+    }
+}
+
+#[test]
+fn durable_composer_drafts_survive_reopen_and_clear_without_evicting_history_or_outbox() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let draft = CacheDraft {
+        room: fixture.room.clone(),
+        thread: None,
+        reply: Some(1),
+        text: text("Draft Grüße 👋"),
+        saved_at: 100,
+    };
+    store.put_draft(&draft, 100).unwrap();
+    let threaded = CacheDraft {
+        thread: Some(7),
+        ..draft.clone()
+    };
+    store.put_draft(&threaded, 100).unwrap();
+    store
+        .put_history(&history(&fixture.room, 100), 100)
+        .unwrap();
+    store.enqueue(&record(&fixture.room, 1), 100).unwrap();
+    drop(store);
+    let loaded = fixture.store().load(100).unwrap();
+    assert_eq!(loaded.drafts.as_slice(), &[draft.clone(), threaded.clone()]);
+    fixture
+        .store()
+        .put_draft(
+            &CacheDraft {
+                text: text(""),
+                ..draft
+            },
+            100,
+        )
+        .unwrap();
+    let loaded = fixture.store().load(100).unwrap();
+    assert_eq!(loaded.drafts.as_slice(), &[threaded]);
+    assert_eq!(loaded.histories.as_slice().len(), 1);
+    assert_eq!(loaded.outbox.as_slice().len(), 1);
+    fixture.store().remove_cached_room(&fixture.room).unwrap();
+    assert!(
+        fixture
+            .store()
+            .load(100)
+            .unwrap()
+            .drafts
+            .as_slice()
+            .is_empty()
+    );
+}
+
+#[test]
+fn durable_draft_capacity_rejects_without_losing_text_and_expiry_scrubs_content() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    for root in 1..=CACHE_DRAFT_LIMIT as u64 {
+        store
+            .put_draft(
+                &CacheDraft {
+                    room: fixture.room.clone(),
+                    thread: Some(root),
+                    reply: None,
+                    text: text("Unsent canary"),
+                    saved_at: 100,
+                },
+                100,
+            )
+            .unwrap();
+    }
+    let extra = CacheDraft {
+        room: fixture.room.clone(),
+        thread: Some(99),
+        reply: None,
+        text: text("Extra"),
+        saved_at: 100,
+    };
+    assert_eq!(store.put_draft(&extra, 100), Err(DataError::Capacity));
+    assert_eq!(
+        store.load(100).unwrap().drafts.as_slice().len(),
+        CACHE_DRAFT_LIMIT
+    );
+    assert!(
+        store
+            .load(100 + CACHE_LIFETIME)
+            .unwrap()
+            .drafts
+            .as_slice()
+            .is_empty()
+    );
+    assert_eq!(
+        store.put_draft(&extra, 100 + CACHE_LIFETIME),
+        Err(DataError::InvalidInput)
+    );
+}
+
+#[test]
+fn room_order_and_newest_fifty_messages_survive_reopen_with_the_existing_byte_ceiling() {
+    let fixture = Fixture::new();
+    let other = fixture.key(8);
+    let rooms = page([room(&other, 100), room(&fixture.room, 100)]);
+    fixture.store().put_rooms(&rooms, 100).unwrap();
+    let mut h = history(&other, 100);
+    h.messages = page((1..=100).map(message));
+    fixture.store().put_history(&h, 100).unwrap();
+    let loaded = fixture.store().load(100).unwrap();
+    assert_eq!(loaded.rooms, rooms);
+    assert_eq!(loaded.histories.as_slice()[0].messages.as_slice().len(), 50);
+    assert_eq!(loaded.histories.as_slice()[0].messages.as_slice()[0].id, 51);
+}
+
+#[test]
+fn only_an_uncertain_unread_marker_can_be_atomically_superseded_by_a_read_intent() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let previous = OperationId::from_local(1);
+    let old = OutboxRecord::from_intent(previous, fixture.room.clone(), &OutboxIntent::MarkUnread)
+        .unwrap();
+    store.enqueue(&old, 100).unwrap();
+    let replacement = OutboxRecord::from_intent(
+        OperationId::from_local(2),
+        fixture.room.clone(),
+        &OutboxIntent::MarkRead { message: 8 },
+    )
+    .unwrap();
+    assert_eq!(
+        store.replace(previous, &replacement, 101),
+        Err(DataError::InvalidInput)
+    );
+    store.set_phase(previous, OutboxPhase::Dispatched).unwrap();
+    let admitted = store.replace(previous, &replacement, 101).unwrap();
+    assert_eq!(admitted.record, replacement);
+    assert_eq!(
+        store.replace(previous, &replacement, 101).unwrap(),
+        admitted
+    );
+    let reopened = fixture.store().load(101).unwrap().outbox;
+    assert_eq!(reopened.as_slice().len(), 1);
+    assert_eq!(reopened.as_slice()[0].record, replacement);
 }

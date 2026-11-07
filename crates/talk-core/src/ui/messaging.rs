@@ -1,12 +1,15 @@
 //! Finite messaging projection. The composition owner reconciles canonical IDs.
 use super::conversation::{Availability, RemoteState};
+use super::markup::Prepared;
 use super::presentation::{Completion, ConversationRef, RequestId};
-use super::{Decision, Page, Text, UnavailableReason};
+use super::{ClipboardImage, Decision, Page, Text, UnavailableReason};
+use crate::preferences::navigation::NavigationRoomKey;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MessageFeature {
     React,
     Reply,
+    PrivateReply,
     Edit,
     Delete,
     Threads,
@@ -15,17 +18,53 @@ pub enum MessageFeature {
     Search,
     Pins,
     Reminders,
+    UpcomingReminders,
     Schedules,
     Forward,
     Files,
+    Voice,
     Typing,
     ReadReceipts,
+    MarkUnread,
+    UnreadFrom,
+    Translation,
+    Summary,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reaction {
     pub emoji: Text<64>,
     pub count: u32,
     pub own: bool,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReactionAuthors {
+    pub message: u128,
+    pub emoji: Text<64>,
+    pub authors: Page<Text<256>, 100>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReactionAuthorsLoad {
+    pub request: RequestId,
+    pub message: u128,
+    pub emoji: Text<64>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadDetails {
+    pub root: u128,
+    pub title: Text<256>,
+    pub notification_level: Option<i8>,
+    pub rename: Decision,
+}
+/// Recent room thread activity, scoped by the enclosing message panel.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadActivity {
+    pub root: u128,
+    pub replies: u16,
+    pub last_initials: Option<Text<16>>,
+    pub recent_initials: Page<Text<16>, 3>,
+    pub last_time: Option<Text<32>>,
+    pub expires: Option<u64>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RichObject {
@@ -40,6 +79,7 @@ pub struct RichObject {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reply {
     pub id: u128,
+    pub external: bool,
     pub author: Text<256>,
     pub text: Text<4096>,
     pub unavailable: bool,
@@ -61,6 +101,8 @@ pub enum SystemEvent {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessageMetadata {
+    /// Background-prepared display data for this exact body, never persisted.
+    pub prepared: Option<Prepared>,
     /// Opaque correlation for the local outbox and a validated own-message
     /// reference. It never establishes identity from text or timestamps.
     pub local_operation: Option<u128>,
@@ -75,14 +117,19 @@ pub struct MessageMetadata {
     pub edited: bool,
     pub deleted: bool,
     pub system: bool,
+    /// The server explicitly marked this attachment as a voice message.
+    pub voice_message: bool,
     pub system_event: SystemEvent,
-    /// Redundant pin/unpin activity, classified from the untranslated system
-    /// tag. Canonical history retains it; the visible timeline omits it.
+    /// Quiet pin and poll activity, classified from the untranslated system
+    /// tag. Canonical history retains it; the visible timeline omits it. The
+    /// field name is retained for compatibility with stored history.
     pub pin_notice: bool,
     /// Effective receipt target for this painted row, extending only through
     /// adjacent hidden pin activity with observed server-page continuity.
     /// Derived by composition; durable content never restores this evidence.
     pub read_through: Option<u128>,
+    /// Exact adjacent predecessor, proven by a live server page in this runtime.
+    pub unread_after: Option<u128>,
     pub replyable: bool,
     pub parent: Option<Reply>,
     pub thread: Option<u128>,
@@ -94,6 +141,7 @@ pub struct MessageMetadata {
 impl Default for MessageMetadata {
     fn default() -> Self {
         Self {
+            prepared: None,
             local_operation: None,
             local_order: None,
             author_key: None,
@@ -103,9 +151,11 @@ impl Default for MessageMetadata {
             edited: false,
             deleted: false,
             system: false,
+            voice_message: false,
             system_event: SystemEvent::Unknown,
             pin_notice: false,
             read_through: None,
+            unread_after: None,
             replyable: false,
             parent: None,
             thread: None,
@@ -122,9 +172,16 @@ pub struct SearchResult {
     pub title: Text<256>,
     pub excerpt: Text<4096>,
 }
+/// Ephemeral signaling observation, scoped by the containing message panel.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypingPerson {
+    pub name: Text<256>,
+    pub author_key: Text<256>,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mention {
     pub identifier: Text<512>,
+    pub author_key: Option<Text<256>>,
     pub label: Text<256>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -133,10 +190,22 @@ pub struct Reminder {
     pub timestamp: u64,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Translation {
+    pub message: u128,
+    pub source: Text<4096>,
+    pub language: Text<64>,
+    pub text: Text<4096>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Scheduled {
     pub id: u128,
     pub body: Text<4096>,
     pub timestamp: u64,
+    /// A zero send time means Talk has stopped trying to send this message.
+    pub failed_original_timestamp: Option<u64>,
+    /// Editing is unavailable when the complete server text exceeds the editor limit.
+    pub editable: bool,
+    pub silent: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UploadedFile {
@@ -198,9 +267,11 @@ pub enum MessageActionError {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FailedDraftKind {
+    File,
     Send,
     Edit(u128),
     Schedule(u64),
+    EditScheduled(u128),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FailedDraft {
@@ -217,6 +288,8 @@ pub struct MessagePanel {
     /// Local durable or session-memory admission, never a server permission grant.
     pub queue_available: bool,
     pub queued_actions: u32,
+    /// A pending room unread mutation keeps automatic read receipts suspended.
+    pub unread_queued: bool,
     /// Latest scoped outbox failure, identified independently from user request
     /// counters so a late rejection cannot complete another action.
     pub action_error: Option<(u64, MessageActionError)>,
@@ -226,6 +299,7 @@ pub struct MessagePanel {
     pub pin_change: Decision,
     pub shared_files: Page<super::presentation::MessageView, 50>,
     pub file_limit: u64,
+    pub media_caption: bool,
     pub uploaded: Option<UploadedFile>,
     pub uploads: Page<UploadView, 8>,
     pub uploads_running: bool,
@@ -237,12 +311,27 @@ pub struct MessagePanel {
     pub file_saved: Option<u64>,
     pub thread_root: Option<u128>,
     pub thread_state: RemoteState,
+    /// Independent root lookup when it lies outside the retained room history.
+    pub thread_root_state: RemoteState,
+    pub thread_root_message: Option<super::presentation::MessageView>,
     pub thread_messages: Page<super::presentation::MessageView, 50>,
+    /// Server cursor for the previous reply page; pages stay bounded.
+    pub thread_older: Option<u128>,
+    pub thread_has_newer: bool,
+    pub thread_activity: Page<ThreadActivity, 50>,
+    pub thread_details: Option<ThreadDetails>,
+    /// Prior observation for the single admitted optimistic thread change.
+    pub thread_change_prior: Option<(RequestId, ThreadDetails, Option<bool>)>,
+    /// Pending local subscription intent; this does not grant server authority.
+    pub thread_following_intent: Option<bool>,
+    pub thread_details_request: Option<RequestId>,
     pub context: ConversationRef,
     /// Foreground mutation state; targeted reads settle their own request slots.
     pub state: RemoteState,
     /// One admitted reaction mutation, cleared only by its correlated result.
     pub reaction_pending: Option<u128>,
+    pub reaction_authors: Page<ReactionAuthors, 16>,
+    pub reaction_authors_load: Option<ReactionAuthorsLoad>,
     pub history: RemoteState,
     pub older: Option<u128>,
     pub latest: Option<u128>,
@@ -256,8 +345,15 @@ pub struct MessagePanel {
     /// One message-navigation request, independent of mutation and history state.
     pub context_load: Option<ContextLoad>,
     pub mentions: Page<Mention, 100>,
+    pub typing: Page<TypingPerson, 16>,
     pub reminders: Page<Reminder, 100>,
     pub scheduled: Page<Scheduled, 100>,
+    /// Only targets for which the server can detect the source language.
+    pub translation_targets: Option<Page<Text<64>, 64>>,
+    pub translations: Page<Translation, 50>,
+    pub translation_pending: Option<u128>,
+    pub translation_failed: Option<u128>,
+    pub summary: Option<Summary>,
     pub result: Option<(RequestId, Completion)>,
 }
 impl MessagePanel {
@@ -266,6 +362,7 @@ impl MessagePanel {
             failed_drafts: Page::empty(),
             queue_available: false,
             queued_actions: 0,
+            unread_queued: false,
             action_error: None,
             pinned_messages: Page::empty(),
             pins_state: RemoteState::Idle,
@@ -273,6 +370,7 @@ impl MessagePanel {
             pin_change: Decision::Unknown,
             shared_files: Page::empty(),
             file_limit: 0,
+            media_caption: false,
             uploaded: None,
             uploads: Page::empty(),
             uploads_running: false,
@@ -283,10 +381,21 @@ impl MessagePanel {
             file_saved: None,
             thread_root: None,
             thread_state: RemoteState::Idle,
+            thread_root_state: RemoteState::Idle,
+            thread_root_message: None,
             thread_messages: Page::empty(),
+            thread_older: None,
+            thread_has_newer: false,
+            thread_activity: Page::empty(),
+            thread_details: None,
+            thread_change_prior: None,
+            thread_following_intent: None,
+            thread_details_request: None,
             context,
             state: RemoteState::Idle,
             reaction_pending: None,
+            reaction_authors: Page::empty(),
+            reaction_authors_load: None,
             history: RemoteState::Idle,
             older: None,
             latest: None,
@@ -299,8 +408,14 @@ impl MessagePanel {
             located: None,
             context_load: None,
             mentions: Page::empty(),
+            typing: Page::empty(),
             reminders: Page::empty(),
             scheduled: Page::empty(),
+            translation_targets: None,
+            translations: Page::empty(),
+            translation_pending: None,
+            translation_failed: None,
+            summary: None,
             result: None,
         }
     }
@@ -312,18 +427,65 @@ impl MessagePanel {
             .map_or(Availability::UNKNOWN, |(_, value)| *value)
     }
 }
+/// Bounded room-local summary state; generated text is never an authority grant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Summary {
+    Offer {
+        from: u128,
+        unread: u32,
+    },
+    Pending {
+        parts: Page<Text<4096>, 4>,
+    },
+    Ready {
+        parts: Page<Text<4096>, 4>,
+        partial: bool,
+    },
+    Empty,
+    Failed,
+}
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ComposeTarget {
     pub reply_to: Option<u128>,
+    pub private_reply: Option<PrivateReplyTarget>,
     pub thread: Option<u128>,
+    /// Create a thread whose root is this new message.
+    pub new_thread: bool,
     pub silent: bool,
+}
+/// Unsubmitted ordinary-room text. Stable identifiers are resolved by the
+/// composition/cache owner; this value grants no mutation authority.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComposerDraft {
+    pub thread: Option<u128>,
+    pub reply: Option<u128>,
+    pub body: Text<4096>,
+}
+/// Displayed quote and durable lookup key; neither grants access to the source.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivateReplyTarget {
+    pub source: NavigationRoomKey,
+    pub message: u128,
+    pub author: Text<128>,
+    pub body: Text<512>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
+    SetFavorite(bool),
+    SetArchived(bool),
+    SetNotificationLevel(u8),
+    VotePoll {
+        poll: u64,
+        options: Page<u16, 100>,
+    },
     RetryQueued(u128),
     DiscardQueued(u128),
     PickUpload,
     StageFiles(Page<Text<16384>, 8>),
+    StageClipboardImage {
+        name: Text<255>,
+        image: ClipboardImage,
+    },
     SendFiles {
         caption: Text<4096>,
         target: ComposeTarget,
@@ -346,6 +508,17 @@ pub enum MessageAction {
     DismissUpload,
     Files,
     Thread(u128),
+    ThreadOlder(u128),
+    ThreadRoot(u128),
+    ThreadInfo(u128),
+    RenameThread {
+        root: u128,
+        title: Text<256>,
+    },
+    ThreadNotifications {
+        root: u128,
+        level: i8,
+    },
     Older,
     Refresh,
     Context(u128),
@@ -363,8 +536,15 @@ pub enum MessageAction {
         emoji: Text<64>,
         add: bool,
     },
+    ReactionAuthors {
+        message: u128,
+        emoji: Text<64>,
+    },
     MarkRead(u128),
     MarkUnread,
+    MarkUnreadFrom(u128),
+    /// Locate the first visible message after the read marker; zero means start.
+    LocateUnreadAfter(u128),
     Typing(bool),
     Mentions(Text<256>),
     Search(Text<256>),
@@ -382,8 +562,21 @@ pub enum MessageAction {
         timestamp: u64,
         target: ComposeTarget,
     },
+    EditScheduled {
+        id: u128,
+        body: Text<4096>,
+        timestamp: u64,
+        silent: bool,
+    },
     Scheduled,
     CancelScheduled(u128),
+    Translate {
+        message: u128,
+        source: Text<4096>,
+        language: Text<64>,
+    },
+    Summarize,
+    DismissSummary,
     Forward {
         message: u128,
         destination: ConversationRef,

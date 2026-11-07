@@ -109,7 +109,7 @@ impl Desktop {
         })
     }
 
-    pub(in crate::presentation::messaging) fn locate_message_smooth(
+    pub(in crate::presentation) fn locate_message_smooth(
         &mut self,
         context: ConversationRef,
         source: u128,
@@ -145,6 +145,7 @@ impl Desktop {
             .as_slice()
             .get(target.item_ix)
             .map(|message| (context, message.local_id));
+        self.highlight_started = self.highlighted_message.map(|_| Instant::now());
         true
     }
 

@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{ErrorKind, Write},
+    io::{ErrorKind, Read, Write},
     os::fd::{AsRawFd, BorrowedFd, OwnedFd},
 };
 
@@ -135,6 +135,23 @@ impl<T: ReceiveData> DataOffer<T> {
         }
         None
     }
+
+    fn read_files(&self, connection: &Connection) -> Option<ClipboardItem> {
+        self.has_mime_type(FILE_LIST_MIME_TYPE).then_some(())?;
+        let pipe = Pipe::new().ok()?;
+        self.inner
+            .receive_data(FILE_LIST_MIME_TYPE.to_owned(), unsafe {
+                BorrowedFd::borrow_raw(pipe.write.as_raw_fd())
+            });
+        drop(pipe.write);
+        connection.flush().ok()?;
+        let mut bytes = Vec::new();
+        pipe.read
+            .take((crate::platform::CLIPBOARD_FILES_MAX_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        crate::platform::clipboard_file_uris(&bytes)
+    }
 }
 
 impl Clipboard {
@@ -206,7 +223,8 @@ impl Clipboard {
         }
 
         let item = offer
-            .read_text(&self.connection)
+            .read_files(&self.connection)
+            .or_else(|| offer.read_text(&self.connection))
             .or_else(|| offer.read_image(&self.connection))?;
 
         self.cached_read = Some(item.clone());

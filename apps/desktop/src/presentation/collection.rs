@@ -1,7 +1,7 @@
 //! Shared loading/recovery presentation. Retained data never establishes authority.
 use super::controls::Skeleton;
 use super::{ButtonStyle, Desktop, LocalAction};
-use gpui::{Context, Div, FontWeight, div, prelude::*, px};
+use gpui::{Context, Div, div, prelude::*};
 use talk_core::ui::presentation::ContentState;
 
 #[derive(Clone, Copy)]
@@ -46,6 +46,7 @@ impl CollectionState {
                     "Inhalte konnten noch nicht geladen werden. Prüfe deine Verbindung und versuche es erneut."
                 },
             ),
+            ContentState::Failed if self.retained => return None,
             ContentState::Failed => (
                 "info",
                 "Aktualisierung fehlgeschlagen.",
@@ -81,75 +82,32 @@ impl Desktop {
             Some(a.scope) == self.snapshot.active_account
                 && a.connection == talk_core::ui::presentation::AccountConnectionState::Connecting
         }) {
-            return div()
-                .px_2()
-                .py_2()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(self.pending_dots(self.theme.muted))
-                .child(self.hint(self.l("Konto wird verbunden …")));
+            return if state.retained {
+                div()
+            } else {
+                self.collection_skeleton(Skeleton::Rows, "collection-connecting")
+            };
         }
         if state.initial_loading() {
-            return self.collection_skeleton(Skeleton::Rows);
+            return self.collection_skeleton(Skeleton::Rows, "collection-rows");
         }
-        if state.state == ContentState::Offline {
-            if !self.offline_notice_visible() {
-                return div();
-            }
-            return div()
-                .flex_none()
-                .px_2()
-                .py_1()
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_size(self.sp(12.))
-                .text_color(self.theme.muted)
-                .child(self.scaled_icon("cloud", 14., self.theme.muted))
-                .child(div().flex_1().child(self.l("Offline")))
-                .child(
-                    self.button(id, "Erneut laden", ButtonStyle::Quiet, true, retry, cx)
-                        .min_h(px(28.))
-                        .py_0()
-                        .text_size(self.sp(12.)),
-                );
+        // Connectivity belongs to the single account banner. A failed refresh
+        // with retained content is also quiet; the owner keeps retrying it.
+        if state.state == ContentState::Offline
+            || state.retained && state.state == ContentState::Failed
+        {
+            return div();
         }
         let Some((symbol, title, detail)) = state.copy() else {
             return div();
         };
-        let t = self.theme;
-        let warning = matches!(
-            state.state,
-            ContentState::Offline | ContentState::Failed | ContentState::Denied
-        );
-        let fg = if warning { t.warning } else { t.muted };
-        div()
-            .flex_none()
-            .rounded(px(8.))
-            .bg(if warning { t.warning_bg } else { t.subtle })
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .items_start()
-                    .gap_2()
-                    .child(self.scaled_icon(symbol, 16., fg))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .text_size(self.sp(12.))
-                            .line_height(self.sp(18.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(fg)
-                            .child(self.l(title)),
-                    ),
-            )
-            .child(self.hint(self.l(detail)))
+        let role = match state.state {
+            ContentState::Failed => super::controls::BannerRole::Error,
+            ContentState::Denied | ContentState::Offline => super::controls::BannerRole::Warning,
+            _ => super::controls::BannerRole::Info,
+        };
+        let label = format!("{} {}", self.l(title), self.l(detail));
+        self.banner_with_icon(role, &label, Some(symbol))
             .when(state.retry(), |d| {
                 d.child(self.button(id, "Erneut laden", ButtonStyle::Secondary, true, retry, cx))
             })
@@ -170,7 +128,7 @@ mod tests {
             let retained = CollectionState::new(state, true);
             assert!(retained.shows_content());
             assert!(!retained.confirmed_empty());
-            assert_eq!(retained.copy().is_some(), state != ContentState::Loading);
+            assert_eq!(retained.copy().is_some(), state == ContentState::Offline);
             assert!(!retained.initial_loading());
             let initial = CollectionState::new(state, false);
             assert!(!initial.shows_content());

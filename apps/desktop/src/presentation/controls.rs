@@ -1,10 +1,18 @@
 //! Private native control vocabulary; all icons are fixed embedded SVG assets.
+mod feedback;
 mod forms;
+mod material;
 mod skeletons;
 mod surfaces;
 use super::{ButtonStyle, Desktop, LocalAction};
+pub(super) use crate::presentation::controls::feedback::BannerRole;
+pub(super) use crate::presentation::controls::forms::RowSize;
+pub(super) use crate::presentation::controls::material::{Materials, Texture};
+pub(super) use crate::presentation::controls::material::{glass, glass_corners};
 pub(super) use crate::presentation::controls::skeletons::Skeleton;
-pub(super) use crate::presentation::controls::surfaces::CONTENT_RADIUS;
+pub(super) use crate::presentation::controls::surfaces::{
+    CONTENT_RADIUS, CardStyle, inner_highlight,
+};
 use gpui::{
     Context, Div, ElementId, FocusHandle, FontWeight, Hsla, KeyDownEvent, SharedString, Stateful,
     div, prelude::*, px, svg,
@@ -219,14 +227,14 @@ fn control_colors(t: super::Theme, style: ButtonStyle, enabled: bool) -> (Hsla, 
             ButtonStyle::Quiet => (gpui::transparent_black(), t.disabled_fg),
             ButtonStyle::Primary | ButtonStyle::Danger => (t.subtle, t.disabled_fg),
             ButtonStyle::Secondary => (t.surface, t.disabled_fg),
-            ButtonStyle::Stage | ButtonStyle::StageDanger => (t.stage_panel, t.stage_disabled),
+            ButtonStyle::Stage | ButtonStyle::StageDanger => (t.stage_panel, t.stage_muted),
         };
     }
     match style {
         ButtonStyle::Primary => (t.accent, t.on_accent),
         ButtonStyle::Danger => (t.danger_bg, t.danger),
         ButtonStyle::Stage => (t.stage_panel, t.stage_text),
-        ButtonStyle::StageDanger => (t.danger, t.danger_bg),
+        ButtonStyle::StageDanger => (gpui::rgb(0xc0483a).into(), gpui::white()),
         ButtonStyle::Quiet => (gpui::transparent_black(), t.sidebar_secondary),
         ButtonStyle::Secondary => (t.surface, t.text),
     }
@@ -245,7 +253,7 @@ fn control_focus_color(t: super::Theme, style: ButtonStyle, enabled: bool) -> Hs
     match (style, enabled) {
         (ButtonStyle::Primary, true) => t.on_accent,
         (ButtonStyle::Danger, true) => t.danger,
-        (ButtonStyle::StageDanger, true) => t.danger_bg,
+        (ButtonStyle::StageDanger, true) => gpui::white(),
         (ButtonStyle::Stage | ButtonStyle::StageDanger, _) => t.stage_text,
         _ => t.focus,
     }
@@ -254,7 +262,14 @@ fn control_focus_color(t: super::Theme, style: ButtonStyle, enabled: bool) -> Hs
 fn switch_colors(t: super::Theme, enabled: bool, value: Option<bool>) -> (Hsla, Hsla) {
     match (enabled, value) {
         (true, Some(true)) => (t.accent, t.on_accent),
-        (true, _) => (t.muted, t.surface),
+        (true, _) => (
+            if t.dark {
+                gpui::rgb(0x3a4a63).into()
+            } else {
+                gpui::rgb(0x8493a8).into()
+            },
+            gpui::white(),
+        ),
         (false, _) => (t.subtle, t.disabled_fg),
     }
 }
@@ -440,7 +455,7 @@ impl gpui::RenderOnce for ReasonTip {
                     .text_color(self.theme.text)
                     .text_size(self.text_size)
                     .line_height(self.line_height)
-                    .shadow_sm()
+                    .shadow(self.theme.elevation(super::theme::Elevation::Raised))
                     .flex()
                     .flex_col()
                     .gap_1()
@@ -754,6 +769,7 @@ impl Desktop {
         let hover_id = id.clone();
         let anchor_id = id.clone();
         let click_id = id.clone();
+        let pulse_id = id.clone();
         let anchors = self.navigation.hints.clone();
         let hovered = self.hover_hints.displayed(&id);
         let hover_epoch = self.hover_hints.epoch();
@@ -761,6 +777,13 @@ impl Desktop {
         let anchor_focus = focus.clone();
         let enabled = availability.enabled && focus.is_some();
         let (bg, fg) = control_colors(t, style, enabled);
+        let pulse_action = matches!(
+            &action,
+            LocalAction::Send
+                | LocalAction::SendThread
+                | LocalAction::MessageIn(_, super::messaging::Action::React(..))
+                | LocalAction::Message(super::messaging::Action::React(..))
+        );
         let room_row = matches!(&action, LocalAction::Navigate(_));
         let navigation_row = matches!(style, ButtonStyle::Quiet)
             && (room_row || matches!(&action, LocalAction::Destination(_)));
@@ -847,6 +870,14 @@ impl Desktop {
                         .rounded(px(corner_radius))
                         .bg(background),
                 )
+            })
+            .when(pulse_action, |d| {
+                let color = if matches!(style, ButtonStyle::Primary) {
+                    t.on_accent.opacity(0.3)
+                } else {
+                    t.accent.opacity(0.18)
+                };
+                d.child(self.action_pulse(pulse_id, color, corner_radius))
             })
             .when(
                 pointer_hovered && enabled && !self.background_inert && geometry.hover_background,
@@ -943,6 +974,17 @@ impl Desktop {
                             kind: super::motion::TriggerKind::Switch(from),
                             admitted: Instant::now(),
                         });
+                    } else if !this.reduced_motion
+                        && !this.update_restart_pending
+                        && !this.projection_blocked
+                        && pulse_action
+                    {
+                        this.motion_trigger = Some(super::motion::MotionTrigger {
+                            id: click_id.clone(),
+                            kind: super::motion::TriggerKind::Pulse,
+                            admitted: Instant::now(),
+                        });
+                        cx.notify();
                     }
                 }))
             })
@@ -961,7 +1003,12 @@ impl Desktop {
         action_name: Option<&'static str>,
         cx: &Context<Self>,
     ) -> ReasonTip {
-        let label = self.l(availability.reason.or(availability.help).unwrap_or(""));
+        let label = match (availability.reason, availability.help) {
+            (Some(reason), Some(help)) if availability.enabled => {
+                format!("{} · {}", self.l(reason), self.l(help))
+            }
+            (reason, help) => self.l(reason.or(help).unwrap_or("")).to_owned(),
+        };
         ReasonTip {
             text_size: self.sp(12.),
             line_height: self.sp(16.),
@@ -979,6 +1026,17 @@ impl Desktop {
             label: label.into(),
             theme: self.theme,
         }
+    }
+
+    pub(super) fn value_tip(
+        &self,
+        id: ElementId,
+        label: impl Into<SharedString>,
+        cx: &Context<Self>,
+    ) -> ReasonTip {
+        let mut tip = self.reason_tip(id, Availability::available().hinted(), Some("Konto"), cx);
+        tip.label = label.into();
+        tip
     }
     pub(super) fn button(
         &self,
@@ -1124,10 +1182,13 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        let availability = availability.into();
-        self.control(id, ButtonStyle::Secondary, availability, action, cx)
+        let mut availability = availability.into();
+        availability.hover_hint = !availability.enabled && !availability.explained_elsewhere;
+        let id = id.into();
+        self.control(id.clone(), ButtonStyle::Secondary, availability, action, cx)
             .min_w_0()
             .justify_between()
+            .border_color(self.theme.input_border)
             .bg(if expanded {
                 self.theme.selected
             } else {
@@ -1157,6 +1218,9 @@ impl Desktop {
                         ))
                     }),
             )
+            .when(!self.background_inert && availability.hover_hint, |d| {
+                d.child(self.reason_tip(id, availability, None, cx))
+            })
     }
     pub(super) fn option_row(
         &self,
@@ -1234,7 +1298,7 @@ impl Desktop {
                 div()
                     .flex_none()
                     .opacity(if availability.pending { 0. } else { 1. })
-                    .child(self.scaled_icon(content.1, 18., foreground)),
+                    .child(self.scaled_icon(content.1, 16., foreground)),
             )
     }
     pub(super) fn button_with_leading_icon(
@@ -1254,13 +1318,35 @@ impl Desktop {
                 div()
                     .flex_none()
                     .opacity(if availability.pending { 0. } else { 1. })
-                    .child(self.scaled_icon(content.1, 18., foreground)),
+                    .child(self.scaled_icon(content.1, 16., foreground)),
             )
             .child(
                 div()
                     .opacity(if availability.pending { 0. } else { 1. })
                     .child(self.l(content.0)),
             )
+    }
+    pub(super) fn menu_item(
+        &self,
+        id: impl Into<ElementId>,
+        content: (&'static str, &'static str),
+        availability: impl Into<Availability>,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        self.style_list_row(
+            self.button_with_leading_icon(
+                id,
+                content,
+                ButtonStyle::Quiet,
+                availability,
+                action,
+                cx,
+            ),
+            RowSize::Regular,
+        )
+        .w_full()
+        .justify_start()
     }
     pub(super) fn icon_button(
         &self,
@@ -1271,7 +1357,7 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        self.styled_icon_button(id, symbol, (style, 34., 8.), availability, action, cx)
+        self.styled_icon_button(id, symbol, (style, 32., 8., 20.), availability, action, cx)
     }
     pub(super) fn round_icon_button(
         &self,
@@ -1282,18 +1368,29 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        self.styled_icon_button(id, symbol, (style, 52., 26.), availability, action, cx)
+        self.styled_icon_button(id, symbol, (style, 52., 26., 20.), availability, action, cx)
+    }
+    pub(super) fn compact_round_icon_button(
+        &self,
+        id: impl Into<ElementId>,
+        symbol: (&'static str, &'static str),
+        style: ButtonStyle,
+        availability: Availability,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        self.styled_icon_button(id, symbol, (style, 34., 17., 16.), availability, action, cx)
     }
     fn styled_icon_button(
         &self,
         id: impl Into<ElementId>,
         symbol: (&'static str, &'static str),
-        geometry: (ButtonStyle, f32, f32),
+        geometry: (ButtonStyle, f32, f32, f32),
         availability: Availability,
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        let (style, extent, radius) = geometry;
+        let (style, extent, radius, icon_size) = geometry;
         let id = id.into();
         let (name, label) = symbol;
         let t = self.control_theme(&id);
@@ -1308,7 +1405,7 @@ impl Desktop {
                 div()
                     .flex_none()
                     .opacity(if availability.pending { 0. } else { 1. })
-                    .child(self.scaled_icon(name, 18., color)),
+                    .child(self.scaled_icon(name, icon_size, color)),
             )
             .when(availability.pending, |d| {
                 d.child(self.pending_overlay(color))
@@ -1333,21 +1430,40 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
+        self.chip_with_availability(id, label, group, Availability::available(), action, cx)
+    }
+
+    pub(super) fn chip_with_availability(
+        &self,
+        id: impl Into<ElementId>,
+        label: impl Into<SharedString>,
+        group: (bool, usize, usize),
+        availability: Availability,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
         let id = id.into();
         let (selected, index, _count) = group;
         let t = self.theme;
         let control = self
-            .button(id, label, ButtonStyle::Quiet, true, action.clone(), cx)
+            .style_segment_option(
+                self.button(
+                    id,
+                    label,
+                    ButtonStyle::Quiet,
+                    availability,
+                    action.clone(),
+                    cx,
+                ),
+                selected,
+            )
             .min_h(px(32.))
             .py_0()
             .px_2()
             .text_size(self.sp(12.))
-            .bg(if selected {
-                t.segment
-            } else {
-                gpui::transparent_black()
-            })
-            .text_color(if selected {
+            .text_color(if !availability.is_enabled() {
+                t.disabled_fg
+            } else if selected {
                 t.text
             } else {
                 t.sidebar_secondary
@@ -1363,25 +1479,102 @@ impl Desktop {
         }
     }
 
+    pub(super) fn style_segment_option<T: Styled>(&self, option: T, selected: bool) -> T {
+        option
+            .bg(if selected {
+                self.theme.segment
+            } else {
+                gpui::transparent_black()
+            })
+            .border_color(if selected {
+                self.theme.input_border
+            } else {
+                gpui::transparent_black()
+            })
+    }
+
     pub fn person_avatar(&self, initials: &str, size: f32) -> Div {
         let seed = initials
             .bytes()
             .fold(0usize, |n, c| n.wrapping_mul(31).wrapping_add(c as usize));
         let (bg, fg) = self.theme.avatar(seed);
         let extent = size * (f32::from(self.scale) / 100.).sqrt();
+        self.avatar_shape(size)
+            .bg(bg)
+            .when(!self.theme.reduced_transparency, |avatar| {
+                let highlight = Hsla {
+                    l: (bg.l + 0.025).min(1.),
+                    ..bg
+                };
+                avatar
+                    .bg(gpui::linear_gradient(
+                        180.,
+                        gpui::linear_color_stop(highlight, 0.),
+                        gpui::linear_color_stop(bg, 1.),
+                    ))
+                    .border_1()
+                    .border_color(self.theme.inner_highlight())
+            })
+            .text_color(fg)
+            .text_size(px((extent * 0.36).max(12.)))
+            .line_height(px((extent * 0.5).max(18.)))
+            .font_weight(FontWeight::MEDIUM)
+            .child(initials.to_owned())
+    }
+
+    pub(super) fn avatar_shape(&self, size: f32) -> Div {
+        let extent = size * (f32::from(self.scale) / 100.).sqrt();
         div()
             .flex_none()
             .size(px(extent))
-            .rounded(px(extent / 3.))
+            .rounded(px(extent * 0.28))
             .flex()
             .items_center()
             .justify_center()
-            .bg(bg)
-            .text_color(fg)
-            .text_size(px(extent * 0.36))
-            .line_height(px(extent * 0.5))
+    }
+
+    pub(super) fn presence_indicator(&self, color: Hsla, background: Hsla) -> Div {
+        div()
+            .flex_none()
+            .size(px(14.))
+            .rounded_full()
+            .border_2()
+            .border_color(background)
+            .bg(color)
+    }
+
+    pub(super) fn count_badge(&self, label: impl Into<SharedString>) -> Div {
+        let label: SharedString = label.into();
+        div()
+            .flex_none()
+            .min_w(px(18.))
+            .h(px(18.))
+            .px_1()
+            .rounded_full()
+            .bg(self.theme.accent)
+            .text_color(self.theme.on_accent)
+            .font_family("Google Sans Code")
             .font_weight(FontWeight::MEDIUM)
-            .child(initials.to_owned())
+            .text_size(px(11.))
+            .line_height(px(14.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_center()
+            .child(label)
+    }
+
+    pub(super) fn style_tonal_chip<T: Styled>(&self, chip: T) -> T {
+        chip.rounded(px(6.))
+            .bg(self.theme.selected)
+            .px_1()
+            .text_size(self.sp(12.))
+            .text_color(self.theme.selected_text)
+    }
+
+    pub(super) fn tonal_chip(&self, label: impl Into<SharedString>) -> Div {
+        let label: SharedString = label.into();
+        self.style_tonal_chip(div().flex_none()).child(label)
     }
     pub fn avatar(&self, initials: &str, large: bool) -> Div {
         self.person_avatar(initials, if large { 72. } else { 36. })
@@ -1639,10 +1832,7 @@ mod tests {
                 for style in [ButtonStyle::Stage, ButtonStyle::StageDanger] {
                     let (bg, fg) = control_colors(t, style, false);
                     let ratio = contrast(bg, fg);
-                    assert!(
-                        (2.0..=3.6).contains(&ratio),
-                        "{p:?}/{a:?}: unavailable stage {ratio}"
-                    );
+                    assert!(ratio >= 4.5, "{p:?}/{a:?}: unavailable stage {ratio}");
                     let (active_bg, active_fg) = control_colors(t, style, true);
                     assert!(contrast(active_bg, active_fg) >= 4.5);
                 }
@@ -1668,15 +1858,12 @@ mod tests {
                     for parent in [t.surface, t.subtle, t.canvas, t.chrome_end] {
                         let drawn = if bg.a == 0. { parent } else { bg };
                         let ratio = contrast(fg, drawn);
-                        assert!(
-                            (2.0..=3.6).contains(&ratio),
-                            "{palette:?}/{appearance:?}: {ratio}"
-                        );
-                        assert!(
-                            ratio < contrast(t.muted, drawn) * 0.7,
-                            "unavailable must remain weaker than active"
-                        );
+                        assert!(ratio >= 4.5, "{palette:?}/{appearance:?}: {ratio}");
                         let (active_bg, active_fg) = control_colors(t, style, true);
+                        assert!(
+                            bg != active_bg || fg != active_fg,
+                            "unavailable and active control styles must differ"
+                        );
                         let active_drawn = if active_bg.a == 0. { parent } else { active_bg };
                         let active_ratio = contrast(active_fg, active_drawn);
                         assert!(

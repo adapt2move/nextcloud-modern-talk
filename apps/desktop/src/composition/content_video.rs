@@ -73,6 +73,7 @@ struct Shared {
     stop: AtomicBool,
     playing: AtomicBool,
     seek: Mutex<Option<u64>>,
+    rate: std::sync::atomic::AtomicU8,
     frame: Mutex<Option<Frame>>,
     snapshot: Mutex<Snapshot>,
     stop_at: Mutex<Option<Instant>>,
@@ -87,6 +88,7 @@ impl Shared {
             stop: AtomicBool::new(false),
             playing: AtomicBool::new(false),
             seek: Mutex::new(None),
+            rate: std::sync::atomic::AtomicU8::new(2),
             frame: Mutex::new(None),
             snapshot: Mutex::new(Snapshot {
                 phase: Phase::Starting,
@@ -153,13 +155,23 @@ pub(super) struct Player {
 }
 impl Player {
     pub fn start(bytes: VideoBytes) -> Result<Self, Error> {
+        Self::start_inner(bytes, false)
+    }
+    pub fn start_audio(bytes: VideoBytes) -> Result<Self, Error> {
+        Self::start_inner(bytes, true)
+    }
+    fn start_inner(bytes: VideoBytes, audio_only: bool) -> Result<Self, Error> {
         if bytes.as_slice().is_empty() {
             return Err(Error::Malformed);
         }
         if bytes.as_slice().len() > MAX_VIDEO_BYTES {
             return Err(Error::TooLarge);
         }
-        let container = pipeline::Container::detect(bytes.as_slice())?;
+        let container = if audio_only {
+            pipeline::Container::detect_audio(bytes.as_slice())?
+        } else {
+            pipeline::Container::detect(bytes.as_slice())?
+        };
         OCCUPIED
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| Error::Busy)?;
@@ -177,7 +189,7 @@ impl Player {
             .spawn(move || {
                 // Declared first: release only after worker/native disposal.
                 let _lease = lease;
-                run(bytes, container, &state);
+                run(bytes, container, &state, audio_only);
             })
             .map_err(|_| Error::WorkerUnavailable)?;
         Ok(Self {
@@ -202,6 +214,15 @@ impl Player {
             .seek
             .lock()
             .map_err(|_| Error::WorkerUnavailable)? = Some(position);
+        self.wake();
+        Ok(())
+    }
+    pub fn set_rate(&self, half_steps: u8) -> Result<(), Error> {
+        self.admit_control()?;
+        if !(2..=4).contains(&half_steps) {
+            return Err(Error::ControlFailed);
+        }
+        self.shared.rate.store(half_steps, Ordering::Release);
         self.wake();
         Ok(())
     }
@@ -267,26 +288,32 @@ fn clamp_seek(position: u64, duration: Option<u64>) -> u64 {
         .min(duration.map_or(MAX_POSITION_MS, |d| d.saturating_sub(1)))
 }
 
-fn run(bytes: VideoBytes, container: pipeline::Container, shared: &Arc<Shared>) {
+fn run(bytes: VideoBytes, container: pipeline::Container, shared: &Arc<Shared>, audio_only: bool) {
     let started = Instant::now();
     if shared.stop.load(Ordering::Acquire) {
         shared.phase(Phase::Stopped);
         return;
     }
-    let pipeline = match pipeline::Pipeline::new(bytes, container, shared.clone()) {
+    let pipeline = match pipeline::Pipeline::new(bytes, container, shared.clone(), audio_only) {
         Ok(pipeline) => pipeline,
         Err(error) => {
             shared.phase(Phase::Failed(error));
             return;
         }
     };
-    run_pipeline(pipeline, shared, started);
+    run_pipeline(pipeline, shared, started, audio_only);
 }
 
-fn run_pipeline(mut pipeline: pipeline::Pipeline, shared: &Arc<Shared>, started: Instant) {
+fn run_pipeline(
+    mut pipeline: pipeline::Pipeline,
+    shared: &Arc<Shared>,
+    started: Instant,
+    audio_only: bool,
+) {
     let mut failure = pipeline.set_playing(false).err();
     let mut desired_playing = false;
-    let mut preroll = false;
+    let mut preroll = audio_only;
+    let mut rate = 2;
     let mut settled = false;
     let mut transition_started = Instant::now();
     let mut sequence = 0u64;
@@ -339,13 +366,18 @@ fn run_pipeline(mut pipeline: pipeline::Pipeline, shared: &Arc<Shared>, started:
         }
         let playing = shared.playing.load(Ordering::Acquire);
         let seek = shared.seek.lock().ok().and_then(|mut seek| seek.take());
+        let requested_rate = shared.rate.load(Ordering::Acquire);
         let ended = shared.snapshot().phase == Phase::Ended;
-        if let Some(position) = seek.or_else(|| (ended && playing).then_some(0)) {
-            if pipeline.seek(position).is_err() {
+        if let Some(position) = seek
+            .or_else(|| (ended && playing).then_some(0))
+            .or_else(|| (settled && requested_rate != rate).then(|| shared.snapshot().position_ms))
+        {
+            rate = requested_rate;
+            if pipeline.seek(position, f64::from(rate) / 2.0).is_err() {
                 failure = Some(Error::ControlFailed);
                 break;
             }
-            preroll = false;
+            preroll = audio_only;
             settled = false;
             transition_started = Instant::now();
             // A seek prerolls a fresh frame even while remaining paused.

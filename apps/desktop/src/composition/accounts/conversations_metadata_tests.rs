@@ -3,6 +3,7 @@ use talk_core::ids::ConversationId;
 
 fn listed(context: ConversationRef) -> protocol::Conversation {
     protocol::Conversation {
+        user_status: None,
         id: context.conversation,
         call_scope: None,
         navigation_key: None,
@@ -30,6 +31,10 @@ fn listed(context: ConversationRef) -> protocol::Conversation {
             join_call: Decision::Unknown,
         },
         unread_messages: Some(0),
+        unread_direct_mention: Some(false),
+        last_read_message: Some(0),
+        unread_mention: None,
+        notification_muted: None,
         last_activity: Some(1),
         call_active: Some(false),
         sensitive: false,
@@ -67,6 +72,10 @@ fn details(room: protocol::Conversation) -> wire::ConversationDetails {
         recording_consent: None,
         has_password: Some(true),
         participant_count: Some(4),
+        breakout_mode: None,
+        breakout_started: None,
+        breakout_child: false,
+        breakout_supported: false,
         controls: page(
             [wire::Setting::Metadata, wire::Setting::Members].map(|setting| {
                 (
@@ -98,6 +107,127 @@ fn known(now: Instant) -> (Accounts, ConversationRef, protocol::Conversation) {
     panel.details = Some(value);
     model.snapshot.conversation_panel = Some(panel);
     (model, context, room)
+}
+
+#[test]
+fn notification_edits_project_immediately_and_restore_the_previous_room_on_failure() {
+    let (mut model, context, _) = known(Instant::now());
+    let before = model
+        .snapshot
+        .conversations
+        .as_slice()
+        .iter()
+        .find(|r| r.context == context)
+        .unwrap()
+        .notification_muted;
+    let change = NotificationChange::Messages {
+        desired: view::NotificationLevel::Never,
+        previous: Some(view::NotificationLevel::Mention),
+        previous_muted: before,
+    };
+    model.project_notification_change(context, change, true);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .notifications,
+        Some(view::NotificationLevel::Never)
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .notification_muted,
+        Some(true)
+    );
+    model.project_notification_change(context, change, false);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .notifications,
+        Some(view::NotificationLevel::Mention)
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .notification_muted,
+        before
+    );
+    let call = NotificationChange::Calls {
+        desired: false,
+        previous: Some(true),
+    };
+    model.project_notification_change(context, call, true);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .call_notifications,
+        Some(false)
+    );
+    model.project_notification_change(context, call, false);
+    assert_eq!(
+        model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap()
+            .call_notifications,
+        Some(true)
+    );
+}
+
+#[test]
+fn participant_index_tickets_retire_on_hints_permission_changes_and_removal() {
+    let now = Instant::now();
+    let (mut model, context, mut room) = known(now);
+    let metadata = &mut model
+        .background
+        .account_mut(context.account)
+        .unwrap()
+        .metadata;
+    let first = metadata.participant_index_ticket(context).unwrap();
+    metadata.hint();
+    let after_hint = metadata.participant_index_ticket(context).unwrap();
+    assert_ne!(first, after_hint);
+    room.actions.list_participants = Decision::Denied;
+    metadata.reconcile(context.account, &list(context, [room.clone()]));
+    assert_eq!(metadata.participant_index_ticket(context), None);
+    room.actions.list_participants = Decision::Allowed;
+    metadata.reconcile(context.account, &list(context, [room.clone()]));
+    let restored = metadata.participant_index_ticket(context).unwrap();
+    assert_ne!(after_hint, restored);
+    metadata.reconcile(context.account, &list(context, []));
+    metadata.reconcile(context.account, &list(context, [room]));
+    assert_ne!(metadata.participant_index_ticket(context), Some(restored));
 }
 
 #[test]
@@ -497,4 +627,39 @@ fn metadata_retention_is_bounded_to_current_room_scope_and_removal_retires_opera
     metadata.reconcile(context.account, &list(context, []));
     assert!(metadata.rooms.is_empty());
     assert!(!metadata.complete(context, OperationId::from_local(5)));
+}
+
+#[test]
+fn status_changes_do_not_invalidate_metadata_and_single_room_replies_retain_current_status() {
+    let context = crate::composition::fixtures::context(1);
+    let mut room = listed(context);
+    room.kind = RoomKind::Direct;
+    let mut metadata = Metadata::default();
+    metadata.reconcile(context.account, &list(context, [room.clone()]));
+    room.user_status = Some(protocol::UserStatus {
+        presence: protocol::UserPresence::Away,
+        icon: Some(text("☕")),
+        message: Some(text("Break")),
+    });
+    assert!(
+        metadata
+            .reconcile(context.account, &list(context, [room.clone()]))
+            .is_empty()
+    );
+    let shown = conversation(&room, context.account);
+    assert_eq!(shown.presence, Presence::Away);
+    assert_eq!(shown.status_message.as_ref().unwrap().as_str(), "Break");
+    room.user_status = None;
+    let retained = conversation_with_existing(&room, context.account, &shown);
+    assert_eq!(retained.presence, Presence::Away);
+    assert_eq!(retained.status_message, shown.status_message);
+    let mut other = shown.clone();
+    other.context.conversation.local += 1;
+    let unrelated = conversation_with_existing(&room, context.account, &other);
+    assert_eq!(unrelated.presence, Presence::Unknown);
+    assert!(unrelated.status_message.is_none());
+    // A fresh list without status clears it instead of using the retained value.
+    let cleared = conversation(&room, context.account);
+    assert_eq!(cleared.presence, Presence::Unknown);
+    assert!(cleared.status_message.is_none());
 }

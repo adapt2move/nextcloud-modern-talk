@@ -1,5 +1,5 @@
 //! A single bounded, scoped result. No implicit retries or invented delivery.
-use super::controls::Availability;
+use super::controls::{Availability, BannerRole};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, state::error_label};
 use gpui::{AnyElement, Context, div, prelude::*, px};
 use std::time::{Duration, Instant};
@@ -11,6 +11,15 @@ enum Tone {
     Info,
     Warning,
     Error,
+}
+impl Tone {
+    fn role(self) -> BannerRole {
+        match self {
+            Self::Info => BannerRole::Info,
+            Self::Warning => BannerRole::Warning,
+            Self::Error => BannerRole::Error,
+        }
+    }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) struct Feedback {
@@ -33,11 +42,7 @@ impl From<Option<Overlay>> for Surface {
 }
 impl Feedback {
     pub(super) fn dismiss_theme(self, theme: super::Theme) -> super::Theme {
-        let foreground = match self.tone {
-            Tone::Info => theme.muted,
-            Tone::Warning => theme.warning,
-            Tone::Error => theme.danger,
-        };
+        let foreground = self.tone.role().foreground(theme);
         super::Theme {
             sidebar_secondary: foreground,
             hover: gpui::Hsla {
@@ -94,6 +99,11 @@ impl Feedback {
             && self
                 .surface
                 .is_none_or(|expected| expected == overlay.into())
+    }
+    fn visible_in_composer(self, context: ConversationRef, thread: bool) -> bool {
+        let surface = thread.then_some(Overlay::Thread);
+        self.visible_in(Some(context), surface)
+            && (!thread || self.surface == Some(Surface::Overlay(Overlay::Thread)))
     }
     pub fn expired(self, now: Instant) -> bool {
         self.expires_at.is_some_and(|deadline| now >= deadline)
@@ -218,6 +228,10 @@ impl Desktop {
         self.feedback
             .is_some_and(|f| f.visible_in(self.snapshot.selected, self.overlay))
     }
+    pub(super) fn composer_feedback_visible(&self, context: ConversationRef, thread: bool) -> bool {
+        self.feedback
+            .is_some_and(|feedback| feedback.visible_in_composer(context, thread))
+    }
     pub(super) fn incoming_visible(&self) -> bool {
         self.snapshot.call.as_ref().is_some_and(|c| {
             c.stage == CallStage::Incoming && Some(c.scope) != self.dismissed_incoming
@@ -230,45 +244,36 @@ impl Desktop {
             && !self.incoming_visible()
     }
     pub(super) fn feedback_view(&self, cx: &Context<Self>) -> AnyElement {
-        let t = self.theme;
+        self.feedback_view_on(self.overlay, cx)
+    }
+    pub(super) fn feedback_view_on(
+        &self,
+        overlay: Option<Overlay>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let Some(f) = self
             .feedback
-            .filter(|f| f.visible_in(self.snapshot.selected, self.overlay))
+            .filter(|f| f.visible_in(self.snapshot.selected, overlay))
         else {
             return div().into_any_element();
         };
-        let (bg, fg, symbol) = match f.tone {
-            Tone::Info => (t.subtle, t.text, "info"),
-            Tone::Warning => (t.warning_bg, t.warning, "info"),
-            Tone::Error => (t.danger_bg, t.danger, "info"),
-        };
-        let banner = div()
+        let role = f.tone.role();
+        let banner = self
+            .banner_with_icon(role, self.l(f.text), Some("info"))
             .relative()
             .occlude()
-            .rounded(px(8.))
-            .bg(bg)
-            .text_color(fg)
-            .p_3()
-            .flex()
-            .items_start()
-            .gap_3()
-            .child(self.scaled_icon(symbol, 18., fg))
             .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .text_size(self.sp(12.))
-                    .line_height(self.sp(18.))
-                    .child(self.l(f.text)),
+                self.icon_button(
+                    "dismiss-feedback",
+                    ("x", "Meldung schließen"),
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::DismissFeedback,
+                    cx,
+                )
+                .size(px(28.))
+                .min_h(px(28.)),
             )
-            .child(self.icon_button(
-                "dismiss-feedback",
-                ("x", "Meldung schließen"),
-                ButtonStyle::Quiet,
-                Availability::available(),
-                LocalAction::DismissFeedback,
-                cx,
-            ))
             .child(self.reveal_region("dismiss-feedback", cx));
         self.reveal((f.text, f.tone as usize), banner)
     }
@@ -396,6 +401,22 @@ mod tests {
         let mut newer_runtime = context(1);
         newer_runtime.account.runtime = RuntimeGeneration::from_local(2);
         assert!(!result.visible_in(Some(newer_runtime), Some(Overlay::Thread)));
+    }
+
+    #[test]
+    fn docked_composer_feedback_stays_on_its_own_surface() {
+        let room = context(1);
+        let thread = Feedback::error("Thread draft")
+            .in_conversation(room)
+            .on_surface(Some(Overlay::Thread));
+        assert!(thread.visible_in_composer(room, true));
+        assert!(!thread.visible_in_composer(room, false));
+        let main = Feedback::error("Main draft")
+            .in_conversation(room)
+            .on_surface(None);
+        assert!(main.visible_in_composer(room, false));
+        assert!(!main.visible_in_composer(room, true));
+        assert!(!thread.visible_in_composer(context(2), true));
     }
 
     #[test]

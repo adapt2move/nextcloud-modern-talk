@@ -10,9 +10,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
     let mut panel = ConversationPanel::new(context);
     panel.details = Some(RoomDetails {
         name: text("Produktteam"),
-        description: Some(text(
-            "Fiktiver Raum für gemeinsame Ideen und Projektabsprachen.",
-        )),
+        description: Some(text("Raum für gemeinsame Ideen und Projektabsprachen.")),
         read_only: Some(false),
         notifications: Some(NotificationLevel::Mention),
         call_notifications: Some(true),
@@ -25,8 +23,13 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         server_default_permissions: Some(511),
         effective_permissions: Some(511),
         lobby: Some(false),
+        lobby_timer: None,
         has_password: Some(false),
         participant_count: Some(7),
+        breakout_mode: None,
+        breakout_started: None,
+        breakout_child: false,
+        breakout_supported: true,
         guest_access: Some(false),
         leave: Decision::Allowed,
         controls: page(
@@ -35,6 +38,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
                 RoomSetting::Avatar,
                 RoomSetting::ReadOnly,
                 RoomSetting::Notifications,
+                RoomSetting::CallNotifications,
                 RoomSetting::Important,
                 RoomSetting::Sensitive,
                 RoomSetting::Expiration,

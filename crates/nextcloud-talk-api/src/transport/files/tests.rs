@@ -8,6 +8,183 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
 #[tokio::test]
+async fn directory_listing_uses_depth_one_and_encoded_account_path() {
+    let body = "<d:multistatus xmlns:d=\"DAV:\"/>";
+    let server = Server::start(vec![(207, body.into(), Duration::ZERO)]).await;
+    let (mut owner, runtime) = client(&server);
+    let path = crate::files::DirectoryPath::parse("/Plans & notes").unwrap();
+    let (_, bytes) = owner
+        .transport
+        .directory_listing(&context(&runtime), &path)
+        .await
+        .unwrap();
+    assert_eq!(bytes, body.as_bytes());
+    let requests = server.requests();
+    let request = &requests[0];
+    assert!(
+        request.starts_with("PROPFIND /remote.php/dav/files/synthetic-user/Plans%20&%20notes ")
+    );
+    assert!(request.to_ascii_lowercase().contains("depth: 1\r\n"));
+    assert!(request.contains("<d:resourcetype/>"));
+}
+
+#[tokio::test]
+async fn client_lists_root_and_projects_only_direct_children() {
+    let body = r#"<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+        <d:response><d:href>/remote.php/dav/files/synthetic-user/</d:href></d:response>
+        <d:response><d:href>/remote.php/dav/files/synthetic-user/Notes/</d:href>
+          <d:propstat><d:prop><d:displayname>Notes</d:displayname>
+          <d:resourcetype><d:collection/></d:resourcetype><oc:fileid>42</oc:fileid>
+          </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+        </d:response></d:multistatus>"#;
+    let server = Server::start(vec![(207, body.into(), Duration::ZERO)]).await;
+    let (mut owner, runtime) = client(&server);
+    let entries = owner
+        .list_directory(
+            &context(&runtime),
+            &crate::files::DirectoryPath::parse("/").unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "Notes");
+    assert!(entries[0].is_directory);
+    assert_eq!(entries[0].file_id.as_deref(), Some("42"));
+}
+
+#[tokio::test]
+async fn directory_page_falls_back_only_for_the_initial_request() {
+    let body = "<d:multistatus xmlns:d=\"DAV:\"/>";
+    let server = Server::start(vec![(207, body.into(), Duration::ZERO)]).await;
+    let (mut owner, runtime) = client(&server);
+    let path = crate::files::DirectoryPath::parse("/").unwrap();
+    let first = owner
+        .list_directory_page(&context(&runtime), &path, 0)
+        .await
+        .unwrap();
+    assert!(first.entries.is_empty());
+    assert!(first.pagination.is_none());
+    let request = &server.requests()[0].to_ascii_lowercase();
+    assert!(request.contains("x-nc-paginate: true\r\n"));
+    assert!(request.contains("x-nc-paginate-count: 40\r\n"));
+    let error = owner
+        .list_directory_page(&context(&runtime), &path, 40)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn directory_listing_rejects_non_multistatus_success() {
+    let server = Server::start(vec![(200, "not a listing".into(), Duration::ZERO)]).await;
+    let (mut owner, runtime) = client(&server);
+    let error = owner
+        .list_directory(
+            &context(&runtime),
+            &crate::files::DirectoryPath::parse("/").unwrap(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::ServerUnavailable);
+}
+
+#[tokio::test]
+async fn unsupported_dav_method_is_not_reported_as_a_transient_failure() {
+    let server = Server::start(vec![(405, String::new(), Duration::ZERO)]).await;
+    let (mut owner, runtime) = client(&server);
+    let error = owner.favorite_files(&context(&runtime)).await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Unsupported);
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn existing_file_share_sends_room_path_and_caption() {
+    let server = Server::start(vec![reply(json!({"id": "42"}))]).await;
+    let (mut owner, runtime) = client(&server);
+    let room = crate::models::RoomToken::parse("room1234").unwrap();
+    let path = crate::files::FilePath::parse("/Documents/a file.txt").unwrap();
+    let id = owner
+        .share_existing_file(
+            &context(&runtime),
+            &room,
+            &path,
+            "reference-1",
+            &crate::files::ShareOptions {
+                voice_message: false,
+                caption: "A caption".into(),
+                reply_to: Some(12),
+                thread: Some(13),
+                silent: true,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(id, "42");
+    let requests = server.requests();
+    let request = &requests[0];
+    assert!(request.starts_with("POST /ocs/v2.php/apps/files_sharing/api/v1/shares?format=json "));
+    let body = request.split_once("\r\n\r\n").unwrap().1;
+    let form: std::collections::HashMap<_, _> = url::form_urlencoded::parse(body.as_bytes())
+        .into_owned()
+        .collect();
+    assert_eq!(form.get("shareType").map(String::as_str), Some("10"));
+    assert_eq!(form.get("shareWith").map(String::as_str), Some("room1234"));
+    assert_eq!(
+        form.get("referenceId").map(String::as_str),
+        Some("reference-1")
+    );
+    assert_eq!(
+        form.get("path").map(String::as_str),
+        Some("/Documents/a file.txt")
+    );
+    let metadata: serde_json::Value = serde_json::from_str(&form["talkMetaData"]).unwrap();
+    assert_eq!(metadata["caption"], "A caption");
+    assert_eq!(metadata["replyTo"], 12);
+    assert_eq!(metadata["threadId"], 13);
+    assert_eq!(metadata["silent"], true);
+}
+
+#[tokio::test]
+async fn existing_file_share_rejects_invalid_caption_before_dispatch() {
+    let server = Server::start(vec![]).await;
+    let (mut owner, runtime) = client(&server);
+    let room = crate::models::RoomToken::parse("room1234").unwrap();
+    let path = crate::files::FilePath::parse("/file.txt").unwrap();
+    let error = owner
+        .share_existing_file(
+            &context(&runtime),
+            &room,
+            &path,
+            "ref",
+            &crate::files::ShareOptions {
+                voice_message: false,
+                caption: "bad\0caption".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Malformed);
+    assert_eq!(server.count(), 0);
+}
+
+#[tokio::test]
+async fn existing_file_share_with_missing_id_is_uncertain() {
+    let server = Server::start(vec![reply(json!({}))]).await;
+    let (mut owner, runtime) = client(&server);
+    let room = crate::models::RoomToken::parse("room1234").unwrap();
+    let path = crate::files::FilePath::parse("/file.txt").unwrap();
+    let error = owner
+        .share_existing_file(&context(&runtime), &room, &path, "ref", &Default::default())
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Uncertain);
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
 async fn first_dav_upload_with_stored_body_and_lost_headers_is_uncertain() {
     const CONTENT: &[u8] = b"stored before response loss";
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -68,6 +68,7 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> bool {
         !draft.retrying
+            && draft.kind != FailedDraftKind::File
             && self.composer.read(cx).content.is_empty()
             && !self.composer.read(cx).composing()
             && self.message_ui.editing.is_none()
@@ -86,7 +87,7 @@ impl Desktop {
         !draft.retrying
             && self.local_message_intents()
             && match draft.kind {
-                FailedDraftKind::Send => self
+                FailedDraftKind::File | FailedDraftKind::Send => self
                     .selected()
                     .is_some_and(|row| decision_allows_intent(row.send, true)),
                 FailedDraftKind::Edit(message) => {
@@ -101,7 +102,7 @@ impl Desktop {
                                 !row.metadata.deleted && row.metadata.edit != Decision::Denied
                             })
                 }
-                FailedDraftKind::Schedule(_) => {
+                FailedDraftKind::Schedule(_) | FailedDraftKind::EditScheduled(_) => {
                     self.message_feature_enabled(MessageFeature::Schedules)
                 }
             }
@@ -175,12 +176,11 @@ impl Desktop {
                     self.message_ui.editing = Some(message);
                 }
                 if let FailedDraftKind::Schedule(timestamp) = draft.kind {
-                    self.open_message_deadline(None, window, cx);
+                    self.message_ui.scheduled_edit = None;
+                    self.open_message_deadline(None, None, window, cx);
                     if let Some(local) = self.settings_port.local_datetime(timestamp) {
-                        self.message_ui.time_input.update(cx, |input, cx| {
-                            input.set_context_value(local.as_str());
-                            cx.notify();
-                        });
+                        self.message_ui.picker =
+                            talk_core::preferences::time::calendar::Calendar::parse(local.as_str());
                     }
                 } else {
                     self.composer.focus_handle(cx).focus(window);
@@ -207,14 +207,14 @@ impl Desktop {
         Some(self.composer_card().p_3().gap_2()
             .child(div().flex().items_center().gap_2()
                 .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(self.l(match draft.kind {
-                    FailedDraftKind::Send => "Senden fehlgeschlagen",
+                    FailedDraftKind::File | FailedDraftKind::Send => "Senden fehlgeschlagen",
                     FailedDraftKind::Edit(_) => "Änderung fehlgeschlagen",
-                    FailedDraftKind::Schedule(_) => "Planung fehlgeschlagen",
+                    FailedDraftKind::Schedule(_) | FailedDraftKind::EditScheduled(_) => "Planung fehlgeschlagen",
                 })))
                 .when(drafts.len() > 1, |row| row
                     .child(self.icon_button(scoped_id("failed-previous", context, 0, 0), ("arrow-left", "Vorheriger Entwurf"), ButtonStyle::Quiet,
                         Availability::available(), action(RecoveryAction::Previous(operation)), cx))
-                    .child(div().font_family("Google Sans Code").text_size(self.sp(11.)).child(format!("{}/{}", index + 1, drafts.len())))
+                    .child(div().font_family("Google Sans Code").text_size(self.sp(12.)).child(format!("{}/{}", index + 1, drafts.len())))
                     .child(self.icon_button(scoped_id("failed-next", context, 0, 0), ("arrow-right", "Nächster Entwurf"), ButtonStyle::Quiet,
                         Availability::available(), action(RecoveryAction::Next(operation)), cx))))
             .child(div().max_h(self.sp(60.)).overflow_hidden().text_size(self.sp(13.)).line_height(self.sp(20.))

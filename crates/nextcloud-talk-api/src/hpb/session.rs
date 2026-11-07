@@ -8,6 +8,27 @@ use tokio_tungstenite::{
     tungstenite::{self, Message, client::IntoClientRequest, protocol::WebSocketConfig},
 };
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+#[derive(Default)]
+struct RetryBudget {
+    failures: usize,
+}
+impl RetryBudget {
+    fn interrupted(&mut self) -> bool {
+        if self.failures >= 4 {
+            return false;
+        }
+        self.failures += 1;
+        true
+    }
+    fn connected_for(&mut self, duration: Duration) {
+        // The account socket can live for days. Bound one unstable episode,
+        // rather than exhausting rejoin forever after four unrelated outages.
+        // A handshake alone cannot renew the budget during a rapid flap.
+        if duration >= Duration::from_secs(30) {
+            self.failures = 0;
+        }
+    }
+}
 struct PendingJoin {
     id: String,
     generation: u64,
@@ -15,9 +36,10 @@ struct PendingJoin {
     cancel: Cancellation,
     reply: oneshot::Sender<Result<(), ErrorKind>>,
 }
-struct Resume {
-    session: PeerSession,
-    secret: Zeroizing<String>,
+#[derive(Clone)]
+pub(super) struct Resume {
+    pub(super) session: PeerSession,
+    pub(super) secret: Zeroizing<String>,
 }
 fn deadline(shared: &Shared, millis: u64) -> Moment {
     let now = shared.account.runtime.now();
@@ -39,7 +61,8 @@ fn socket_error(error: tungstenite::Error) -> ErrorKind {
         // An abrupt TCP/TLS EOF is transport loss. Other protocol violations
         // still terminate the session and never enter the resume path.
         tungstenite::Error::Protocol(
-            tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+            tungstenite::error::ProtocolError::ResetWithoutClosingHandshake
+            | tungstenite::error::ProtocolError::HandshakeIncomplete,
         ) => ErrorKind::Transport,
         tungstenite::Error::Protocol(_) | tungstenite::Error::Utf8(_) => ErrorKind::Malformed,
         _ => ErrorKind::Transport,
@@ -191,7 +214,7 @@ async fn authenticate(
         if value["type"].as_str() == Some("error") {
             if resumed && value["error"]["code"].as_str() == Some("no_such_session") {
                 *resume = None;
-                shared.invalidate_room();
+                shared.invalidate_room(true);
                 continue;
             }
             return Err(wire::failure(&value["error"]));
@@ -257,6 +280,62 @@ async fn retire(socket: &mut Socket, counter: &mut u64) -> Result<(), ErrorKind>
     .await
     .map_err(|_| ErrorKind::Uncertain)?
 }
+pub(super) async fn retire_stopped(
+    shared: &Shared,
+    context: &OperationContext,
+) -> Result<(), ErrorKind> {
+    shared.validate(context)?;
+    let previous = shared
+        .retirement_resume
+        .lock()
+        .map_err(|_| ErrorKind::Uncertain)?
+        .clone()
+        .ok_or(ErrorKind::Uncertain)?;
+    until(shared, context.deadline, &context.cancellation, async {
+        let mut socket = connect(shared, 0).await?;
+        // This cleanup exchange cannot fall back to a fresh hello or process
+        // room events. A matched no_such_session or bye is required evidence.
+        match until(shared, deadline(shared, 3000), &context.cancellation, read(&mut socket)).await {
+            Ok(value) if value["type"].as_str() == Some("welcome") => {},
+            Err(ErrorKind::Deadline) => {},
+            Ok(_) => return Err(ErrorKind::Malformed),
+            Err(error) => return Err(error),
+        }
+        let mut counter = 0;
+        let id = next_id(&mut counter)?;
+        write(&mut socket, json!({"id":id,"type":"hello","hello":{"version":"1.0","resumeid":previous.secret.as_str()}})).await?;
+        let mut value = read(&mut socket).await?;
+        if value["type"].as_str() == Some("welcome") { value = read(&mut socket).await?; }
+        if value["id"].as_str() != Some(&id) { return Err(ErrorKind::WrongScope); }
+        if value["type"].as_str() == Some("error") {
+            if value["error"]["code"].as_str() != Some("no_such_session") {
+                return Err(wire::failure(&value["error"]));
+            }
+        } else {
+            let hello = &value["hello"];
+            if value["type"].as_str() != Some("hello")
+                || !matches!(hello["version"].as_str(), Some("1.0" | "2.0")) {
+                return Err(ErrorKind::Malformed);
+            }
+            if PeerSession::parse(wire::text(&hello["sessionid"], 512)?)? != previous.session
+                || hello.get("userid").is_some_and(|id| id.as_str() != Some(shared.account.user.as_str())) {
+                return Err(ErrorKind::WrongScope);
+            }
+            // A resumed hello may rotate its secret before bye fails. Retain
+            // that bounded secret for the next explicit reconciliation only.
+            if let Some(secret) = hello.get("resumeid") {
+                *shared.retirement_resume.lock().map_err(|_| ErrorKind::Uncertain)? = Some(Resume {
+                    session: previous.session,
+                    secret: Zeroizing::new(wire::text(secret, 2048)?.into()),
+                });
+            }
+            retire(&mut socket, &mut counter).await?;
+        }
+        shared.invalidate_room(false);
+        *shared.retirement_resume.lock().map_err(|_| ErrorKind::Uncertain)? = None;
+        Ok(())
+    }).await
+}
 enum End {
     Retired,
     Reconnect(ErrorKind),
@@ -276,6 +355,7 @@ async fn connected(
     let mut received = 0usize;
     let mut last_received = Instant::now();
     let mut last_ping = Instant::now();
+    let connectivity_epoch = shared.account.runtime.connectivity_epoch();
     let result: Result<End, ErrorKind> = async {
         loop {
             if !shared.live() { return Ok(End::Terminal(ErrorKind::Cancelled)); }
@@ -302,6 +382,7 @@ async fn connected(
             }
             tokio::select! {
                 biased;
+                _ = shared.account.runtime.connectivity_changed(connectivity_epoch) => return Ok(End::Reconnect(ErrorKind::Transport)),
                 _ = tick.tick() => {},
                 command = commands.recv() => {
                     let Some(command) = command else { return Ok(End::Terminal(ErrorKind::Cancelled)); };
@@ -310,8 +391,8 @@ async fn connected(
                             if pending.is_some() { let _ = reply.send(Err(ErrorKind::Busy)); continue; }
                             let value = {
                                 let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
-                                if !state.mcu { let _ = reply.send(Err(ErrorKind::Unsupported)); continue; }
                                 let Some(room) = &state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
+                                if room.purpose == RoomPurpose::Call && !state.mcu { let _ = reply.send(Err(ErrorKind::Unsupported)); continue; }
                                 if room.generation != generation || room.cancellation.is_cancelled() || reply.is_closed() {
                                     let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
                                 }
@@ -324,21 +405,113 @@ async fn connected(
                             if let Err(error) = sent { let _ = reply.send(Err(error)); return Err(error); }
                             pending = Some(PendingJoin { id, generation, deadline: end, cancel, reply });
                         }
-                        Command::Send { generation, peer, sid, signal, deadline: end, cancel, reply } => {
+                        Command::ForceMute { generation, peer, target, deadline: end, cancel, reply } => {
                             let value = {
                                 let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
                                 let Some(room) = &state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
-                                if room.generation != generation || !room.joined || room.cancellation.is_cancelled() || reply.is_closed() {
+                                if room.generation != generation || !room.joined || room.cancellation.is_cancelled() || reply.is_closed() || cancel.is_cancelled() {
                                     let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
                                 }
-                                let Some(selected) = room.selected.iter().find(|p| p.talk == peer && p.sid == sid) else {
+                                let Some(recipient) = room.members.iter().find(|member| member.talk == peer && peer != room.own) else {
                                     let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
                                 };
-                                wire::message(&selected.sfu, sid.as_ref(), signal)
+                                let Some(subject) = room.members.iter().find(|member| member.talk == target && target != room.own) else {
+                                    let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
+                                };
+                                json!({"type":"message","message":{"recipient":{"type":"session","sessionid":recipient.sfu.0.as_str()},"data":{"to":recipient.sfu.0.as_str(),"roomType":"video","type":"control","payload":{"action":"forceMute","peerId":subject.sfu.0.as_str()}}}})
                             };
                             let mut value = value;
                             value["id"] = json!(next_id(counter)?);
                             let sent = until(shared, end, &cancel, write(socket, value)).await;
+                            let failed = sent.as_ref().err().copied();
+                            let _ = reply.send(sent);
+                            if let Some(error) = failed { return Err(error); }
+                        }
+                        Command::Activity { generation, peer, activity, deadline: end, cancel, reply } => {
+                            let value = {
+                                let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
+                                let Some(room) = &state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
+                                if room.generation != generation || !room.joined || room.cancellation.is_cancelled() || reply.is_closed() || cancel.is_cancelled() {
+                                    let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
+                                }
+                                let Some(member) = room.members.iter().find(|member| member.talk == peer && peer != room.own) else {
+                                    let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
+                                };
+                                let (kind, payload) = match activity.encode() {
+                                    Ok(value) => value,
+                                    Err(error) => { let _ = reply.send(Err(error)); continue; }
+                                };
+                                json!({"type":"message","message":{"recipient":{"type":"session","sessionid":member.sfu.0.as_str()},"data":{"to":member.sfu.0.as_str(),"roomType":"video","type":kind,"payload":payload}}})
+                            };
+                            let mut value = value;
+                            value["id"] = json!(next_id(counter)?);
+                            let sent = until(shared, end, &cancel, write(socket, value)).await;
+                            let failed = sent.as_ref().err().copied();
+                            let _ = reply.send(sent);
+                            if let Some(error) = failed { return Err(error); }
+                        }
+                        Command::Typing { generation, started, deadline: end, cancel, reply } => {
+                            let peers = {
+                                let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
+                                let Some(room) = &state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
+                                if room.generation != generation || room.purpose != RoomPurpose::Chat || !room.joined
+                                    || room.cancellation.is_cancelled() || reply.is_closed() {
+                                    let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
+                                }
+                                room.members.iter().filter(|member| member.talk != room.own)
+                                    .map(|member| member.sfu.clone()).collect::<Vec<_>>()
+                            };
+                            let mut result = Ok(());
+                            for peer in peers {
+                                if cancel.is_cancelled() || reply.is_closed() { result = Err(ErrorKind::Cancelled); break; }
+                                let valid = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?.room.as_ref()
+                                    .is_some_and(|room| room.generation == generation && room.joined && !room.cancellation.is_cancelled()
+                                        && room.members.iter().any(|member| member.sfu == peer));
+                                if !valid { continue; }
+                                let mut value = wire::typing_message(&peer, started);
+                                value["id"] = json!(next_id(counter)?);
+                                if let Err(error) = until(shared, end, &cancel, write(socket, value)).await {
+                                    result = Err(error); break;
+                                }
+                            }
+                            let failed = result.as_ref().err().copied();
+                            let _ = reply.send(result);
+                            if let Some(error @ (ErrorKind::Transport | ErrorKind::Deadline)) = failed { return Err(error); }
+                        }
+                        Command::Send { generation, stream, peer, sid, signal, deadline: end, cancel, reply } => {
+                            let stop_screen = matches!(&signal, Some(Signal::StopScreen));
+                            let request_offer = signal.is_none();
+                            let id = next_id(counter)?;
+                            let value = {
+                                let mut state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
+                                let Some(room) = &mut state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
+                                if room.generation != generation || !room.joined || room.cancellation.is_cancelled() || reply.is_closed() {
+                                    let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
+                                }
+                                if matches!(signal, Some(Signal::SendOffer)) && room.purpose == RoomPurpose::Call {
+                                    let Some(member) = room.members.iter().find(|m| m.talk == peer && m.talk != room.own) else {
+                                        let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
+                                    };
+                                    wire::stream_message(&member.sfu, None, signal, stream)
+                                } else {
+                                    let Some(selected) = room.selected.iter_mut().find(|p| p.talk == peer && p.sid == sid && p.stream == stream) else {
+                                        let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
+                                    };
+                                    if request_offer {
+                                        if room.subscription_requests.len() >= 64 { let _ = reply.send(Err(ErrorKind::Busy)); return Err(ErrorKind::Busy); }
+                                        room.subscription_requests.push(id.clone());
+                                        selected.request_id = Some(id.clone());
+                                    }
+                                    wire::stream_message(&selected.sfu, sid.as_ref(), signal, stream)
+                                }
+                            };
+                            let mut value = value;
+                            value["id"] = json!(id);
+                            let mut sent = until(shared, end, &cancel, write(socket, value)).await;
+                            if stop_screen && sent.is_ok() {
+                                let broadcast = json!({"id":next_id(counter)?,"type":"message","message":{"recipient":{"type":"room"},"data":{"type":"unshareScreen","roomType":"screen"}}});
+                                sent = until(shared, end, &cancel, write(socket, broadcast)).await;
+                            }
                             let failed = sent.as_ref().err().copied();
                             let _ = reply.send(sent);
                             if let Some(error) = failed { return Err(error); }
@@ -386,7 +559,16 @@ async fn connected(
                             }
                             continue;
                     }
-                    shared.incoming(&value)?;
+                    if let Err(error) = shared.incoming(&value) {
+                        #[cfg(feature = "backend-test")]
+                        {
+                            let kind = match value["type"].as_str() { Some("event") => "event", Some("message") => "message", Some("error") => "error", Some("bye") => "bye", _ => "extension" };
+                            let target = match value["event"]["target"].as_str() { Some("room") => "room", Some("participants") => "participants", Some("roomlist") => "roomlist", _ => "other" };
+                            let event = match value["event"]["type"].as_str() { Some("join") => "join", Some("leave") => "leave", Some("update") => "update", Some("message") => "message", _ => "other" };
+                            eprintln!("HPB incoming stopped: {kind}/{target}/{event} {error:?}");
+                        }
+                        return Err(error);
+                    }
                 }
             }
         }
@@ -408,21 +590,20 @@ async fn connected(
 pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Command>) {
     let mut resume = None;
     let mut counter = 0u64;
-    let mut failures = 0usize;
+    let mut retries = RetryBudget::default();
     let terminal = loop {
         if !shared.live() {
             break ErrorKind::Cancelled;
         }
-        let result = connect(&shared, failures).await;
+        let result = connect(&shared, retries.failures).await;
         let mut socket = match result {
             Ok(socket) => socket,
-            Err(error @ (ErrorKind::Transport | ErrorKind::Deadline)) if failures < 4 => {
+            Err(error @ (ErrorKind::Transport | ErrorKind::Deadline)) if retries.interrupted() => {
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
                 }
-                failures += 1;
                 let _ = shared.interrupt();
-                let wait = Duration::from_millis(250u64 << failures);
+                let wait = Duration::from_millis(250u64 << retries.failures);
                 if until(
                     &shared,
                     deadline(&shared, wait.as_millis() as u64 + 100),
@@ -442,11 +623,13 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
             Err(error) => break error,
         };
         if let Err(error) = authenticate(&shared, &mut socket, &mut resume, &mut counter).await {
-            if matches!(error, ErrorKind::Transport | ErrorKind::Deadline) && failures < 4 {
+            #[cfg(feature = "backend-test")]
+            eprintln!("HPB authentication stopped: {error:?}");
+            if matches!(error, ErrorKind::Transport | ErrorKind::Deadline) && retries.interrupted()
+            {
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
                 }
-                failures += 1;
                 if shared.interrupt().is_err() {
                     break ErrorKind::Busy;
                 }
@@ -458,11 +641,14 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
             let _ = retire(&mut socket, &mut counter).await;
             break error;
         }
-        match connected(&shared, &mut socket, &mut commands, &mut counter).await {
+        let connected_at = Instant::now();
+        let outcome = connected(&shared, &mut socket, &mut commands, &mut counter).await;
+        retries.connected_for(connected_at.elapsed());
+        match outcome {
             End::Retired => {
                 match retire(&mut socket, &mut counter).await {
                     Ok(()) => {
-                        shared.invalidate_room();
+                        shared.invalidate_room(false);
                         resume = None;
                         if let Ok(mut state) = shared.state.lock() {
                             state.session = None;
@@ -475,11 +661,12 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
                     Err(_) => break ErrorKind::Uncertain,
                 }
             }
-            End::Reconnect(error) if failures < 4 => {
+            End::Reconnect(error) if retries.interrupted() => {
+                #[cfg(feature = "backend-test")]
+                eprintln!("HPB transport interrupted: {error:?}");
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
                 }
-                failures += 1;
                 if shared.interrupt().is_err() {
                     break ErrorKind::Busy;
                 }
@@ -495,10 +682,47 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
             }
         }
     };
+    #[cfg(feature = "backend-test")]
+    eprintln!("HPB session stopped: {terminal:?}");
+    if matches!(
+        terminal,
+        ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::Uncertain
+    ) && let Ok(mut retained) = shared.retirement_resume.lock()
+    {
+        *retained = resume;
+    }
     // Terminal policy/auth errors take precedence as the current state; the
     // session-scoped first transport failure remains a separate safe diagnostic.
     shared.status(LiveState::Stopped(terminal));
     while let Ok(command) = commands.try_recv() {
         command.reject(terminal);
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+
+    #[test]
+    fn separate_healthy_episodes_do_not_exhaust_a_long_lived_account() {
+        let mut budget = RetryBudget::default();
+        for _ in 0..100 {
+            assert!(budget.interrupted());
+            assert!(budget.interrupted());
+            budget.connected_for(Duration::from_secs(30));
+        }
+        assert!(budget.interrupted());
+    }
+
+    #[test]
+    fn handshakes_and_short_flaps_cannot_renew_the_bounded_retry_window() {
+        let mut budget = RetryBudget::default();
+        for _ in 0..4 {
+            assert!(budget.interrupted());
+            budget.connected_for(Duration::from_millis(29_999));
+        }
+        assert!(!budget.interrupted());
+        assert!(!budget.interrupted());
+        assert_eq!(budget.failures, 4);
     }
 }

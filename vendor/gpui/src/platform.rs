@@ -1519,13 +1519,16 @@ pub struct ClipboardItem {
     entries: Vec<ClipboardEntry>,
 }
 
-/// Either a ClipboardString or a ClipboardImage
+/// A clipboard value. File paths retain their native type so they are not
+/// mistaken for ordinary text during an explicit paste.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClipboardEntry {
     /// A string entry
     String(ClipboardString),
     /// An image entry
     Image(Image),
+    /// File paths supplied by the operating system's file-list format.
+    Files(Vec<PathBuf>),
 }
 
 impl ClipboardItem {
@@ -1559,6 +1562,13 @@ impl ClipboardItem {
     pub fn new_image(image: &Image) -> Self {
         Self {
             entries: vec![ClipboardEntry::Image(image.clone())],
+        }
+    }
+
+    /// A native file-list item. Consumers must apply their own admission limits.
+    pub fn new_files(paths: Vec<PathBuf>) -> Self {
+        Self {
+            entries: vec![ClipboardEntry::Files(paths)],
         }
     }
 
@@ -1597,6 +1607,62 @@ impl ClipboardItem {
     /// Get owned versions of the item's entries
     pub fn into_entries(self) -> impl Iterator<Item = ClipboardEntry> {
         self.entries.into_iter()
+    }
+}
+
+/// Parse only the explicitly offered native URI-list format, never plain text.
+/// Keep one extra path so callers can report a selection exceeding eight files.
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+pub(crate) const CLIPBOARD_FILES_MAX_BYTES: usize = 9 * 16_384 + 1024;
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+pub(crate) fn clipboard_file_uris(bytes: &[u8]) -> Option<ClipboardItem> {
+    if bytes.len() > CLIPBOARD_FILES_MAX_BYTES {
+        return Some(ClipboardItem::new_files(Vec::new()));
+    }
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut paths = Vec::new();
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        let url = http_client::Url::parse(line).ok()?;
+        if url.scheme() != "file" {
+            return None;
+        }
+        let path = url.to_file_path().ok()?;
+        if !path.is_absolute() || path.to_str().is_none_or(|p| p.len() > 16_384) {
+            return Some(ClipboardItem::new_files(Vec::new()));
+        }
+        paths.push(path);
+        if paths.len() == 9 {
+            break;
+        }
+    }
+    (!paths.is_empty()).then(|| ClipboardItem::new_files(paths))
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "freebsd")))]
+mod clipboard_file_tests {
+    use super::*;
+    #[test]
+    fn native_file_lists_are_bounded_and_do_not_convert_web_urls() {
+        let item = clipboard_file_uris(
+            b"# copied files\r\nfile:///tmp/a%20b.txt\r\nfile:///tmp/c.txt\r\n",
+        )
+        .unwrap();
+        assert!(
+            matches!(item.entries(), [ClipboardEntry::Files(paths)] if paths == &[PathBuf::from("/tmp/a b.txt"), PathBuf::from("/tmp/c.txt")])
+        );
+        assert!(clipboard_file_uris(b"https://example.com/example.txt\n").is_none());
+        assert!(clipboard_file_uris(b"file:///tmp/a\nhttps://example.com/\n").is_none());
+        let many = b"file:///tmp/a\n".repeat(20);
+        assert!(
+            matches!(clipboard_file_uris(&many).unwrap().entries(), [ClipboardEntry::Files(paths)] if paths.len() == 9)
+        );
+        assert!(
+            matches!(clipboard_file_uris(&vec![0; CLIPBOARD_FILES_MAX_BYTES + 1]).unwrap().entries(), [ClipboardEntry::Files(paths)] if paths.is_empty())
+        );
     }
 }
 

@@ -1374,6 +1374,8 @@ impl PlatformWindow for X11Window {
             || "X11 MapWindow failed.",
             self.0.xcb.map_window(self.0.x_window),
         )?;
+        let client = self.0.state.borrow().client.clone();
+        client.drain_events_after_map();
         Ok(())
     }
 

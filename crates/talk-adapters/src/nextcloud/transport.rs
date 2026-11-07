@@ -19,6 +19,12 @@ impl NetworkRuntime {
             epoch.as_local(),
         )))
     }
+    pub fn connectivity_epoch(&self) -> u64 {
+        self.0.connectivity_epoch()
+    }
+    pub fn network_changed(&self) {
+        self.0.network_changed();
+    }
     pub fn now(&self) -> Moment {
         moment(self.0.now())
     }
@@ -214,6 +220,16 @@ impl Transport {
     ) -> Result<api::signaling::PeerSession, PortError> {
         self.api.own_room_session(&context(c), room).map_err(error)
     }
+    pub(super) async fn retire_stopped_external_meeting(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+    ) -> Result<(), PortError> {
+        self.api
+            .retire_stopped_external_meeting(&context(c), room)
+            .await
+            .map_err(error)
+    }
     pub(super) async fn finish_meeting(
         &mut self,
         c: &OperationContext,
@@ -301,11 +317,61 @@ impl Transport {
     pub(super) fn validate(&self, c: &OperationContext) -> Result<(), PortError> {
         self.api.validate(&context(c)).map_err(error)
     }
-    pub(super) async fn upload_file(
+    pub(super) async fn list_files(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::DirectoryPath,
+    ) -> Result<Vec<api::files::DirectoryEntry>, PortError> {
+        self.api
+            .list_directory(&context(c), &path)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn search_files(
+        &mut self,
+        c: &OperationContext,
+        term: Option<&str>,
+    ) -> Result<Vec<api::files::DirectoryEntry>, PortError> {
+        self.api
+            .search_files(&context(c), term)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn list_files_page(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::DirectoryPath,
+        offset: u64,
+    ) -> Result<api::files::DirectoryPage, PortError> {
+        self.api
+            .list_directory_page(&context(c), &path, offset)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn favorite_files(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<Vec<api::files::DirectoryEntry>, PortError> {
+        self.api.favorite_files(&context(c)).await.map_err(error)
+    }
+    pub(super) async fn share_existing_file(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+        path: &api::files::FilePath,
+        reference: &str,
+        options: &api::files::ShareOptions,
+    ) -> Result<String, PortError> {
+        self.api
+            .share_existing_file(&context(c), room, path, reference, options)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn upload_file<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
         &mut self,
         c: &OperationContext,
         path: api::files::FilePath,
-        file: tokio::fs::File,
+        file: R,
         size: u64,
         progress: talk_core::protocol::content::TransferProgress,
     ) -> Result<(), PortError> {
@@ -352,6 +418,16 @@ impl Transport {
     ) -> Result<Vec<u8>, PortError> {
         self.api.image(&context(c), request).await.map_err(error)
     }
+    pub(super) async fn reference_thumbnail(
+        &mut self,
+        c: &OperationContext,
+        url: &str,
+    ) -> Result<Vec<u8>, PortError> {
+        self.api
+            .reference_thumbnail(&context(c), url)
+            .await
+            .map_err(error)
+    }
     pub(super) async fn video(
         &mut self,
         c: &OperationContext,
@@ -362,6 +438,13 @@ impl Transport {
             .video(&context(c), path, format)
             .await
             .map_err(error)
+    }
+    pub(super) async fn voice_audio(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::FilePath,
+    ) -> Result<Vec<u8>, PortError> {
+        self.api.voice_audio(&context(c), path).await.map_err(error)
     }
     #[cfg(any(test, target_os = "macos"))]
     pub(super) async fn preview_pdf(
@@ -382,6 +465,37 @@ impl Transport {
             .await
             .map_err(error)
     }
+    // Draft operations stay behind this transport owner; the content owner applies
+    // room capability and moderator checks before exposing them to presentation.
+    pub(super) async fn poll_drafts(
+        &mut self,
+        c: &OperationContext,
+        room: &api::models::RoomToken,
+    ) -> Result<Vec<api::poll::Draft>, PortError> {
+        self.api.poll_drafts(&context(c), room).await.map_err(error)
+    }
+    pub(super) async fn poll_draft_mutation(
+        &mut self,
+        c: &OperationContext,
+        room: &api::models::RoomToken,
+        command: api::poll::Command,
+    ) -> Result<api::poll::Draft, PortError> {
+        self.api
+            .poll_draft_mutation(&context(c), room, command)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn delete_poll_draft(
+        &mut self,
+        c: &OperationContext,
+        room: &api::models::RoomToken,
+        poll: u64,
+    ) -> Result<(), PortError> {
+        self.api
+            .delete_poll_draft(&context(c), room, poll)
+            .await
+            .map_err(error)
+    }
     pub(super) fn file_link(&self, file: u64) -> Result<String, PortError> {
         self.api.file_link(file).map_err(error)
     }
@@ -391,6 +505,44 @@ impl Transport {
         request: api::Request,
     ) -> Result<api::Reply, PortError> {
         self.api.request(&context(c), request).await.map_err(error)
+    }
+    pub(super) async fn own_status_details(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<api::presence::StatusDetails, PortError> {
+        self.api
+            .own_status_details(&context(c))
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn predefined_statuses(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<Vec<api::presence::PredefinedStatus>, PortError> {
+        self.api
+            .predefined_statuses(&context(c))
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn set_status_message(
+        &mut self,
+        c: &OperationContext,
+        change: &api::presence::MessageChange,
+    ) -> Result<(), PortError> {
+        self.api
+            .set_status_message(&context(c), change)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn set_own_user_status(
+        &mut self,
+        c: &OperationContext,
+        choice: api::presence::StatusChoice,
+    ) -> Result<api::presence::UserStatus, PortError> {
+        self.api
+            .set_own_user_status(&context(c), choice)
+            .await
+            .map_err(error)
     }
     pub(super) async fn own_user_status(
         &mut self,
@@ -406,6 +558,39 @@ impl Transport {
             .message_notifications(&context(c))
             .await
             .map_err(error)
+    }
+    pub(super) fn watch_typing(
+        &self,
+        c: &OperationContext,
+        room: RoomToken,
+    ) -> Result<api::typing::Watch, PortError> {
+        self.api.watch_typing(&context(c), room).map_err(error)
+    }
+    pub(super) fn typing_activity(
+        &self,
+        c: &OperationContext,
+        watch: &api::typing::Watch,
+        active: bool,
+    ) -> Result<(), PortError> {
+        watch
+            .activity(&context(c), active)
+            .map_err(|value| self.error(kind(value)))
+    }
+    pub(super) fn typing_people(
+        &self,
+        c: &OperationContext,
+        watch: &api::typing::Watch,
+        room: &RoomToken,
+    ) -> Vec<api::typing::Person> {
+        watch.people(scope(c.scope), room)
+    }
+    pub(super) fn typing_matches(
+        &self,
+        c: &OperationContext,
+        watch: &api::typing::Watch,
+        room: &RoomToken,
+    ) -> bool {
+        watch.matches(scope(c.scope), room)
     }
     pub(super) async fn poll_live_events(
         &mut self,
@@ -507,7 +692,18 @@ fn request(
     match route {
         "ocs/v2.php/cloud/user" if get => return Ok(R::Account),
         "ocs/v2.php/cloud/capabilities" if get => return Ok(R::Capabilities),
-        "ocs/v2.php/apps/spreed/api/v4/room" if get => return Ok(R::Rooms),
+        "ocs/v2.php/apps/spreed/api/v4/room" if get => {
+            return Ok(
+                if query
+                    .iter()
+                    .any(|(key, value)| *key == "includeStatus" && value == "true")
+                {
+                    R::RoomsWithStatus
+                } else {
+                    R::Rooms
+                },
+            );
+        }
         "ocs/v2.php/apps/spreed/api/v4/room" if post => {
             return Ok(R::CreateGroup {
                 name: v("roomName")?,
@@ -619,7 +815,18 @@ fn project(reply: api::Reply) -> Result<Response, ErrorKind> {
     let mut last_given = None;
     let mut common_read = None;
     let data = match reply {
-        R::Chat(_) | R::Conversation(_) => return Err(ErrorKind::Malformed),
+        R::Chat(_)
+        | R::Conversation(_)
+        | R::SearchProvider(_)
+        | R::Reference(_)
+        | R::CreationPresets(_)
+        | R::TranslationLanguages(_)
+        | R::Translated(_)
+        | R::FederationInvitations(_)
+        | R::FederatedRoomCapabilities(_)
+        | R::TaskProcessing(_) => {
+            return Err(ErrorKind::Malformed);
+        }
         R::Account(v) => v.project(),
         R::Capabilities(v) => v.project(),
         R::Room(v) => v.project(),

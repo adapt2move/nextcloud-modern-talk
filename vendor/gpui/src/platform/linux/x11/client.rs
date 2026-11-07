@@ -226,6 +226,20 @@ impl X11ClientStatePtr {
         self.0.upgrade().map(X11Client)
     }
 
+    pub fn drain_events_after_map(&self) {
+        let Some(client) = self.get_client() else {
+            return;
+        };
+        // A checked XCB request can read MapNotify into its internal queue and
+        // consume the fd readiness edge before the event source runs. Drain on
+        // the next idle turn, after GPUI has installed the window and callbacks.
+        // This is one callback per map, not a polling timer or a retained window.
+        client.0.borrow().loop_handle.insert_idle(|client| {
+            let connection = client.0.borrow().xcb_connection.clone();
+            client.process_x11_events(&connection).log_err();
+        });
+    }
+
     pub fn drop_window(&self, x_window: u32) {
         let Some(client) = self.get_client() else {
             return;

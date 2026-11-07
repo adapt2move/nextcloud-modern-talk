@@ -25,7 +25,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         "Mara Fischer",
         "MF",
         "09:41",
-        "Die neue Meetingecke — ein fiktiver Entwurf für unsere Abstimmung.",
+        "Die neue Meetingecke — ein Entwurf für unsere Abstimmung.",
         false,
     );
     photo.metadata.rich = page([RichObject {
@@ -59,7 +59,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         "Alex Sommer",
         "AS",
         "09:44",
-        "Fiktive Umfrage für die Oberflächenprüfung",
+        "Was haltet ihr von den Entwürfen?",
         true,
     );
     poll.metadata.rich = page([RichObject {
@@ -114,12 +114,12 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         account: Some(context.account),
         context: Some(context),
         self_name: Some(text("Alex Sommer")),
-        organization: Some(text("Nord Studio · Beispieldaten")),
+        organization: Some(text("Nord Studio")),
         assets: page(assets),
         poll_create: ready,
         polls: page([PollView {
             id: 9001,
-            question: text("Fiktive Umfrage: Welcher Entwurf gefällt euch?"),
+            question: text("Welcher Entwurf gefällt euch?"),
             options: page([
                 PollOption {
                     id: 0,
@@ -145,6 +145,119 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         }]),
         ..Default::default()
     };
+    if let Some(panel) = snapshot.message_panel.as_mut() {
+        panel.media_caption = true;
+    }
+}
+
+pub(super) fn polls(snapshot: &mut PresentationSnapshot) {
+    let available = Availability {
+        implemented: true,
+        server: FeatureSupport::Supported,
+        allowed: Decision::Allowed,
+    };
+    snapshot.messages = page(
+        snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .filter(|message| message.local_id == 103)
+            .cloned(),
+    );
+    snapshot.content_panel.poll_drafts_manage = available;
+    snapshot.content_panel.poll_drafts_edit = available;
+    snapshot.content_panel.poll_drafts = page([PollDraftEntry {
+        id: 9002,
+        draft: PollDraft {
+            question: text("Wo treffen wir uns?"),
+            options: page([text("Im Studio"), text("Im Garten")]),
+            max_votes: 1,
+            hidden_results: false,
+        },
+        max_votes: 1,
+    }]);
+}
+
+pub(super) fn poll_details(snapshot: &mut PresentationSnapshot) {
+    let Some(mut poll) = snapshot.content_panel.polls.as_slice().first().cloned() else {
+        return;
+    };
+    poll.question = text("Was soll unser gemeinsamer Raum bieten?");
+    poll.closed = true;
+    poll.max_votes = 0;
+    poll.voters = Some(6);
+    poll.options = page(
+        [
+            ("Helle Meetingecke", 4, true),
+            ("Ruhiges Studio", 3, false),
+            ("Offene Werkbank", 2, false),
+            ("Pflanzen und Tageslicht", 2, true),
+            ("Kleine Bibliothek", 1, false),
+            ("Flexible Tische", 1, false),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(id, (label, votes, own))| PollOption {
+            id: id as u16,
+            label: text(label),
+            votes: Some(votes),
+            own,
+        }),
+    );
+    poll.details = page([
+        PollVoter {
+            name: text("Alex Sommer"),
+            option: 0,
+        },
+        PollVoter {
+            name: text("Mara Fischer"),
+            option: 1,
+        },
+        PollVoter {
+            name: text("Luis Vega"),
+            option: 3,
+        },
+    ]);
+    poll.details_complete = true;
+    snapshot.content_panel.polls = page([poll]);
+}
+
+pub(super) fn voice(snapshot: &mut PresentationSnapshot) {
+    let context = snapshot.selected.unwrap();
+    let mut recording = message(109, "Mara Fischer", "MF", "09:48", "", false);
+    recording.metadata.voice_message = true;
+    recording.metadata.rich = page([RichObject {
+        id: Some(text("109")),
+        mime_type: Some(text("audio/ogg")),
+        size: Some(240_000),
+        placeholder: text("file"),
+        kind: text("file"),
+        name: text("Sprachnachricht.ogg"),
+        link: None,
+    }]);
+    snapshot.messages = page([recording]);
+    if let Some(panel) = snapshot.message_panel.as_mut() {
+        let _ = panel.features.try_push((
+            talk_core::ui::messaging::MessageFeature::Voice,
+            Availability {
+                implemented: true,
+                server: FeatureSupport::Supported,
+                allowed: Decision::Allowed,
+            },
+        ));
+    }
+    snapshot.content_panel.voice_playback = Some(VoicePlaybackView {
+        attachment: AttachmentRef {
+            context,
+            message: 109,
+            placeholder: text("file"),
+        },
+        state: PlaybackState::Paused,
+        position_ms: 11_000,
+        duration_ms: Some(38_000),
+        speed_half_steps: 2,
+        stop_unconfirmed: false,
+    });
 }
 
 pub(super) fn attachments(snapshot: &mut PresentationSnapshot) {
@@ -216,7 +329,7 @@ pub(super) fn transfer(snapshot: &mut PresentationSnapshot) {
             message: 102,
             placeholder: text("document"),
         },
-        name: text("Fiktive Übertragungsansicht.pdf"),
+        name: text("Raumkonzept.pdf"),
         received: 3 * 1024 * 1024,
         total: Some(8 * 1024 * 1024),
         state: DownloadState::Transferring,
@@ -225,9 +338,164 @@ pub(super) fn transfer(snapshot: &mut PresentationSnapshot) {
 
 pub(super) fn action(
     snapshot: &mut PresentationSnapshot,
+    request: RequestId,
     action: ContentAction,
 ) -> Result<(), SubmitError> {
     match action {
+        ContentAction::ListFiles(path) => {
+            cloud_files(snapshot, path.as_str());
+            Ok(())
+        }
+        ContentAction::ListFilesPage { path, .. } => {
+            cloud_files(snapshot, path.as_str());
+            Ok(())
+        }
+        ContentAction::RecentFiles | ContentAction::FavoriteFiles => {
+            let section = if matches!(action, ContentAction::RecentFiles) {
+                talk_core::ui::content::FileSection::Recent
+            } else {
+                talk_core::ui::content::FileSection::Favorites
+            };
+            cloud_files(snapshot, "/");
+            if let Some(browser) = &mut snapshot.content_panel.file_browser {
+                browser.section = section;
+            }
+            Ok(())
+        }
+        ContentAction::SearchFiles(term) => {
+            cloud_files(snapshot, "/");
+            if let Some(browser) = &mut snapshot.content_panel.file_browser {
+                browser.section = talk_core::ui::content::FileSection::Search;
+                let term = term.as_str().to_lowercase();
+                browser.entries = page(
+                    browser
+                        .entries
+                        .as_slice()
+                        .iter()
+                        .filter(|entry| entry.name.as_str().to_lowercase().contains(&term))
+                        .cloned(),
+                );
+            }
+            Ok(())
+        }
+        ContentAction::CloseFileBrowser => {
+            snapshot.content_panel.file_browser = None;
+            Ok(())
+        }
+        ContentAction::SortFiles(sort) => {
+            if let Some(browser) = &mut snapshot.content_panel.file_browser {
+                browser.sort = sort;
+            }
+            Ok(())
+        }
+        ContentAction::StageCloudFile { context, path } => {
+            let entry = snapshot
+                .content_panel
+                .file_browser
+                .as_ref()
+                .filter(|browser| browser.account == context.account)
+                .and_then(|browser| {
+                    browser
+                        .entries
+                        .as_slice()
+                        .iter()
+                        .find(|item| item.path == path && !item.directory)
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            let size = entry.size;
+            let name = entry.name.clone();
+            let panel = snapshot
+                .message_panel
+                .as_mut()
+                .filter(|panel| panel.context == context)
+                .ok_or(SubmitError::StaleScope)?;
+            if panel
+                .uploads
+                .as_slice()
+                .iter()
+                .any(|item| item.name == name)
+            {
+                return Ok(());
+            }
+            panel
+                .uploads
+                .try_push(talk_core::ui::messaging::UploadView {
+                    id: 8000 + panel.uploads.as_slice().len() as u64,
+                    name,
+                    bytes: size,
+                    state: talk_core::ui::messaging::UploadState::Selected,
+                    submitted: false,
+                    transferred: 0,
+                    uploaded: true,
+                    server_message: None,
+                })
+                .map_err(|_| SubmitError::Busy)?;
+            Ok(())
+        }
+        ContentAction::StageCloudFiles { context, paths } => {
+            for path in paths.as_slice() {
+                self::action(
+                    snapshot,
+                    request,
+                    ContentAction::StageCloudFile {
+                        context,
+                        path: path.clone(),
+                    },
+                )?;
+            }
+            Ok(())
+        }
+        ContentAction::RefreshPollDrafts if snapshot.content_panel.poll_drafts_manage.enabled() => {
+            snapshot.content_panel.poll_state = talk_core::ui::conversation::RemoteState::Idle;
+            Ok(())
+        }
+        ContentAction::CreatePoll(draft) if snapshot.content_panel.poll_create.enabled() => {
+            // Disconnected UI fixtures never contact a server; this receipt only
+            // exercises the native dialog's accepted-state transition.
+            println!(
+                "UI_POLL_FIXTURE create options={} no_backend=true",
+                draft.options.as_slice().len()
+            );
+            snapshot.content_panel.poll_state = talk_core::ui::conversation::RemoteState::Idle;
+            snapshot.content_panel.result = Some((request, Completion::ServerAccepted));
+            Ok(())
+        }
+        ContentAction::Vote { poll, options } => {
+            let mut polls = snapshot.content_panel.polls.as_slice().to_vec();
+            let current = polls
+                .iter_mut()
+                .find(|entry| entry.id == poll && !entry.closed && entry.vote.enabled())
+                .ok_or(SubmitError::StaleScope)?;
+            current.options = page(
+                current
+                    .options
+                    .as_slice()
+                    .iter()
+                    .cloned()
+                    .map(|mut option| {
+                        option.own = options.as_slice().contains(&option.id);
+                        option
+                    }),
+            );
+            snapshot.content_panel.polls = page(polls);
+            snapshot.content_panel.result = Some((request, Completion::ServerAccepted));
+            println!("UI_POLL_FIXTURE vote poll={poll} no_backend=true");
+            Ok(())
+        }
+        ContentAction::ClosePoll(poll) => {
+            let mut polls = snapshot.content_panel.polls.as_slice().to_vec();
+            let current = polls
+                .iter_mut()
+                .find(|entry| entry.id == poll && !entry.closed && entry.close.enabled())
+                .ok_or(SubmitError::StaleScope)?;
+            current.closed = true;
+            current.vote.allowed = Decision::Denied;
+            current.close.allowed = Decision::Denied;
+            snapshot.content_panel.polls = page(polls);
+            snapshot.content_panel.result = Some((request, Completion::ServerAccepted));
+            println!("UI_POLL_FIXTURE close poll={poll} no_backend=true");
+            Ok(())
+        }
         ContentAction::Load(target)
             if snapshot
                 .content_panel
@@ -268,6 +536,67 @@ pub(super) fn action(
             snapshot.content_panel.preview = None;
             Ok(())
         }
+        ContentAction::SeekVoice {
+            attachment,
+            position_ms,
+        } => {
+            let voice = snapshot
+                .content_panel
+                .voice_playback
+                .as_mut()
+                .filter(|voice| {
+                    snapshot.selected == Some(attachment.context) && voice.attachment == attachment
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            voice.position_ms = position_ms.min(voice.duration_ms.unwrap_or(0));
+            println!(
+                "UI_VOICE_FIXTURE seek_ms={} no_backend=true",
+                voice.position_ms
+            );
+            Ok(())
+        }
+        ContentAction::SpeedVoice {
+            attachment,
+            speed_half_steps,
+        } => {
+            let voice = snapshot
+                .content_panel
+                .voice_playback
+                .as_mut()
+                .filter(|voice| {
+                    snapshot.selected == Some(attachment.context) && voice.attachment == attachment
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            if !(2..=4).contains(&speed_half_steps) {
+                return Err(SubmitError::StaleScope);
+            }
+            voice.speed_half_steps = speed_half_steps;
+            Ok(())
+        }
+        ContentAction::PlayVoice(attachment) => {
+            let voice = snapshot
+                .content_panel
+                .voice_playback
+                .as_mut()
+                .filter(|voice| {
+                    snapshot.selected == Some(attachment.context) && voice.attachment == attachment
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            voice.state = PlaybackState::Playing;
+            Ok(())
+        }
+        ContentAction::PauseVoice(attachment) => {
+            let voice = snapshot
+                .content_panel
+                .voice_playback
+                .as_mut()
+                .filter(|voice| {
+                    snapshot.selected == Some(attachment.context) && voice.attachment == attachment
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            voice.state = PlaybackState::Paused;
+            Ok(())
+        }
         ContentAction::Acknowledge => {
             snapshot.content_panel.result = None;
             Ok(())
@@ -286,13 +615,152 @@ pub(super) fn action(
     }
 }
 
+pub(super) fn cloud_files(snapshot: &mut PresentationSnapshot, path: &str) {
+    use talk_core::ui::content::{CloudFileView, FileBrowserView};
+    let Some(account) = snapshot.active_account else {
+        return;
+    };
+    let names: &[(&str, bool, Option<u64>)] = if path == "/" {
+        &[
+            ("Entwürfe", true, None),
+            ("Team", true, None),
+            ("Projektübersicht.pdf", false, Some(1_240_000)),
+            ("Workshop.png", false, Some(485_000)),
+        ]
+    } else {
+        &[
+            ("Konzept.pdf", false, Some(288_000)),
+            ("Notizen.txt", false, Some(4200)),
+        ]
+    };
+    snapshot.content_panel.file_browser = Some(FileBrowserView {
+        account,
+        path: text(path),
+        section: talk_core::ui::content::FileSection::All,
+        sort: talk_core::ui::content::FileSort::Name,
+        generation: 1,
+        pagination: None,
+        search_available: true,
+        favorites_available: true,
+        has_listing: true,
+        loading: false,
+        offline: false,
+        error: None,
+        entries: page(names.iter().map(|(name, directory, size)| CloudFileView {
+            name: text(name),
+            path: text(&format!(
+                "{}{}{}",
+                if path == "/" { "" } else { path },
+                "/",
+                name
+            )),
+            directory: *directory,
+            size: *size,
+            modified: Some(text("04 Nov 2026")),
+            modified_unix: Some(1793750400),
+            mime: if name.ends_with(".png") {
+                Some(text("image/png"))
+            } else if name.ends_with(".pdf") {
+                Some(text("application/pdf"))
+            } else {
+                None
+            },
+            file_id: match *name {
+                "Workshop.png" => Some(text("7101")),
+                "Projektübersicht.pdf" => Some(text("7102")),
+                _ => None,
+            },
+        })),
+    });
+    let mut assets: Vec<_> = snapshot
+        .content_panel
+        .assets
+        .as_slice()
+        .iter()
+        .filter(|asset| !matches!(asset.target, AssetTarget::CloudFile { .. }))
+        .cloned()
+        .collect();
+    if path == "/" {
+        for (file, name, key) in [(7101, "Workshop.png", 4), (7102, "Projektübersicht.pdf", 5)] {
+            assets.push(AssetView {
+                target: AssetTarget::CloudFile {
+                    account,
+                    path: text(&format!("/{name}")),
+                    file,
+                    generation: 1,
+                },
+                state: AssetState::Ready { key },
+                emoji: None,
+                color: None,
+                document_pages: None,
+            });
+        }
+    }
+    snapshot.content_panel.assets = page(assets);
+}
+
 pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::content::ImageJob> {
+    if scenario == Some("chat-cloud-files") {
+        let mut jobs = images(Some("chat-content"));
+        for (file, name, key, bytes) in [
+            (
+                7101,
+                "Workshop.png",
+                4,
+                include_bytes!("../../../assets/fixtures/content-photo.png").as_slice(),
+            ),
+            (
+                7102,
+                "Projektübersicht.pdf",
+                5,
+                include_bytes!("../../../assets/fixtures/content-document.png").as_slice(),
+            ),
+        ] {
+            jobs.push(super::super::accounts::content::ImageJob {
+                cached: false,
+                local: None,
+                attachment: None,
+                preview_generation: None,
+                account: scope(),
+                target: AssetTarget::CloudFile {
+                    account: scope(),
+                    path: text(&format!("/{name}")),
+                    file,
+                    generation: 1,
+                },
+                key,
+                bytes: talk_core::protocol::content::ImageBytes::new(bytes.to_vec())
+                    .expect("bounded authored fixture"),
+            });
+        }
+        return jobs;
+    }
+    if scenario == Some("reference-preview") {
+        return vec![super::super::accounts::content::ImageJob {
+            cached: false,
+            local: None,
+            attachment: None,
+            preview_generation: None,
+            account: scope(),
+            target: AssetTarget::Reference {
+                context: context(1),
+                message: 1,
+                ordinal: 0,
+            },
+            key: 42,
+            bytes: talk_core::protocol::content::ImageBytes::new(
+                include_bytes!("../../../assets/fixtures/content-photo.png").to_vec(),
+            )
+            .expect("bounded authored fixture"),
+        }];
+    }
     if !matches!(
         scenario,
         Some(
             "chat-content"
                 | "chat-attachments"
                 | "chat-upload"
+                | "chat-upload-preview"
                 | "chat-upload-uncertain"
                 | "chat-content-progress"
                 | "chat-content-loading"
@@ -364,10 +832,10 @@ pub(super) fn pending_upload(snapshot: &mut PresentationSnapshot, uncertain: boo
     };
     let mut row = snapshot.messages.as_slice()[0].clone();
     row.local_id = file.message_id();
-    row.author = text("Fictional author");
-    row.initials = text("FA");
+    row.author = text("Alex Sommer");
+    row.initials = text("AS");
     row.own = true;
-    row.body = text("My favourite");
+    row.body = text("Mein Favorit");
     row.attachments = Page::empty();
     row.metadata = Default::default();
     row.delivery = talk_core::ui::presentation::DeliveryState::Pending;
@@ -390,5 +858,38 @@ pub(super) fn pending_upload(snapshot: &mut PresentationSnapshot, uncertain: boo
     if let Some(panel) = snapshot.message_panel.as_mut() {
         panel.uploads = page([file]);
         panel.uploads_running = !uncertain;
+    }
+}
+
+pub(super) fn staged_image(snapshot: &mut PresentationSnapshot) {
+    use talk_core::ui::messaging::{UploadState, UploadView};
+    let context = snapshot.selected.unwrap();
+    let file = UploadView {
+        id: 1,
+        name: text("Zwischenablage.png"),
+        bytes: Some(190313),
+        state: UploadState::Selected,
+        submitted: false,
+        transferred: 0,
+        uploaded: false,
+        server_message: None,
+    };
+    snapshot
+        .content_panel
+        .assets
+        .try_push(AssetView {
+            target: AssetTarget::Thumbnail(AttachmentRef {
+                context,
+                message: file.message_id(),
+                placeholder: text("upload"),
+            }),
+            state: AssetState::Ready { key: 2 },
+            emoji: None,
+            color: None,
+            document_pages: None,
+        })
+        .unwrap();
+    if let Some(panel) = snapshot.message_panel.as_mut() {
+        panel.uploads = page([file]);
     }
 }

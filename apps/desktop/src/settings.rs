@@ -142,6 +142,9 @@ impl SettingsRuntime {
     pub fn reduced_motion(&self) -> bool {
         self.shared.lock().interaction.profile.reduced_motion
     }
+    pub fn reduced_transparency(&self) -> bool {
+        self.shared.lock().interaction.profile.reduced_transparency
+    }
     pub fn emoji_picker_available(&self) -> bool {
         let state = self.shared.lock();
         state.snapshot.runtime == RuntimeState::Running

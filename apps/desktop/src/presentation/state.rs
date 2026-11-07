@@ -55,7 +55,7 @@ pub(super) fn connection_failure_copy(
         ),
         ConnectionFailure::AccessDenied => (
             "Server verweigert den Zugriff.",
-            "Der Server hat die Anfrage mit HTTP 403 abgelehnt. Prüfe den Serverzugriff.",
+            "Prüfe, ob du auf diesen Server zugreifen darfst.",
         ),
         ConnectionFailure::ServerUnavailable => (
             "Server vorübergehend nicht verfügbar.",
@@ -203,7 +203,7 @@ pub fn call_unavailable_reason(row: &ConversationView, content: ContentState) ->
     }
 }
 
-pub const MAX_DRAFTS: usize = 8;
+pub const MAX_DRAFTS: usize = 32;
 
 /// The admitted edit keeps its identity and text until its own receipt arrives.
 /// A repeated Enter or an unrelated result must not replace that ownership.
@@ -254,6 +254,105 @@ pub struct Drafts {
     targets: Vec<(ConversationRef, talk_core::ui::messaging::ComposeTarget)>,
 }
 impl Drafts {
+    pub fn restore_durable(
+        &mut self,
+        context: ConversationRef,
+        values: &[talk_core::ui::messaging::ComposerDraft],
+        thread_editor: bool,
+    ) -> bool {
+        let mut changed = false;
+        for value in values
+            .iter()
+            .filter(|d| d.thread.is_some() == thread_editor)
+        {
+            let target = talk_core::ui::messaging::ComposeTarget {
+                thread: value.thread,
+                reply_to: value.reply,
+                ..Default::default()
+            };
+            // A local entry, even cleared or pending, always wins a late load.
+            if self
+                .entries
+                .iter()
+                .any(|d| d.context == context && d.target.thread == value.thread)
+                || self.entries.len() >= MAX_DRAFTS
+            {
+                continue;
+            }
+            self.entries.push(Draft {
+                context,
+                text: value.body.clone(),
+                target: target.clone(),
+                pending: None,
+                pending_origin: None,
+                pending_editor: None,
+                pending_may_clear: false,
+                uncertain: false,
+            });
+            if !thread_editor && self.target(context) == Default::default() {
+                self.set_target(context, target);
+            }
+            changed = true;
+        }
+        changed
+    }
+    pub fn restored_thread_target(
+        &self,
+        context: ConversationRef,
+        root: u128,
+    ) -> talk_core::ui::messaging::ComposeTarget {
+        self.entries
+            .iter()
+            .rev()
+            .find(|d| d.context == context && d.target.thread == Some(root))
+            .map(|d| d.target.clone())
+            .unwrap_or(talk_core::ui::messaging::ComposeTarget {
+                thread: Some(root),
+                ..Default::default()
+            })
+    }
+    pub fn persist(&self, port: &mut dyn NativeDesktopPort) -> Option<ConversationRef> {
+        let mut failed = None;
+        let mut written = Vec::with_capacity(MAX_DRAFTS);
+        for draft in self.entries.iter().rev() {
+            let key = (draft.context, draft.target.thread);
+            if written.contains(&key) {
+                continue;
+            }
+            let active = self.target(draft.context);
+            if active.thread == draft.target.thread && !same_draft_target(&active, &draft.target) {
+                continue;
+            }
+            written.push(key);
+            // Cross-room private replies are deliberately memory-only. Persist
+            // no quoted excerpts, attachment paths or private source identity.
+            if draft.target.private_reply.is_some() {
+                continue;
+            }
+            if port
+                .save_composer_draft(
+                    draft.context,
+                    talk_core::ui::messaging::ComposerDraft {
+                        thread: draft.target.thread,
+                        reply: draft.target.reply_to,
+                        body: draft.text.clone(),
+                    },
+                )
+                .is_err()
+                && !draft.text.as_str().is_empty()
+            {
+                failed = Some(draft.context);
+            }
+        }
+        failed
+    }
+    /// Separate request namespace for the concurrently mounted thread editor.
+    pub fn thread_editor() -> Self {
+        Self {
+            next_request: 1_u64 << 63,
+            ..Self::default()
+        }
+    }
     /// Cached contexts carry no dispatch authority. Only an explicit stable
     /// room key can move their local text to a newly projected context.
     pub fn rebind_cached(&mut self, previous: &PresentationSnapshot, next: &PresentationSnapshot) {
@@ -373,6 +472,10 @@ impl Drafts {
             .iter()
             .any(|d| d.context == context && d.uncertain)
     }
+    #[cfg(feature = "dev-probes")]
+    pub(super) fn probe_request_sequence(&self) -> u64 {
+        self.next_request
+    }
     pub fn pending(&self, context: ConversationRef) -> bool {
         self.entries
             .iter()
@@ -461,7 +564,11 @@ impl Drafts {
         if draft.text.as_str().trim().is_empty() {
             return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
         }
-        let request = RequestId(self.next_request.checked_add(1).ok_or(SubmitError::Busy)?);
+        let next = self.next_request.checked_add(1).ok_or(SubmitError::Busy)?;
+        if (next ^ self.next_request) & (1_u64 << 63) != 0 {
+            return Err(SubmitError::Busy);
+        }
+        let request = RequestId(next);
         // Busy is non-admission: neither the text nor the pending state changes.
         port.try_submit(UiIntent::Message {
             request,
@@ -556,7 +663,10 @@ impl Drafts {
                 // Never erase text the user changed while the operation was in flight.
                 if draft.pending_may_clear && draft.text == *submitted {
                     draft.text = Text::new("").expect("empty bounded text");
-                    if draft.target.reply_to.is_some() {
+                    if draft.target.reply_to.is_some()
+                        || draft.target.private_reply.is_some()
+                        || draft.target.new_thread
+                    {
                         completed_reply = Some((draft.context, draft.target.clone()));
                     }
                 }
@@ -583,6 +693,8 @@ impl Drafts {
                 // A quote belongs to one submission. Keep the current thread
                 // and delivery option, without retiring a newer reply target.
                 target.reply_to = None;
+                target.private_reply = None;
+                target.new_thread = false;
                 self.set_target(context, target);
             }
         }
@@ -592,10 +704,116 @@ impl Drafts {
 
 /// Defensive renderer validation. Producers still own full permission/lifecycle decisions.
 pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
+    if snapshot
+        .threads
+        .account
+        .is_some_and(|account| Some(account) != snapshot.active_account)
+        || snapshot.threads.entries.as_slice().iter().any(|thread| {
+            Some(thread.context.account) != snapshot.threads.account
+                || !thread.context.is_consistent()
+                || thread.root == 0
+        })
+    {
+        return false;
+    }
+    if snapshot
+        .reference_previews
+        .as_slice()
+        .iter()
+        .any(|preview| {
+            Some(preview.context) != snapshot.selected
+                || Some(preview.context.account) != snapshot.active_account
+                || !preview.context.is_consistent()
+                || preview.message == 0
+                || preview.ordinal >= 32
+                || !snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .chain(
+                        snapshot
+                            .message_panel
+                            .as_ref()
+                            .filter(|panel| panel.context == preview.context)
+                            .into_iter()
+                            .flat_map(|panel| {
+                                panel
+                                    .thread_root_message
+                                    .iter()
+                                    .chain(panel.thread_messages.as_slice())
+                            }),
+                    )
+                    .any(|message| message.local_id == preview.message && !message.metadata.deleted)
+        })
+    {
+        return false;
+    }
+    if snapshot.discover_panel.as_ref().is_some_and(|panel| {
+        Some(panel.account) != snapshot.active_account
+            || panel
+                .rooms
+                .as_slice()
+                .iter()
+                .any(|room| room.context.account != panel.account || !room.context.is_consistent())
+            || panel.joining.is_some_and(|context| {
+                context.account != panel.account
+                    || !context.is_consistent()
+                    || !panel
+                        .rooms
+                        .as_slice()
+                        .iter()
+                        .any(|room| room.context == context)
+            })
+    }) {
+        return false;
+    }
+    if snapshot.search_panel.as_ref().is_some_and(|panel| {
+        Some(panel.account) != snapshot.active_account
+            || panel
+                .filters
+                .conversation
+                .is_some_and(|c| c.account != panel.account || !c.is_consistent())
+            || panel
+                .filters
+                .person
+                .is_some_and(|p| p.account != panel.account)
+            || panel.hits.as_slice().iter().any(|hit| {
+                hit.context.account != panel.account
+                    || !hit.context.is_consistent()
+                    || hit.message == 0
+                    || !snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .any(|r| r.context == hit.context)
+            })
+    }) {
+        return false;
+    }
+    if snapshot
+        .federation_invitations
+        .as_ref()
+        .is_some_and(|view| Some(view.scope) != snapshot.active_account)
+    {
+        return false;
+    }
+    if snapshot.account_reminders.as_ref().is_some_and(|view| {
+        Some(view.scope) != snapshot.active_account
+            || view.reminders.as_slice().iter().any(|reminder| {
+                reminder.context.account != view.scope || !reminder.context.is_consistent()
+            })
+    }) {
+        return false;
+    }
     if snapshot.create_panel.as_ref().is_some_and(|panel| {
         Some(panel.account) != snapshot.active_account
             || panel
                 .people
+                .as_slice()
+                .iter()
+                .any(|person| person.id.account != panel.account)
+            || panel
+                .invites
                 .as_slice()
                 .iter()
                 .any(|person| person.id.account != panel.account)
@@ -715,7 +933,10 @@ fn same_draft_target(
     a: &talk_core::ui::messaging::ComposeTarget,
     b: &talk_core::ui::messaging::ComposeTarget,
 ) -> bool {
-    a.reply_to == b.reply_to && a.thread == b.thread
+    a.reply_to == b.reply_to
+        && a.thread == b.thread
+        && a.private_reply.as_ref().map(|p| (&p.source, p.message))
+            == b.private_reply.as_ref().map(|p| (&p.source, p.message))
 }
 
 pub(super) fn cached_draft_context(
@@ -753,7 +974,7 @@ pub(super) fn cached_draft_context(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     fn test_page<T, const N: usize>(
         values: impl IntoIterator<Item = T>,
@@ -764,13 +985,14 @@ mod tests {
         }
         page
     }
-    fn draft_snapshot() -> PresentationSnapshot {
+    pub(in crate::presentation) fn draft_snapshot() -> PresentationSnapshot {
         use talk_core::ui::presentation::{
             AccountConnectionState, AccountView, ConversationListState, LoginPhase, LoginView,
             NativeStoreState, Presence, StorageStatus,
         };
         let context = context(1);
         let row = ConversationView {
+            action_error: None,
             context,
             navigation_key: None,
             title: Text::new("Synthetic room").unwrap(),
@@ -779,23 +1001,36 @@ mod tests {
             updated_label: Text::new("").unwrap(),
             kind: ConversationKind::Group,
             unread: 0,
+            unread_direct_mention: None,
+            last_read_message: None,
+            unread_mention: None,
+            notification_muted: None,
+            last_activity: None,
             favorite: None,
             tags: None,
             organization: Default::default(),
             archived: Some(false),
             archive: Decision::Unknown,
             presence: Presence::Unknown,
+            status_icon: None,
+            status_message: None,
             participants: None,
+            participant_names: Page::empty(),
             send: Decision::Unknown,
             attach: Decision::Unknown,
             draft_clipboard: Decision::Unknown,
             call: Decision::Unknown,
+            call_active: None,
             call_scope: None,
         };
         PresentationSnapshot {
+            pending_intents: 0,
             content_panel: Default::default(),
             file_export: None,
             create_panel: None,
+            discover_panel: None,
+            search_panel: None,
+            reference_previews: Page::empty(),
             revision: 1,
             login: LoginView {
                 phase: LoginPhase::EnterServer,
@@ -822,6 +1057,7 @@ mod tests {
             account_removal: None,
             active_account: Some(context.account),
             conversations: test_page([row]),
+            threads: Default::default(),
             conversation_list: ConversationListState {
                 content: ContentState::Ready,
                 complete: true,
@@ -829,6 +1065,8 @@ mod tests {
             tags: Page::empty(),
             tag_state: ContentState::Ready,
             organization_result: None,
+            account_reminders: None,
+            federation_invitations: None,
             selected: Some(context),
             content: ContentState::Ready,
             messages: Page::empty(),
@@ -1667,6 +1905,35 @@ mod tests {
         }
     }
     #[test]
+    fn creating_a_thread_reuses_the_draft_and_clears_only_after_its_admission() {
+        use talk_core::ui::messaging::ComposeTarget;
+        let c = context(1);
+        let mut drafts = Drafts::default();
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        drafts.save(c, "A new discussion").unwrap();
+        assert!(drafts.set_target(
+            c,
+            ComposeTarget {
+                new_thread: true,
+                ..Default::default()
+            }
+        ));
+        assert_eq!(drafts.text(c), "A new discussion");
+        drafts.save(c, "A new discussion").unwrap();
+        let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+        assert!(drafts.target(c).new_thread);
+        assert!(drafts.complete(SubmissionResult {
+            request,
+            context: c,
+            result: Completion::Queued
+        }));
+        assert!(!drafts.target(c).new_thread);
+        assert!(drafts.text(c).is_empty());
+    }
+    #[test]
     fn only_correlated_confirmation_clears_unchanged_text() {
         let mut drafts = Drafts::default();
         let c = context(1);
@@ -1739,15 +2006,18 @@ mod tests {
     #[test]
     fn draft_capacity_rejects_navigation_without_eviction_and_scopes_hosts() {
         let mut drafts = Drafts::default();
-        for i in 1..=8 {
+        for i in 1..=MAX_DRAFTS as u128 {
             drafts.save(context(i), "Wichtig").unwrap();
         }
-        drafts.capture_editor(context(9), RequestId(1), 1);
-        assert!(drafts.observe_editor(context(9), 1, false));
-        assert!(!drafts.observe_editor(context(9), 1, true));
-        assert_eq!(drafts.entries.len(), 8);
-        assert_eq!(drafts.save(context(9), "Neun"), Err(SubmitError::Busy));
-        for i in 1..=8 {
+        drafts.capture_editor(context(MAX_DRAFTS as u128 + 1), RequestId(1), 1);
+        assert!(drafts.observe_editor(context(MAX_DRAFTS as u128 + 1), 1, false));
+        assert!(!drafts.observe_editor(context(MAX_DRAFTS as u128 + 1), 1, true));
+        assert_eq!(drafts.entries.len(), MAX_DRAFTS);
+        assert_eq!(
+            drafts.save(context(MAX_DRAFTS as u128 + 1), "Neun"),
+            Err(SubmitError::Busy)
+        );
+        for i in 1..=MAX_DRAFTS as u128 {
             assert_eq!(drafts.text(context(i)), "Wichtig");
         }
         let mut other = context(1);
@@ -1821,6 +2091,7 @@ mod tests {
             call: talk_core::ui::CallGeneration::from_local(1),
         };
         let mut row = ConversationView {
+            action_error: None,
             tags: None,
             context: c,
             navigation_key: None,
@@ -1830,16 +2101,25 @@ mod tests {
             updated_label: Text::new("").unwrap(),
             kind: ConversationKind::Direct,
             unread: 0,
+            unread_direct_mention: None,
+            last_read_message: None,
+            unread_mention: None,
+            notification_muted: None,
+            last_activity: None,
             favorite: None,
             organization: Default::default(),
             archived: None,
             archive: Decision::Unknown,
             presence: talk_core::ui::presentation::Presence::Unknown,
+            status_icon: None,
+            status_message: None,
             participants: None,
+            participant_names: Page::empty(),
             send: Decision::Unknown,
             attach: Decision::Unknown,
             draft_clipboard: Decision::Unknown,
             call: Decision::Allowed,
+            call_active: None,
             call_scope: Some(call),
         };
         assert_eq!(
@@ -1957,5 +2237,47 @@ mod tests {
         snapshot.message_panel.as_mut().unwrap().queue_available = true;
         snapshot.message_panel.as_mut().unwrap().context = context(2);
         assert_ne!(composer_send_decision(&snapshot, &row), Decision::Allowed);
+    }
+}
+
+#[cfg(test)]
+mod durable_draft_tests {
+    use super::*;
+    #[test]
+    fn late_disk_draft_never_overwrites_local_text_and_threads_remain_separate() {
+        let c = ConversationRef {
+            account: talk_core::ui::AccountScope {
+                account: talk_core::ui::AccountId::from_local(1),
+                runtime: talk_core::ui::RuntimeGeneration::from_local(2),
+            },
+            conversation: talk_core::ui::ConversationId {
+                account: talk_core::ui::AccountId::from_local(1),
+                host: talk_core::ui::HostId::from_local(3),
+                local: 4,
+            },
+        };
+        let disk = talk_core::ui::messaging::ComposerDraft {
+            thread: None,
+            reply: Some(9),
+            body: Text::new("Disk").unwrap(),
+        };
+        let mut drafts = Drafts::default();
+        drafts.save(c, "Newer").unwrap();
+        assert!(!drafts.restore_durable(c, std::slice::from_ref(&disk), false));
+        assert_eq!(drafts.text(c), "Newer");
+        let mut restored = Drafts::default();
+        assert!(restored.restore_durable(c, &[disk], false));
+        assert_eq!(restored.text(c), "Disk");
+        assert_eq!(restored.target(c).reply_to, Some(9));
+        let thread = talk_core::ui::messaging::ComposerDraft {
+            thread: Some(7),
+            reply: Some(8),
+            body: Text::new("Thread").unwrap(),
+        };
+        assert!(!restored.restore_durable(c, std::slice::from_ref(&thread), false));
+        let mut threads = Drafts::thread_editor();
+        assert!(threads.restore_durable(c, &[thread], true));
+        threads.set_target(c, threads.restored_thread_target(c, 7));
+        assert_eq!(threads.text(c), "Thread");
     }
 }

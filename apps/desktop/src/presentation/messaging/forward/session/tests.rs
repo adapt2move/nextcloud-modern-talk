@@ -52,6 +52,7 @@ fn message() -> MessageView {
 fn snapshot() -> PresentationSnapshot {
     let source = room(1);
     let row = |context| ConversationView {
+        action_error: None,
         context,
         navigation_key: None,
         title: Text::new("Synthetic conversation").unwrap(),
@@ -60,6 +61,11 @@ fn snapshot() -> PresentationSnapshot {
         updated_label: Text::new("").unwrap(),
         kind: ConversationKind::Group,
         unread: 0,
+        unread_direct_mention: None,
+        last_read_message: None,
+        unread_mention: None,
+        notification_muted: None,
+        last_activity: None,
         favorite: None,
         organization: ConversationOrganization {
             classified: Some(false),
@@ -69,11 +75,15 @@ fn snapshot() -> PresentationSnapshot {
         archived: Some(false),
         archive: Decision::Unknown,
         presence: Presence::Unknown,
+        status_icon: None,
+        status_message: None,
         participants: None,
+        participant_names: Page::empty(),
         send: Decision::Allowed,
         attach: Decision::Denied,
         draft_clipboard: Decision::Allowed,
         call: Decision::Denied,
+        call_active: None,
         call_scope: None,
     };
     let mut panel = MessagePanel::new(source);
@@ -86,9 +96,13 @@ fn snapshot() -> PresentationSnapshot {
         },
     )]);
     PresentationSnapshot {
+        pending_intents: 0,
         content_panel: Default::default(),
         file_export: None,
         create_panel: None,
+        discover_panel: None,
+        search_panel: None,
+        reference_previews: Page::empty(),
         revision: 1,
         login: LoginView {
             phase: LoginPhase::Ready,
@@ -115,6 +129,7 @@ fn snapshot() -> PresentationSnapshot {
         account_removal: None,
         active_account: Some(source.account),
         conversations: page([row(source), row(room(2))]),
+        threads: Default::default(),
         conversation_list: ConversationListState {
             content: ContentState::Ready,
             complete: true,
@@ -122,6 +137,8 @@ fn snapshot() -> PresentationSnapshot {
         tags: Page::empty(),
         tag_state: ContentState::Ready,
         organization_result: None,
+        account_reminders: None,
+        federation_invitations: None,
         selected: Some(source),
         content: ContentState::Ready,
         messages: page([message()]),

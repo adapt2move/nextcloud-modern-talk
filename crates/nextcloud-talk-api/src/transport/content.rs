@@ -2,6 +2,52 @@ use super::*;
 use crate::Error;
 use crate::content::ImageRequest;
 impl crate::transport::Transport {
+    pub(crate) async fn reference_thumbnail(
+        &mut self,
+        c: &OperationContext,
+        raw: &str,
+    ) -> Result<Vec<u8>, Error> {
+        if raw.len() > 2048 || raw.chars().any(char::is_control) {
+            return Err(self.error(ErrorKind::Malformed));
+        }
+        let url = url::Url::parse(raw).map_err(|_| self.error(ErrorKind::Malformed))?;
+        let base = &self.binding.origin.0;
+        if url.origin() != base.origin()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(self.error(ErrorKind::WrongScope));
+        }
+        let relative = url
+            .path()
+            .strip_prefix(base.path())
+            .ok_or_else(|| self.error(ErrorKind::WrongScope))?;
+        let (prefix, key) = relative
+            .strip_prefix("core/references/preview/")
+            .map(|key| ("core/references/preview/", key))
+            .or_else(|| {
+                relative
+                    .strip_prefix("index.php/core/references/preview/")
+                    .map(|key| ("index.php/core/references/preview/", key))
+            })
+            .ok_or_else(|| self.error(ErrorKind::WrongScope))?;
+        if key.is_empty()
+            || key.len() > 128
+            || !key
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(self.error(ErrorKind::Malformed));
+        }
+        // Reconstruct a reviewed installation-relative route; never fetch the returned URL.
+        let url = self.content_endpoint(&format!("{prefix}{key}"))?;
+        let mut bytes = Vec::new();
+        self.stream(c, url, None, &mut bytes, super::files::StreamRead::Image)
+            .await?;
+        Ok(bytes)
+    }
     fn content_endpoint(&self, route: &str) -> Result<url::Url, Error> {
         self.binding
             .origin

@@ -40,6 +40,7 @@ fn details(context: ConversationRef, id: u64, body: &str) -> wire::MessageDetail
         replyable: Some(true),
         parent: None,
         thread: None,
+        thread_replies: None,
         reactions: Page::empty(),
         rich: Page::empty(),
         system: None,
@@ -99,6 +100,594 @@ fn model() -> (Accounts, ConversationRef, NavigationRoomKey) {
     model.snapshot.message_panel = Some(view::MessagePanel::new(context));
     model.history.open(context);
     (model, context, room)
+}
+
+fn thread(context: ConversationRef, root: u64, title: &str, level: i8) -> Box<wire::Thread> {
+    Box::new(wire::Thread {
+        root: MessageId {
+            conversation: context.conversation,
+            sequence: root,
+        },
+        last_message: None,
+        last_reply: None,
+        title: text(title),
+        replies: 2,
+        unread: None,
+        notification_level: Some(level),
+        rename: Decision::Allowed,
+    })
+}
+
+#[test]
+fn queued_thread_changes_replay_over_observations_and_rollback_independently() {
+    let (mut model, context, room) = model();
+    model.snapshot.threads.account = Some(context.account);
+    model.snapshot.threads.entries = page([talk_core::ui::presentation::ThreadView {
+        context,
+        root: 7,
+        title: text("Original"),
+        replies: 2,
+        last_message: Some(9),
+    }]);
+    let op = OperationId::from_local(800);
+    model
+        .history
+        .admitted(context, op, messaging::Work::ThreadInfo(7), RequestId(1), 1);
+    assert!(model.history.complete(
+        context,
+        op,
+        messaging::Work::ThreadInfo(7),
+        RequestId(1),
+        &Ok(wire::MessagingResult::Thread(thread(
+            context, 7, "Original", 0
+        ))),
+        false
+    ));
+    model.snapshot.message_panel.as_mut().unwrap().thread_root = Some(7);
+    let rename = Intent::RenameThread {
+        root: 7,
+        title: text("New title"),
+    };
+    let unfollow = Intent::ThreadNotifications { root: 7, level: 3 };
+    model.outbox.load(
+        context.account.account,
+        &page([
+            stored(1, room.clone(), rename.clone(), OutboxPhase::Queued, 1),
+            stored(2, room, unfollow.clone(), OutboxPhase::Queued, 2),
+        ]),
+    );
+    model.project_history(context);
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().title.as_str(),
+        "New title"
+    );
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().notification_level,
+        Some(3)
+    );
+    assert_eq!(panel.thread_following_intent, Some(false));
+    assert!(conflicts(
+        &model.outbox.entries[0],
+        &model.outbox.entries[1]
+    ));
+    let mut list = model.snapshot.clone();
+    model.project_thread_list(&mut list);
+    assert!(list.threads.entries.as_slice().is_empty());
+    assert_eq!(
+        model.snapshot.threads.entries.as_slice()[0].title.as_str(),
+        "Original"
+    );
+
+    model.outbox_result(
+        OperationId::from_local(1),
+        &Err(Completion::Failed(UnavailableReason::PermissionDenied)),
+    );
+    model.project_history(context);
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().title.as_str(),
+        "Original"
+    );
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().notification_level,
+        Some(3)
+    );
+    assert_eq!(panel.thread_following_intent, Some(false));
+    assert!(panel.action_error.is_some());
+
+    model.outbox.entries[1].state = State::ParkedUncertain;
+    model.project_history(context);
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().notification_level,
+        Some(0)
+    );
+    assert_eq!(panel.thread_following_intent, None);
+    let mut list = model.snapshot.clone();
+    model.project_thread_list(&mut list);
+    assert_eq!(
+        list.threads.entries.as_slice()[0].title.as_str(),
+        "Original"
+    );
+}
+
+#[test]
+fn uncertain_thread_mutations_reconcile_by_read_without_blind_replay() {
+    let (_, context, _) = model();
+    for intent in [
+        Intent::RenameThread {
+            root: 7,
+            title: text("New title"),
+        },
+        Intent::ThreadNotifications { root: 7, level: 3 },
+    ] {
+        assert!(matches!(reconcile_command(context, &intent),
+            Some((wire::MessagingCommand::Thread(id), messaging::Work::ThreadQueued(7))) if id.sequence == 7));
+        assert!(!reconciled(
+            &intent,
+            &wire::MessagingResult::Thread(thread(context, 7, "Original", 0))
+        ));
+        assert!(!reconciled(
+            &intent,
+            &wire::MessagingResult::Thread(thread(context, 8, "New title", 3))
+        ));
+        assert!(reconciled(
+            &intent,
+            &wire::MessagingResult::Thread(thread(context, 7, "New title", 3))
+        ));
+    }
+}
+
+#[test]
+fn malformed_thread_mutation_receipt_stays_uncertain() {
+    let (mut model, context, room) = model();
+    let operation = OperationId::from_local(1);
+    model.outbox.load(
+        context.account.account,
+        &page([stored(
+            1,
+            room,
+            Intent::RenameThread {
+                root: 7,
+                title: text("New title"),
+            },
+            OutboxPhase::Queued,
+            1,
+        )]),
+    );
+    model.outbox.entries[0].state = State::Running;
+    model.outbox.entries[0].record.phase = OutboxPhase::Dispatched;
+    model.history.admitted(
+        context,
+        operation,
+        messaging::Work::ThreadQueued(7),
+        RequestId(0),
+        1,
+    );
+    model.apply_message(
+        RequestId(0),
+        context,
+        operation,
+        messaging::Work::ThreadQueued(7),
+        Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
+            conversation: context.conversation,
+            operation,
+            result: wire::MessagingResult::Thread(thread(context, 8, "New title", 0)),
+        })),
+    );
+    assert!(model.outbox.entries[0].state == State::Uncertain);
+    assert!(model.outbox.entries[0].record.phase == OutboxPhase::Uncertain);
+}
+
+#[test]
+fn confirmed_thread_changes_update_the_account_page_without_waiting_for_refresh() {
+    use talk_core::ui::presentation::{FeatureSupport, ThreadView};
+    let (mut model, context, room) = model();
+    model.snapshot.threads.account = Some(context.account);
+    model.snapshot.threads.support = FeatureSupport::Supported;
+    model.snapshot.threads.entries = page([ThreadView {
+        context,
+        root: 7,
+        title: text("Original"),
+        replies: 2,
+        last_message: Some(9),
+    }]);
+    model.outbox.load(
+        context.account.account,
+        &page([
+            stored(
+                1,
+                room.clone(),
+                Intent::RenameThread {
+                    root: 7,
+                    title: text("New title"),
+                },
+                OutboxPhase::Queued,
+                1,
+            ),
+            stored(
+                2,
+                room,
+                Intent::ThreadNotifications { root: 7, level: 3 },
+                OutboxPhase::Queued,
+                2,
+            ),
+        ]),
+    );
+    for entry in &mut model.outbox.entries {
+        entry.state = State::Running;
+        entry.record.phase = OutboxPhase::Dispatched;
+        entry.context = Some(context);
+    }
+    model.outbox_result(
+        OperationId::from_local(1),
+        &Ok(wire::MessagingResult::Thread(thread(
+            context,
+            7,
+            "New title",
+            0,
+        ))),
+    );
+    assert!(model.outbox.entries[0].state == State::Removing);
+    assert_eq!(
+        model.snapshot.threads.entries.as_slice()[0].title.as_str(),
+        "New title"
+    );
+    model.outbox_result(
+        OperationId::from_local(2),
+        &Ok(wire::MessagingResult::Thread(thread(
+            context,
+            7,
+            "New title",
+            3,
+        ))),
+    );
+    assert!(model.outbox.entries[1].state == State::Removing);
+    assert!(model.snapshot.threads.entries.as_slice().is_empty());
+}
+
+#[test]
+fn thread_overlays_replay_once_and_rejections_restore_the_latest_server_page() {
+    let (mut model, context, room) = model();
+    let mut root = details(context, 7, "Root");
+    root.thread = Some(root.message.id);
+    root.thread_replies = Some(2);
+    observe(&mut model, context, 1, [root]);
+    let mut reply = details(context, 8, "Before");
+    reply.thread = Some(MessageId {
+        conversation: context.conversation,
+        sequence: 7,
+    });
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_messages = page([messaging::message_view(&reply)]);
+    model.outbox.load(
+        context.account.account,
+        &page([
+            stored(
+                1,
+                room.clone(),
+                Intent::Send {
+                    body: text("Queued reply"),
+                    options: OutboxOptions {
+                        thread: Some(7),
+                        ..Default::default()
+                    },
+                },
+                OutboxPhase::Queued,
+                1,
+            ),
+            stored(
+                2,
+                room.clone(),
+                Intent::Edit {
+                    message: 8,
+                    body: text("Optimistic edit"),
+                },
+                OutboxPhase::Queued,
+                2,
+            ),
+            stored(
+                3,
+                room,
+                Intent::Reaction {
+                    message: 8,
+                    emoji: text("👍"),
+                    add: true,
+                },
+                OutboxPhase::Queued,
+                3,
+            ),
+        ]),
+    );
+    for _ in 0..3 {
+        model.project_history(context);
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        assert_eq!(panel.thread_messages.as_slice().len(), 2);
+        assert_eq!(
+            panel
+                .thread_messages
+                .as_slice()
+                .iter()
+                .filter(|row| row.body.as_str() == "Queued reply")
+                .count(),
+            1
+        );
+        let original = panel
+            .thread_messages
+            .as_slice()
+            .iter()
+            .find(|row| row.local_id == 8)
+            .unwrap();
+        assert_eq!(original.body.as_str(), "Optimistic edit");
+        assert_eq!(original.metadata.reactions.as_slice()[0].count, 1);
+        assert_eq!(
+            model
+                .snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .find(|row| row.local_id == 7)
+                .unwrap()
+                .reply_count,
+            3
+        );
+    }
+
+    let operation = OperationId::from_local(901);
+    model
+        .history
+        .admitted(context, operation, messaging::Work::Poll, RequestId(2), 2);
+    reply.message.text = text("Newer server text");
+    model.apply_message(
+        RequestId(2),
+        context,
+        operation,
+        messaging::Work::Poll,
+        Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
+            conversation: context.conversation,
+            operation,
+            result: wire::MessagingResult::Messages {
+                capabilities: None,
+                messages: page([reply]),
+                cursor: None,
+                common_read: None,
+            },
+        })),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(
+        panel
+            .thread_messages
+            .as_slice()
+            .iter()
+            .find(|row| row.local_id == 8)
+            .unwrap()
+            .body
+            .as_str(),
+        "Optimistic edit"
+    );
+    assert_eq!(
+        panel
+            .thread_messages
+            .as_slice()
+            .iter()
+            .filter(|row| row.body.as_str() == "Queued reply")
+            .count(),
+        1
+    );
+    let cached = model.history.get(context).unwrap().thread(7).unwrap();
+    assert!(
+        cached.as_slice().iter().all(
+            |row| row.body.as_str() != "Queued reply" && row.body.as_str() != "Optimistic edit"
+        )
+    );
+
+    for id in [2, 3] {
+        model.outbox_result(
+            OperationId::from_local(id),
+            &Err(Completion::Failed(UnavailableReason::PermissionDenied)),
+        );
+    }
+    model.project_history(context);
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    let original = panel
+        .thread_messages
+        .as_slice()
+        .iter()
+        .find(|row| row.local_id == 8)
+        .unwrap();
+    assert_eq!(original.body.as_str(), "Newer server text");
+    assert!(original.metadata.reactions.as_slice().is_empty());
+    assert_eq!(
+        panel
+            .thread_messages
+            .as_slice()
+            .iter()
+            .filter(|row| row.body.as_str() == "Queued reply")
+            .count(),
+        1
+    );
+    model.outbox.entries[0].state = State::Running;
+    model.outbox.entries[0].record.phase = OutboxPhase::Dispatched;
+    let operation = OperationId::from_local(902);
+    model
+        .history
+        .admitted(context, operation, messaging::Work::Poll, RequestId(3), 3);
+    let mut accepted = details(context, 9, "Queued reply");
+    accepted.thread = Some(MessageId {
+        conversation: context.conversation,
+        sequence: 7,
+    });
+    accepted.message.own_operation = Some(OperationId::from_local(1));
+    model.apply_message(
+        RequestId(3),
+        context,
+        operation,
+        messaging::Work::Poll,
+        Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
+            conversation: context.conversation,
+            operation,
+            result: wire::MessagingResult::Messages {
+                capabilities: None,
+                messages: page([accepted]),
+                cursor: None,
+                common_read: None,
+            },
+        })),
+    );
+    let rows = model
+        .snapshot
+        .message_panel
+        .as_ref()
+        .unwrap()
+        .thread_messages
+        .as_slice();
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.body.as_str() == "Queued reply")
+            .count(),
+        1
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.local_id == 9 && row.body.as_str() == "Queued reply")
+    );
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(9);
+    panel.thread_messages = Page::empty();
+    model.project_history(context);
+    assert!(model.snapshot.messages.as_slice().iter().all(|row| {
+        row.body.as_str() != "Queued reply" || row.local_id <= u128::from(u64::MAX)
+    }));
+    assert!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .thread_messages
+            .as_slice()
+            .is_empty()
+    );
+}
+
+#[test]
+fn thread_admission_rejects_wrong_root_and_known_denial() {
+    let (mut model, context, _) = model();
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_details = Some(view::ThreadDetails {
+        root: 7,
+        title: text("Original"),
+        notification_level: Some(0),
+        rename: Decision::Denied,
+    });
+    let action = |root| view::MessageAction::RenameThread {
+        root,
+        title: text("New title"),
+    };
+    assert!(matches!(
+        model.queue_message_action(RequestId(1), context, &action(8)),
+        Some(Err(SubmitError::StaleScope))
+    ));
+    assert!(matches!(
+        model.queue_message_action(RequestId(2), context, &action(7)),
+        Some(Err(SubmitError::Unavailable(
+            UnavailableReason::PolicyStale
+        )))
+    ));
+    assert!(model.outbox.entries.is_empty());
+}
+
+#[test]
+fn new_thread_send_keeps_its_title_through_the_durable_intent() {
+    let (model, context, room) = model();
+    let action = view::MessageAction::Send {
+        body: text("Release planning\nDetails"),
+        target: view::ComposeTarget {
+            new_thread: true,
+            ..Default::default()
+        },
+    };
+    let intent = model.outbox_intent(context, &action).unwrap().unwrap();
+    let record = OutboxRecord::from_intent(OperationId::from_local(2), room, &intent).unwrap();
+    let restored = record.intent().unwrap();
+    let Some((wire::MessagingCommand::Send { options, .. }, messaging::Work::Send)) =
+        command(context, &restored, |_| None)
+    else {
+        panic!("new thread send")
+    };
+    assert_eq!(options.thread_title.unwrap().as_str(), "Release planning");
+    assert!(options.reply_to.is_none() && options.thread.is_none());
+}
+
+#[test]
+fn queued_room_unread_overlays_new_observations_and_never_replays_ambiguity() {
+    let (mut model, context, room) = model();
+    model.snapshot.conversations = page(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .cloned()
+            .map(|mut row| {
+                if row.context == context {
+                    row.unread = 0;
+                }
+                row
+            }),
+    );
+    model.outbox.load(
+        context.account.account,
+        &page([stored(1, room, Intent::MarkUnread, OutboxPhase::Queued, 1)]),
+    );
+    model.project_history(context);
+    assert!(model.snapshot.message_panel.as_ref().unwrap().unread_queued);
+    let mut projected = model.snapshot.clone();
+    model.project_room_unread(&mut projected);
+    assert_eq!(
+        projected
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .unread,
+        1
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .unread,
+        0
+    );
+
+    model.outbox.entries[0].state = State::Uncertain;
+    model.outbox.entries[0].record.phase = OutboxPhase::Uncertain;
+    assert!(reconcile_command(context, &Intent::MarkUnread).is_none());
+    model.outbox.entries[0].state = State::Failed;
+    model.project_history(context);
+    assert!(!model.snapshot.message_panel.as_ref().unwrap().unread_queued);
+    let mut rolled_back = model.snapshot.clone();
+    model.project_room_unread(&mut rolled_back);
+    assert_eq!(
+        rolled_back
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .unread,
+        0
+    );
 }
 
 #[test]
@@ -851,13 +1440,15 @@ fn outgoing_order_is_per_destination_and_only_one_dispatch_runs_per_account() {
     for entry in &mut outbox.entries {
         entry.retry = now;
     }
-    outbox.entries[0].state = State::Uncertain;
+    assert_eq!(outbox.next_index(context.account.account, now), Some(0));
     outbox.entries[0].retry = now + Duration::from_secs(30);
     assert_eq!(outbox.next_index(context.account.account, now), Some(2));
+    outbox.entries[0].state = State::Uncertain;
+    assert_eq!(outbox.next_index(context.account.account, now), Some(1));
     outbox.entries[2].state = State::Running;
     assert_eq!(outbox.next_index(context.account.account, now), None);
     outbox.entries[2].state = State::Removing;
-    assert_eq!(outbox.next_index(context.account.account, now), Some(2));
+    assert_eq!(outbox.next_index(context.account.account, now), Some(1));
 }
 
 #[test]
@@ -908,6 +1499,7 @@ fn optimistic_deletion_redacts_parent_aliases_in_every_projected_message_collect
             conversation: context.conversation,
             sequence: 7,
         },
+        external: false,
         author: text("Synthetic actor"),
         text: text("deleted body"),
         unavailable: false,
@@ -1009,7 +1601,7 @@ fn a_mismatching_or_forbidden_read_preserves_outcome_uncertainty_without_overwri
 }
 
 #[test]
-fn each_failed_action_has_a_new_notice_but_an_uncertain_operation_does_not_repeat_its_toast() {
+fn failures_are_scoped_and_automatic_uncertainty_checks_stay_quiet_before_one_delayed_hint() {
     let (mut model, context, room) = model();
     model.outbox.load(
         context.account.account,
@@ -1051,6 +1643,13 @@ fn each_failed_action_has_a_new_notice_but_an_uncertain_operation_does_not_repea
     );
     let second = model.outbox.errors.last().unwrap().2;
     assert!(second > first);
+    model.outbox_result(OperationId::from_local(3), &Err(Completion::Uncertain));
+    assert_eq!(
+        model.outbox.errors.last().unwrap().2,
+        second,
+        "a transient lost acknowledgment is reconciled quietly"
+    );
+    model.outbox.entries[2].created = history::now_unix().saturating_sub(30);
     model.outbox_result(OperationId::from_local(3), &Err(Completion::Uncertain));
     let uncertain = model.outbox.errors.last().unwrap().2;
     assert!(uncertain > second);
@@ -1151,4 +1750,413 @@ fn persisted_failed_send_edit_and_schedule_restore_as_recoverable_drafts_without
     // Rendering and revisiting the room do not acknowledge the durable text.
     model.project_history(context);
     assert_eq!(model.outbox.entries.len(), 3);
+}
+
+#[test]
+fn queued_room_settings_project_over_fresh_observations_and_rollback_without_stale_snapshots() {
+    let (mut model, context, room) = model();
+    model.outbox.load(
+        context.account.account,
+        &page([
+            stored(
+                1,
+                room.clone(),
+                Intent::Favorite { value: true },
+                OutboxPhase::Queued,
+                1,
+            ),
+            stored(
+                2,
+                room,
+                Intent::Archived { value: true },
+                OutboxPhase::Queued,
+                2,
+            ),
+        ]),
+    );
+    let mut canonical = model.snapshot.clone();
+    canonical.conversations = page(canonical.conversations.as_slice().iter().cloned().map(
+        |mut r| {
+            if r.context == context {
+                r.favorite = Some(false);
+                r.archived = Some(false);
+            }
+            r
+        },
+    ));
+    let mut projected = canonical.clone();
+    model.project_queued_settings(&mut projected);
+    let changed = projected
+        .conversations
+        .as_slice()
+        .iter()
+        .find(|r| r.context == context)
+        .unwrap();
+    assert_eq!(
+        (changed.favorite, changed.archived),
+        (Some(true), Some(true))
+    );
+    assert_eq!(
+        canonical
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .favorite,
+        Some(false)
+    );
+    model.fail_outbox(
+        OperationId::from_local(1),
+        UnavailableReason::PermissionDenied,
+    );
+    let mut rolled_back = canonical;
+    model.project_queued_settings(&mut rolled_back);
+    let changed = rolled_back
+        .conversations
+        .as_slice()
+        .iter()
+        .find(|r| r.context == context)
+        .unwrap();
+    assert_eq!(
+        (changed.favorite, changed.archived),
+        (Some(false), Some(true))
+    );
+}
+#[test]
+fn queued_setting_retries_only_proven_pre_dispatch_failures_and_reconciles_uncertain_writes() {
+    for (error, uncertain) in [(ErrorKind::Transport, false), (ErrorKind::Uncertain, true)] {
+        let (mut model, context, room) = model();
+        model.outbox.load(
+            context.account.account,
+            &page([stored(
+                1,
+                room,
+                Intent::Favorite { value: true },
+                OutboxPhase::Queued,
+                1,
+            )]),
+        );
+        let entry = &mut model.outbox.entries[0];
+        entry.context = Some(context);
+        entry.state = State::Running;
+        entry.record.phase = OutboxPhase::Dispatched;
+        model.complete_queued_setting(
+            context,
+            OperationId::from_local(1),
+            Err(IdentityError::Request(error)),
+        );
+        let entry = &model.outbox.entries[0];
+        assert!(
+            entry.state
+                == if uncertain {
+                    State::Uncertain
+                } else {
+                    State::Ready
+                }
+        );
+        let request =
+            setting_command(context, entry.record.operation, &entry.intent, uncertain).unwrap();
+        assert_eq!(
+            matches!(request, ProtocolRequest::ReconcileConversation(_)),
+            uncertain
+        );
+        // A completion from another room cannot settle this operation.
+        let mut stale = context;
+        stale.conversation.local += 1;
+        model.complete_queued_setting(
+            stale,
+            OperationId::from_local(1),
+            Err(IdentityError::Request(ErrorKind::PermissionDenied)),
+        );
+        assert!(model.outbox.entries[0].state != State::Failed);
+    }
+}
+
+#[test]
+fn restored_file_publication_only_reads_its_reference_and_keeps_a_visible_pending_identity() {
+    let (mut model, context, room) = model();
+    model.outbox.load(
+        context.account.account,
+        &page([stored(
+            7,
+            room.clone(),
+            Intent::ShareFile {
+                path: text("/Documents/synthetic.pdf"),
+                name: text("synthetic.pdf"),
+                caption: text("caption"),
+                options: Default::default(),
+                voice: false,
+            },
+            OutboxPhase::Dispatched,
+            7,
+        )]),
+    );
+    let entry = &model.outbox.entries[0];
+    assert!(entry.state == State::Uncertain);
+    assert!(matches!(
+        reconcile_command(context, &entry.intent),
+        Some((wire::MessagingCommand::ReconcileSend, messaging::Work::Send))
+    ));
+    let mut messages = Page::empty();
+    let mut panel = view::MessagePanel::new(context);
+    model
+        .outbox
+        .project(context, &room, "Synthetic actor", &mut messages, &mut panel);
+    assert_eq!(messages.as_slice().len(), 1);
+    assert_eq!(messages.as_slice()[0].delivery, DeliveryState::Uncertain);
+    assert!(
+        messages.as_slice()[0]
+            .body
+            .as_str()
+            .contains("synthetic.pdf")
+    );
+    model.fail_outbox(
+        OperationId::from_local(7),
+        UnavailableReason::PermissionDenied,
+    );
+    assert!(model.outbox.entries[0].state == State::Failed);
+    let draft = failed_draft(&model.outbox.entries[0]).unwrap();
+    assert_eq!(draft.kind, view::FailedDraftKind::File);
+}
+
+#[test]
+fn an_unknown_delivery_cannot_freeze_later_independent_sends_but_queued_order_is_preserved() {
+    let context = crate::composition::fixtures::context(1);
+    let mut owner = Outbox::default();
+    let outgoing = |body: &str| Intent::Send {
+        body: text(body),
+        options: Default::default(),
+    };
+    owner.load(
+        context.account.account,
+        &page([
+            stored(1, key(1), outgoing("first"), OutboxPhase::Queued, 1),
+            stored(2, key(1), outgoing("second"), OutboxPhase::Queued, 2),
+        ]),
+    );
+    assert!(conflicts(&owner.entries[0], &owner.entries[1]));
+    owner.entries[0].state = State::Uncertain;
+    owner.entries[0].retry = Instant::now() + Duration::from_secs(30);
+    assert!(!conflicts(&owner.entries[0], &owner.entries[1]));
+    assert_eq!(
+        owner.next_index(context.account.account, Instant::now()),
+        Some(1)
+    );
+    assert_eq!(
+        owner.entries[0].record.operation,
+        OperationId::from_local(1)
+    );
+}
+
+#[test]
+fn read_markers_are_optimistic_ordered_coalesced_and_restore_without_write_replay() {
+    let (mut model, context, room) = model();
+    observe(&mut model, context, 1, [details(context, 2, "newest")]);
+    model.snapshot.conversations = page(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .cloned()
+            .map(|mut r| {
+                r.unread = 5;
+                r.last_read_message = Some(0);
+                r
+            }),
+    );
+    model.outbox.load(
+        context.account.account,
+        &page([
+            stored(1, room.clone(), Intent::MarkUnread, OutboxPhase::Queued, 1),
+            stored(
+                2,
+                room.clone(),
+                Intent::MarkRead { message: 2 },
+                OutboxPhase::Queued,
+                2,
+            ),
+        ]),
+    );
+    assert!(conflicts(
+        &model.outbox.entries[0],
+        &model.outbox.entries[1]
+    ));
+    let mut snapshot = model.snapshot.clone();
+    model.project_room_unread(&mut snapshot);
+    assert_eq!(
+        snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .unread,
+        0
+    );
+    assert_eq!(
+        snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .last_read_message,
+        Some(2)
+    );
+    assert_eq!(
+        model.queue_intent(
+            RequestId(22),
+            context,
+            room.clone(),
+            Intent::MarkRead { message: 2 },
+            false
+        ),
+        Ok(())
+    );
+    assert_eq!(model.outbox.entries.len(), 2);
+    model.outbox.entries[1].state = State::Failed;
+    let mut snapshot = model.snapshot.clone();
+    model.project_room_unread(&mut snapshot);
+    assert_eq!(
+        snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .unread,
+        5
+    );
+    let mut restored = Outbox::default();
+    restored.load(
+        context.account.account,
+        &page([stored(
+            3,
+            room,
+            Intent::MarkRead { message: 2 },
+            OutboxPhase::Dispatched,
+            3,
+        )]),
+    );
+    assert!(restored.entries[0].state == State::Uncertain);
+    assert!(matches!(
+        setting_command(
+            context,
+            OperationId::from_local(3),
+            &restored.entries[0].intent,
+            true
+        ),
+        Some(ProtocolRequest::ReconcileConversation(_))
+    ));
+}
+
+#[test]
+fn replacing_an_uncertain_unread_marker_keeps_the_old_intent_until_disk_commit() {
+    for success in [false, true] {
+        let (mut model, context, room) = model();
+        let first = stored(
+            1,
+            room.clone(),
+            Intent::MarkUnread,
+            OutboxPhase::Uncertain,
+            1,
+        );
+        let replacement = stored(2, room.clone(), Intent::MarkUnread, OutboxPhase::Queued, 2);
+        model
+            .outbox
+            .load(context.account.account, &page([first, replacement.clone()]));
+        model.outbox.entries[1].state = State::Saving;
+        model.outbox.entries[1].replaces = Some(OperationId::from_local(1));
+        assert_eq!(model.outbox.entries.len(), 2);
+        assert_eq!(
+            model.queue_intent(
+                RequestId(3),
+                context,
+                room.clone(),
+                Intent::MarkRead { message: 9 },
+                false
+            ),
+            Err(SubmitError::Busy)
+        );
+        model.complete_outbox_data(
+            Work::Save(context.account.account, OperationId::from_local(2)),
+            Ok(RuntimeReply::AccountData {
+                account: context.account.account,
+                result: Err(talk_adapters::identity::DataError::Unavailable),
+            }),
+        );
+        assert_eq!(
+            model.outbox.entries.len(),
+            2,
+            "lost acknowledgement retains both identities until the same replacement settles"
+        );
+        let result = if success {
+            Ok(DataResult::Queued(replacement))
+        } else {
+            Err(talk_adapters::identity::DataError::Capacity)
+        };
+        model.complete_outbox_data(
+            Work::Save(context.account.account, OperationId::from_local(2)),
+            Ok(RuntimeReply::AccountData {
+                account: context.account.account,
+                result,
+            }),
+        );
+        assert_eq!(model.outbox.entries.len(), 1);
+        assert_eq!(
+            model.outbox.entries[0].record.operation,
+            OperationId::from_local(if success { 2 } else { 1 })
+        );
+    }
+}
+
+#[test]
+fn resume_keeps_cached_content_and_forces_a_fresh_catchup_page_before_long_polling() {
+    let (mut model, context, _) = model();
+    observe(&mut model, context, 1, [details(context, 2, "cached")]);
+    model.project_history(context);
+    let retained = model.snapshot.messages.clone();
+    assert_eq!(
+        model
+            .history
+            .get(context)
+            .unwrap()
+            .poll_cursor(Instant::now()),
+        Some(2)
+    );
+    model.network_resumed(false);
+    model.project_history(context);
+    assert_eq!(model.snapshot.messages, retained);
+    assert_eq!(
+        model
+            .history
+            .get(context)
+            .unwrap()
+            .poll_cursor(Instant::now()),
+        None
+    );
+    assert!(model.history.get(context).unwrap().loaded);
+    observe(
+        &mut model,
+        context,
+        2,
+        [
+            details(context, 2, "cached"),
+            details(context, 3, "catchup"),
+        ],
+    );
+    model.project_history(context);
+    assert_eq!(model.snapshot.messages.as_slice().len(), 2);
+    assert_eq!(
+        model
+            .snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .filter(|m| m.local_id == 2)
+            .count(),
+        1
+    );
 }

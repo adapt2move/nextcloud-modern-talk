@@ -94,7 +94,7 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 pub(super) fn encode(values: &LocalPreferences) -> String {
     let mut encoded = format!(
-        "nextcloud-modern-talk-preferences 7\npalette={}\nappearance={}\nscale={}\nsidebar={}\nlocale={}\nlogin={}\nbackground={}\nmessages_banners={}\nmessages_sounds={}\nimportant_banners={}\nimportant_sounds={}\nincoming_calls_banners={}\nincoming_calls_sounds={}\ncalendar_banners={}\ncalendar_sounds={}\nmicrophone={}\nspeaker={}\ncamera={}\n",
+        "nextcloud-modern-talk-preferences 8\npalette={}\nappearance={}\nscale={}\nsidebar={}\nlocale={}\nlogin={}\nbackground={}\nmessages_banners={}\nmessages_sounds={}\nimportant_banners={}\nimportant_sounds={}\nincoming_calls_banners={}\nincoming_calls_sounds={}\ncalendar_banners={}\ncalendar_sounds={}\nmicrophone={}\nspeaker={}\ncamera={}\n",
         match values.palette {
             Palette::Blue => "blue",
             Palette::Sage => "sage",
@@ -221,6 +221,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
         Some("nextcloud-modern-talk-preferences 5") => 5,
         Some("nextcloud-modern-talk-preferences 6") => 6,
         Some("nextcloud-modern-talk-preferences 7") => 7,
+        Some("nextcloud-modern-talk-preferences 8") => 8,
         Some(header) if header.starts_with("nextcloud-modern-talk-preferences ") => {
             return Err(PreferenceError::UnsupportedVersion);
         }
@@ -229,8 +230,23 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
     let mut result = LocalPreferences::default();
     let mut seen = 0u32;
     let mut legacy = NotificationDelivery::default();
+    let mut filter_accounts = Vec::new();
     for line in lines {
         let (key, value) = line.split_once('=').ok_or(PreferenceError::InvalidData)?;
+        if version >= 8 && key == "layout_filter" {
+            let account = value
+                .split('|')
+                .next()
+                .ok_or(PreferenceError::InvalidData)?;
+            if filter_accounts.contains(&account)
+                || filter_accounts.len() >= talk_core::preferences::navigation::MAX_ACCOUNTS
+            {
+                return Err(PreferenceError::InvalidData);
+            }
+            filter_accounts.push(account);
+            navigation::decode_row(&mut result.navigation, key, value)?;
+            continue;
+        }
         if version >= 4 && matches!(key, "layout_sections" | "layout_group" | "layout_room") {
             navigation::decode_row(&mut result.navigation, key, value)?;
             continue;
@@ -415,10 +431,10 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
         result.notifications.calendar = NotificationDelivery::OFF;
     }
     // Existing login=false remains explicit. Older formats have no setup handoff.
-    // Migration is decoded in memory; the next explicit save atomically writes v7.
+    // Migration is decoded in memory; the next explicit save atomically writes v8.
     Ok((
         result,
-        if version < 7 {
+        if version < 8 {
             LoadState::Migrated
         } else {
             LoadState::Loaded

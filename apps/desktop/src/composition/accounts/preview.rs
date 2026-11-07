@@ -41,7 +41,7 @@ pub(in crate::composition) struct FrameJob {
     pub frame: content_video::Frame,
 }
 impl Accounts {
-    pub(super) fn stop_video(&mut self) {
+    pub(in crate::composition) fn stop_video(&mut self) {
         self.content_owner.video.pending = None;
         if let Some(active) = &self.content_owner.video.active {
             active.player.stop();
@@ -54,6 +54,7 @@ impl Accounts {
         attachment: CachedAttachment,
         generation: u64,
     ) {
+        self.stop_voice_player();
         self.stop_video();
         self.content_owner.video.pending = Some(Pending {
             scope: reference.context.account,

@@ -20,27 +20,30 @@ pub(super) struct Block {
 }
 
 impl Block {
+    pub fn prepared(source: SharedString, document: &markup::Document) -> Self {
+        let mut lines = document.lines.as_slice().to_vec();
+        if lines.is_empty() && !document.text.as_str().is_empty() {
+            // The parser intentionally uses one literal block when a
+            // bounded source exceeds its line budget. Never hide it.
+            lines.push(Line {
+                range: 0..document.text.as_str().len(),
+                code: false,
+                quote: false,
+                heading: 0,
+            });
+        }
+        Self {
+            source,
+            text: document.text.as_str().to_owned().into(),
+            lines,
+            spans: document.spans.as_slice().to_vec(),
+            links: document.links.as_slice().to_vec(),
+        }
+    }
     pub fn new(source: SharedString, rich: bool) -> Self {
         if rich {
             let document = markup::parse(&source);
-            let mut lines = document.lines.as_slice().to_vec();
-            if lines.is_empty() && !document.text.as_str().is_empty() {
-                // The parser intentionally uses one literal block when a
-                // bounded source exceeds its line budget. Never hide it.
-                lines.push(Line {
-                    range: 0..document.text.as_str().len(),
-                    code: false,
-                    quote: false,
-                    heading: 0,
-                });
-            }
-            Self {
-                source,
-                text: document.text.as_str().to_owned().into(),
-                lines,
-                spans: document.spans.as_slice().to_vec(),
-                links: document.links.as_slice().to_vec(),
-            }
+            Self::prepared(source, &document)
         } else {
             Self {
                 text: source.clone(),
@@ -84,6 +87,7 @@ impl Documents {
         self.source_bytes = 0;
     }
 
+    #[cfg(test)]
     pub fn link_count(&self, source: &str) -> usize {
         self.entries
             .iter()

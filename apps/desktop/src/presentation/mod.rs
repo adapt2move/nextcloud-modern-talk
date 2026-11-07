@@ -1,4 +1,5 @@
 mod account_removal;
+mod account_search;
 mod account_settings;
 mod attachments;
 mod call;
@@ -9,9 +10,13 @@ mod controls;
 mod conversation_dialog;
 mod creation;
 mod device_settings;
+mod discovery;
+mod federation;
 mod feedback;
 mod focus;
 pub mod input;
+#[cfg(feature = "dev-probes")]
+mod latency_probe;
 pub mod localization;
 mod messaging;
 mod motion;
@@ -19,17 +24,24 @@ mod navigation;
 mod onboarding;
 mod organization;
 mod overlays;
+mod own_status;
+mod own_status_message;
+mod people_card;
 mod permissions;
 pub mod preferences;
 pub(super) mod probes;
+mod references;
+mod reminders;
 mod selectable;
 mod settings;
 mod settings_pages;
 mod shell;
 mod sidebar;
 mod state;
+mod switcher;
 pub mod theme;
 mod toast;
+mod typing;
 mod window_chrome;
 
 use gpui::{
@@ -39,6 +51,8 @@ use gpui::{
 use input::TextInput;
 use state::{CallEntry, Drafts, call_entry, valid_snapshot};
 use std::time::Instant;
+
+const CALL_CLOCK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 use talk_core::ui::presentation::{
     CallStage, Completion, ContentState, ConversationRef, ConversationView, NativeDesktopPort,
     PresentationSnapshot, RequestId, ServerInput, StorageChoice, UiIntent,
@@ -52,21 +66,29 @@ pub enum Overlay {
     RoomInfo,
     Participants,
     Files,
+    CloudFiles,
     Accounts,
     Thread,
     Forward,
     CallParticipants,
     CallChat,
+    ConfirmEndCall,
+    ConfirmRecording,
+    RecordingConsent,
     Search,
     Create,
     Discover,
     Organize,
     ContentPreview,
     CreatePoll,
+    PollDetails,
+    Reminders,
+    Federation,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SidebarDestination {
     Conversations,
+    Threads,
     Inbox,
     Archive,
 }
@@ -83,17 +105,23 @@ pub enum LocalAction {
     Window(window_chrome::Action),
     Content(content::Action),
     CreateMode(bool),
+    CreatePublic(bool),
+    CreatePreset(Option<talk_core::ui::Text<128>>),
+    AddCreationInvite(talk_core::ui::conversation::AccountPersonRef),
+    RemoveCreationInvite(talk_core::ui::conversation::AccountPersonRef),
     FindPeople,
-    FindSearchPeople,
     CreateConversation,
     CreateDirect(talk_core::ui::conversation::AccountPersonRef),
     CheckUpdates,
     InstallUpdate(u64),
     Room(conversation_dialog::Action),
+    Person(people_card::Action),
     Message(messaging::Action),
     MessageIn(ConversationRef, messaging::Action),
     EmojiPicker(ConversationRef),
+    ThreadEmojiPicker(ConversationRef),
     Open(Overlay),
+    OpenRoomNotifications,
     Close,
     DismissFeedback,
     DismissActionToast(ConversationRef, u64),
@@ -101,9 +129,39 @@ pub enum LocalAction {
     ShowIncoming,
     ToggleNavigation,
     ToggleCallChat,
+    ToggleCallParticipants,
+    ToggleCallModeration,
+    ToggleCallSecondary,
+    DismissRecordingFailure(CallScope),
+    ToggleCallReactions(CallScope),
+    ConfirmEndCall,
+    ConfirmRecording,
+    ToggleRecordingConsent(CallScope),
+    ConfirmRecordingConsent(CallScope),
+    DeclineRecordingConsent(CallScope),
+    MinimizeCall(CallScope),
+    ExpandCall(CallScope),
+    ToggleCallFullscreen(CallScope),
+    JoinRoomCall(CallScope),
+    AcceptCallWithVideo,
+    StartDirectWithVideo,
+    FocusCallParticipant(CallScope, Option<u128>),
+    SpeakerCallLayout(CallScope, bool),
     Navigate(ConversationRef),
+    ToggleRoomMenu(ConversationRef, &'static str),
+    MarkRoomUnread(ConversationRef),
+    NewThread(ConversationRef),
+    OpenSubscribedThread(ConversationRef, u128),
+    SendThread,
+    ToggleThreadOptions,
+    BeginThreadRename,
+    SaveThreadRename,
+    ThreadNotification(i8),
+    OpenReminder(ConversationRef, u128),
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
+    SidebarFilter(talk_core::preferences::navigation::SidebarFilter),
+    SidebarRoomNotifications(ConversationRef),
     Favorite(ConversationRef, bool),
     Archive(ConversationRef, bool),
     Send,
@@ -141,6 +199,17 @@ pub enum LocalAction {
     NotificationAccess(talk_core::preferences::notifications::NotificationAccessAction),
     ReloadAccountPreferences,
     AccountPreference(talk_core::preferences::account::AccountPreferenceChange),
+    ToggleOwnStatus,
+    EditStatusMessage,
+    ToggleStatusEmoji,
+    ToggleStatusExpiry,
+    SelectStatusEmoji(&'static str),
+    BackStatusMenu,
+    SaveStatusMessage,
+    ClearStatusMessage,
+    SelectStatusExpiry(talk_core::preferences::account::StatusClearAfter),
+    SelectPredefinedStatus(usize),
+    SetOwnStatus(talk_core::preferences::account::StatusChoice),
     SaveUploadFolder,
     RefreshDevice(talk_core::preferences::devices::DeviceKind),
     Permission(
@@ -148,6 +217,7 @@ pub enum LocalAction {
         talk_core::preferences::permissions::PermissionAction,
     ),
     ToggleDevicePicker(talk_core::preferences::devices::DeviceKind),
+    CallDevicePicker(CallScope, talk_core::preferences::devices::DeviceKind),
     OpenDeviceSettings,
     SelectDevice(
         talk_core::preferences::devices::DeviceKind,
@@ -157,6 +227,18 @@ pub enum LocalAction {
     StopDevice(talk_core::preferences::devices::DeviceKind),
     Search,
     SearchKind(SearchKind),
+    AccountSearchSubmit,
+    AccountSearchMore,
+    AccountSearchFindPerson,
+    AccountSearchSelf,
+    AccountSearchPerson(talk_core::ui::conversation::AccountPersonRef),
+    AccountSearchRooms,
+    AccountSearchRoom(Option<ConversationRef>),
+    AccountSearchHit(ConversationRef, u128),
+    DiscoverSearch,
+    DiscoverJoin(ConversationRef),
+    ToggleReference(ConversationRef, u128, u16),
+    OpenReference(ConversationRef, u128, u16),
     CreateGroup,
     RenameLocalGroup(talk_core::preferences::navigation::NavigationGroupId),
     MoveLocalGroup(talk_core::preferences::navigation::NavigationGroupId, bool),
@@ -189,20 +271,40 @@ pub enum ButtonStyle {
 
 use crate::presentation::probes::Probe;
 
+/// Prepared, bounded decorative images; composition owns decoding the embedded assets.
+pub struct MaterialImages {
+    pub grain: Option<gpui::ImageSource>,
+    pub light: Option<gpui::ImageSource>,
+    pub dark: Option<gpui::ImageSource>,
+}
+
 pub struct InitialView {
     pub probe: Probe,
     pub development: bool,
+    pub material_preview: bool,
+    pub material_images: MaterialImages,
     pub palette: Palette,
     pub appearance: Appearance,
     pub overlay: Option<Overlay>,
     pub prejoin: bool,
+    pub focus_first_call_participant: bool,
+    pub start_with_call_dock: bool,
+    pub start_with_call_devices: bool,
     pub onboarding: bool,
+    pub threads_fixture: bool,
+    pub thread_options_fixture: bool,
+    pub room_menu_fixture: bool,
+    pub new_thread_fixture: bool,
+    pub private_reply_fixture: bool,
     pub scale: u16,
+    pub sidebar_menu_fixture: bool,
 }
 
 use crate::presentation::feedback::Feedback;
 
 pub struct Desktop {
+    materials: controls::Materials,
+    material_preview: bool,
     text_selection: Entity<selectable::Selection>,
     _text_selection_observer: Subscription,
     _text_link_subscription: Subscription,
@@ -211,6 +313,12 @@ pub struct Desktop {
     // never cleared by an error snapshot; composition owns restart/quit.
     update_restart_pending: bool,
     room_ui: conversation_dialog::RoomUi,
+    people_card: people_card::Card,
+    account_search_ui: account_search::AccountSearchUi,
+    discovery_search: Entity<TextInput>,
+    discovery_request: u64,
+    discovery_join: Option<ConversationRef>,
+    reference_ui: references::ReferenceUi,
     message_ui: messaging::MessageUi,
     content_ui: content::ContentUi,
     offline_notice: connectivity::Notice,
@@ -223,6 +331,8 @@ pub struct Desktop {
     hovered_control: Option<gpui::ElementId>,
     reduced_motion: bool,
     motion_trigger: Option<motion::MotionTrigger>,
+    unread_pop: Option<(ConversationRef, Instant)>,
+    toolbar_hover: motion::HoverMotion,
     dialog_motion: motion::DialogMotion,
     motion_frames: std::rc::Rc<std::cell::Cell<u64>>,
     emoji_picker_pending: Option<(ConversationRef, u64)>,
@@ -230,6 +340,7 @@ pub struct Desktop {
     emoji_picker_context: Option<ConversationRef>,
     keyboard_navigation: bool,
     highlighted_message: Option<(ConversationRef, u128)>,
+    highlight_started: Option<Instant>,
     dismissed_terminal_call: Option<CallScope>,
     pub snapshot: PresentationSnapshot,
     projection_blocked: bool,
@@ -274,17 +385,46 @@ pub struct Desktop {
         talk_core::preferences::devices::DevicePreferences,
     )>,
     camera_image: Option<gpui::ImageSource>,
-    call_images: Vec<(CallScope, u128, std::time::Instant, gpui::ImageSource)>,
+    call_images: Vec<(
+        CallScope,
+        talk_core::ui::presentation::CallTileId,
+        std::time::Instant,
+        gpui::ImageSource,
+    )>,
     device_picker: Option<talk_core::preferences::devices::DeviceKind>,
+    call_device_picker: Option<(CallScope, talk_core::preferences::devices::DeviceKind)>,
     pending_device_focus: Option<gpui::ElementId>,
     pub overlay: Option<Overlay>,
     startup_account_dialog: bool,
     destination: SidebarDestination,
     collapsed_sections: [bool; 5],
+    room_menu: Option<(ConversationRef, &'static str)>,
     archive_request: u64,
     pub navigation_open: bool,
     sidebar_hidden: bool,
     pub call_chat_open: bool,
+    call_participants_open: bool,
+    call_moderation_open: bool,
+    call_secondary_open: bool,
+    call_reactions_open: Option<CallScope>,
+    call_focus: Option<(CallScope, u128)>,
+    call_speaker: Option<CallScope>,
+    call_minimized: Option<CallScope>,
+    call_started: Option<(CallScope, std::time::Instant)>,
+    call_reconnecting_since: Option<(CallScope, Instant)>,
+    call_ended_since: Option<(CallScope, Instant)>,
+    call_ended_duration: Option<(CallScope, std::time::Duration)>,
+    call_ended_frame_pending: Option<CallScope>,
+    dismissed_recording_failure: Option<CallScope>,
+    call_recovery: call::recovery::Recovery,
+    call_clock: Option<gpui::Task<()>>,
+    recording_consent: call::consent::State,
+    fixture_call_reaction: Option<(CallScope, u64)>,
+    recent_call_reaction: Option<(
+        CallScope,
+        talk_core::ui::presentation::CallReactionView,
+        Instant,
+    )>,
     onboarding_open: bool,
     pub prejoin: Option<CallScope>,
     pub dismissed_incoming: Option<CallScope>,
@@ -295,8 +435,13 @@ pub struct Desktop {
     pub search: Entity<TextInput>,
     pub sidebar_filter: Entity<TextInput>,
     pub composer: Entity<TextInput>,
+    thread_composer: Entity<TextInput>,
+    thread_title: Entity<TextInput>,
     composer_focus: FocusHandle,
+    thread_composer_focus: FocusHandle,
     composer_active: bool,
+    typing_input: typing::Input,
+    thread_composer_active: bool,
     file_send: Option<attachments::PendingSend>,
     pub conversation_name: Entity<TextInput>,
     group_name: Entity<TextInput>,
@@ -304,17 +449,49 @@ pub struct Desktop {
     account_preferences: Option<talk_core::preferences::account::AccountPreferenceSnapshot>,
     account_preference_request: u64,
     account_preference_error: Option<talk_core::preferences::account::AccountPreferenceError>,
+    own_status_open: bool,
+    own_status_editing: bool,
+    own_status_emoji_open: bool,
+    own_status_expiry_open: bool,
+    own_status_message_input: Entity<TextInput>,
+    own_status_icon_input: Entity<TextInput>,
+    own_status_clear_after: talk_core::preferences::account::StatusClearAfter,
+    own_status_message_error: bool,
+    own_message_optimistic: Option<(
+        talk_core::ui::AccountScope,
+        talk_core::preferences::RequestId,
+        Option<talk_core::preferences::account::StatusMessage>,
+    )>,
+    own_status_focus: bool,
+    own_status_optimistic: Option<(
+        talk_core::ui::AccountScope,
+        talk_core::preferences::RequestId,
+        talk_core::preferences::account::StatusChoice,
+    )>,
+    own_status_reconcile: Option<(talk_core::ui::AccountScope, std::time::Instant)>,
+    own_status_loaded: Option<talk_core::ui::AccountScope>,
     account_removal: account_removal::AccountRemovalUi,
     pub search_kind: SearchKind,
     directory_query: Option<(talk_core::ui::AccountScope, String)>,
+    switcher: switcher::Switcher,
     pub thread_parent: Option<(ConversationRef, u128)>,
+    pending_thread_open: Option<(ConversationRef, u128)>,
+    thread_width: f32,
+    thread_options_open: bool,
+    thread_renaming: bool,
     drafts: Drafts,
+    thread_drafts: Drafts,
+    draft_storage_unavailable: Option<ConversationRef>,
     root_focus: FocusHandle,
     modal_focus: FocusHandle,
     pending_modal_focus: bool,
     pending_feedback_focus: bool,
     pending_navigation_focus: Option<bool>,
     diagnostic_frames: u8,
+    #[cfg(debug_assertions)]
+    latency_probe: bool,
+    #[cfg(feature = "dev-probes")]
+    perf_probe: Option<latency_probe::PerfRun>,
     return_focus: Option<FocusHandle>,
     prejoin_return_focus: Option<CallScope>,
     pending_prejoin_return: Option<CallScope>,
@@ -322,8 +499,9 @@ pub struct Desktop {
     incoming_return_focus: Option<FocusHandle>,
     last_incoming_scope: Option<CallScope>,
     _appearance_observer: Subscription,
-    _input_observers: [Subscription; 3],
-    _composer_focus_observers: [Subscription; 2],
+    _input_observers: [Subscription; 4],
+    _composer_paste_subscription: Subscription,
+    _composer_focus_observers: [Subscription; 4],
     _dialog_observers: Vec<Subscription>,
     pending_ack: Option<talk_core::ui::presentation::SubmissionResult>,
     pub theme: Theme,
@@ -339,12 +517,23 @@ impl Desktop {
         let InitialView {
             probe,
             development,
+            material_preview,
+            material_images,
             palette,
             appearance,
             overlay: initial_overlay,
             prejoin,
+            focus_first_call_participant,
+            start_with_call_dock,
+            start_with_call_devices,
             onboarding,
+            threads_fixture,
+            thread_options_fixture,
+            room_menu_fixture,
+            new_thread_fixture,
+            private_reply_fixture,
             scale,
+            sidebar_menu_fixture,
         } = initial;
         let snapshot = port
             .take_snapshot()
@@ -353,6 +542,23 @@ impl Desktop {
             valid_snapshot(&snapshot),
             "composition supplied inconsistent initial projection"
         );
+        let consent_scope = call::consent::scope(&snapshot);
+        let mut recording_consent = call::consent::State::default();
+        recording_consent.observe(consent_scope);
+        let initial_overlay = initial_overlay.or(consent_scope.map(|_| Overlay::RecordingConsent));
+        let fixture_sidebar_menu = if sidebar_menu_fixture {
+            snapshot.selected.map(|context| (context, "room"))
+        } else {
+            None
+        };
+        let initial_room_menu = (development && room_menu_fixture)
+            .then(|| {
+                snapshot.conversations.as_slice().iter().find(|room| {
+                    Some(room.context) != snapshot.selected && room.archived == Some(false)
+                })
+            })
+            .flatten()
+            .map(|room| (room.context, "room"));
         let startup_account_dialog = initial_overlay.is_none()
             && snapshot.accounts.as_slice().is_empty()
             && !snapshot.saved_accounts.as_slice().is_empty();
@@ -384,22 +590,40 @@ impl Desktop {
             input.markdown = true;
             input
         });
+        let thread_composer = cx.new(|cx| {
+            let mut input = TextInput::new("Im Thread antworten …", 4096, theme, cx);
+            input.multiline = true;
+            input.markdown = true;
+            input
+        });
+        let thread_title = cx.new(|cx| TextInput::new("Thread-Titel", 256, theme, cx));
         let conversation_name = cx.new(|cx| TextInput::new("Name des Gesprächs", 256, theme, cx));
         let group_name = cx.new(|cx| TextInput::new("Name der Gruppe", 128, theme, cx));
         let upload_folder = cx.new(|cx| TextInput::new("/Talk", 2048, theme, cx));
+        let own_status_message_input =
+            cx.new(|cx| TextInput::new("Statusnachricht", 320, theme, cx));
+        let own_status_icon_input = cx.new(|cx| TextInput::new("Emoji", 64, theme, cx));
         let weak = cx.weak_entity();
         let observer = window.observe_window_appearance(move |_, cx| {
             let _ = weak.update(cx, |_, cx| cx.notify());
         });
         let input_observers = [
-            cx.observe(&search, |_, _, cx| cx.notify()),
+            cx.observe(&search, |this, _, cx| this.switcher_input_changed(cx)),
             cx.observe(&sidebar_filter, |_, _, cx| cx.notify()),
             cx.observe(&composer, |_, _, cx| cx.notify()),
+            cx.observe(&thread_composer, |_, _, cx| cx.notify()),
         ];
+        let composer_paste_subscription =
+            cx.subscribe(&composer, |this, _, content: &input::PastedContent, cx| {
+                this.paste_clipboard_attachment(content, cx);
+            });
         let composer_focus = cx.focus_handle().tab_stop(false);
+        let thread_composer_focus = cx.focus_handle().tab_stop(false);
         let composer_focus_observers = [
             cx.on_focus_in(&composer_focus, window, |_, _, cx| cx.notify()),
             cx.on_focus_out(&composer_focus, window, |_, _, _, cx| cx.notify()),
+            cx.on_focus_in(&thread_composer_focus, window, |_, _, cx| cx.notify()),
+            cx.on_focus_out(&thread_composer_focus, window, |_, _, _, cx| cx.notify()),
         ];
         let prejoin = if prejoin {
             snapshot
@@ -414,7 +638,7 @@ impl Desktop {
         } else {
             None
         };
-        if initial_overlay.is_some() {
+        if initial_overlay.is_some() || prejoin.is_some() {
             modal_focus.focus(window)
         } else {
             root_focus.focus(window)
@@ -428,6 +652,9 @@ impl Desktop {
                 preferences.active.locale.resolve(&[])
             };
         let room_ui = conversation_dialog::RoomUi::new(theme, cx);
+        let account_search_ui = account_search::AccountSearchUi::new(theme, cx);
+        let discovery_search =
+            cx.new(|cx| TextInput::new("Freigegebene Gespräche suchen …", 256, theme, cx));
         let message_ui = messaging::MessageUi::new(cx);
         let content_ui =
             content::ContentUi::new(theme, snapshot.active_account, snapshot.selected, cx);
@@ -435,18 +662,77 @@ impl Desktop {
         for input in room_ui
             .inputs()
             .into_iter()
-            .chain([message_ui.search.clone(), message_ui.time_input.clone()])
+            .chain(account_search_ui.inputs())
+            .chain([discovery_search.clone()])
+            .chain([
+                message_ui.search.clone(),
+                own_status_message_input.clone(),
+                own_status_icon_input.clone(),
+                thread_composer.clone(),
+                thread_title.clone(),
+                message_ui.scheduled_input.clone(),
+            ])
             .chain(content_ui.inputs().cloned())
         {
             dialog_observers.push(cx.observe(&input, |_, _, cx| cx.notify()));
         }
+        let call_speaker = if development && focus_first_call_participant {
+            snapshot.call.as_ref().map(|call| call.scope)
+        } else {
+            None
+        };
+        let call_minimized = if development && start_with_call_dock {
+            snapshot.call.as_ref().map(|call| call.scope)
+        } else {
+            None
+        };
+        let call_device_picker = if development && start_with_call_devices {
+            snapshot.call.as_ref().map(|call| {
+                (
+                    call.scope,
+                    talk_core::preferences::devices::DeviceKind::Microphone,
+                )
+            })
+        } else {
+            None
+        };
+        let call_started = snapshot
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Active)
+            .map(|call| (call.scope, std::time::Instant::now()));
+        let call_reconnecting_since = snapshot
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Reconnecting)
+            .map(|call| (call.scope, Instant::now()));
+        let recent_call_reaction = snapshot.call.as_ref().and_then(|call| {
+            call.latest_reaction
+                .clone()
+                .map(|reaction| (call.scope, reaction, Instant::now()))
+        });
+        let fixture_call_reaction = if development {
+            recent_call_reaction
+                .as_ref()
+                .map(|(scope, reaction, _)| (*scope, reaction.sequence))
+        } else {
+            None
+        };
         let mut desktop = Self {
+            materials: controls::Materials::new(material_images, cx),
+            material_preview,
             updates: settings_port.update_snapshot(),
             update_restart_pending: false,
             text_selection,
             _text_selection_observer: text_selection_observer,
             _text_link_subscription: text_link_subscription,
             room_ui,
+            people_card: people_card::Card::new(cx),
+            account_search_ui,
+            discovery_search,
+            discovery_request: 0,
+            discovery_join: None,
+            reference_ui: references::ReferenceUi::default(),
             message_ui,
             content_ui,
             offline_notice: connectivity::Notice::default(),
@@ -459,6 +745,8 @@ impl Desktop {
             hovered_control: None,
             reduced_motion: settings_port.reduced_motion(),
             motion_trigger: None,
+            unread_pop: None,
+            toolbar_hover: motion::HoverMotion::default(),
             dialog_motion: motion::DialogMotion::default(),
             motion_frames: Default::default(),
             emoji_picker_pending: None,
@@ -466,6 +754,7 @@ impl Desktop {
             emoji_picker_context: None,
             keyboard_navigation: false,
             highlighted_message: None,
+            highlight_started: None,
             dismissed_terminal_call: None,
             snapshot,
             projection_blocked: false,
@@ -498,8 +787,9 @@ impl Desktop {
             device_session: None,
             applied_devices: None,
             camera_image: None,
-            call_images: Vec::with_capacity(16),
-            device_picker: None,
+            call_images: Vec::with_capacity(17),
+            device_picker: call_device_picker.map(|(_, kind)| kind),
+            call_device_picker,
             pending_device_focus: None,
             settings_tab: if development {
                 preferences::SettingsTab::Appearance
@@ -508,12 +798,35 @@ impl Desktop {
             },
             overlay: initial_overlay,
             startup_account_dialog,
-            destination: SidebarDestination::Conversations,
+            destination: if development && threads_fixture {
+                SidebarDestination::Threads
+            } else {
+                SidebarDestination::Conversations
+            },
             collapsed_sections: [false; 5],
+            room_menu: fixture_sidebar_menu.or(initial_room_menu),
             archive_request: 0,
             navigation_open: false,
             sidebar_hidden: false,
-            call_chat_open: true,
+            call_chat_open: false,
+            call_participants_open: false,
+            call_moderation_open: false,
+            call_secondary_open: false,
+            call_reactions_open: fixture_call_reaction.map(|(scope, _)| scope),
+            call_focus: None,
+            call_speaker,
+            call_minimized,
+            call_started,
+            call_reconnecting_since,
+            call_ended_since: None,
+            call_ended_duration: None,
+            call_ended_frame_pending: None,
+            dismissed_recording_failure: None,
+            call_recovery: call::recovery::Recovery::default(),
+            call_clock: None,
+            recording_consent,
+            recent_call_reaction,
+            fixture_call_reaction,
             onboarding_open: onboarding,
             prejoin,
             dismissed_incoming: None,
@@ -524,8 +837,13 @@ impl Desktop {
             search,
             sidebar_filter,
             composer,
+            thread_composer,
+            thread_title,
             composer_focus,
+            thread_composer_focus,
             composer_active: false,
+            typing_input: typing::Input::default(),
+            thread_composer_active: false,
             file_send: None,
             conversation_name,
             group_name,
@@ -533,17 +851,41 @@ impl Desktop {
             account_preferences: None,
             account_preference_request: 0,
             account_preference_error: None,
+            own_status_open: development && matches!(probe, Probe::Status | Probe::StatusMessage),
+            own_status_editing: development && probe == Probe::StatusMessage,
+            own_status_emoji_open: false,
+            own_status_expiry_open: false,
+            own_status_message_input,
+            own_status_icon_input,
+            own_status_clear_after: talk_core::preferences::account::StatusClearAfter::Never,
+            own_status_message_error: false,
+            own_message_optimistic: None,
+            own_status_focus: false,
+            own_status_optimistic: None,
+            own_status_reconcile: None,
+            own_status_loaded: None,
             account_removal: account_removal::AccountRemovalUi::new(cx),
             search_kind: SearchKind::All,
             directory_query: None,
+            switcher: switcher::Switcher::default(),
             thread_parent: None,
+            pending_thread_open: None,
+            thread_width: 400.,
+            thread_options_open: false,
+            thread_renaming: false,
             drafts: Drafts::default(),
+            thread_drafts: Drafts::thread_editor(),
+            draft_storage_unavailable: None,
             root_focus,
             modal_focus,
             pending_modal_focus: initial_overlay.is_some() || prejoin.is_some(),
             pending_feedback_focus: false,
             pending_navigation_focus: None,
             diagnostic_frames: 0,
+            #[cfg(debug_assertions)]
+            latency_probe: false,
+            #[cfg(feature = "dev-probes")]
+            perf_probe: None,
             return_focus: None,
             prejoin_return_focus: None,
             pending_prejoin_return: None,
@@ -552,11 +894,15 @@ impl Desktop {
             last_incoming_scope: None,
             _appearance_observer: observer,
             _input_observers: input_observers,
+            _composer_paste_subscription: composer_paste_subscription,
             _composer_focus_observers: composer_focus_observers,
             _dialog_observers: dialog_observers,
             pending_ack: None,
             theme,
         };
+        if development && matches!(probe, Probe::Status | Probe::StatusMessage) {
+            desktop.account_preferences = desktop.fixture_own_status();
+        }
         if development && initial_overlay == Some(Overlay::Thread) {
             desktop.thread_parent = desktop.snapshot.selected.and_then(|c| {
                 desktop
@@ -567,9 +913,82 @@ impl Desktop {
                     .find(|m| m.reply_count > 0)
                     .map(|m| (c, m.local_id))
             });
+            if let Some((context, root)) = desktop.thread_parent {
+                desktop.thread_drafts.set_target(
+                    context,
+                    talk_core::ui::messaging::ComposeTarget {
+                        thread: Some(root),
+                        ..Default::default()
+                    },
+                );
+            }
+            desktop.thread_options_open = thread_options_fixture;
+        }
+        if development
+            && new_thread_fixture
+            && let Some(context) = desktop.snapshot.selected
+        {
+            let _ = desktop.drafts.set_target(
+                context,
+                talk_core::ui::messaging::ComposeTarget {
+                    new_thread: true,
+                    ..Default::default()
+                },
+            );
+            let body = "Plan für den nächsten Release";
+            let _ = desktop.drafts.save(context, body);
+            desktop.composer.update(cx, |input, _| {
+                input.set_value(body);
+            });
+        }
+        if development
+            && private_reply_fixture
+            && let Some(context) = desktop.snapshot.selected
+            && let Ok(source) = talk_core::preferences::navigation::NavigationRoomKey::new(
+                "r1:00000000000000000000000000000001",
+            )
+        {
+            let target = talk_core::ui::messaging::PrivateReplyTarget {
+                source,
+                message: 12,
+                author: talk_core::ui::Text::new("Mara Fischer").expect("fixture author"),
+                body: talk_core::ui::Text::new("Können wir den Entwurf heute gemeinsam ansehen?")
+                    .expect("fixture quote"),
+            };
+            let _ = desktop.drafts.set_target(
+                context,
+                talk_core::ui::messaging::ComposeTarget {
+                    private_reply: Some(target),
+                    ..Default::default()
+                },
+            );
         }
         if development && initial_overlay == Some(Overlay::Search) {
-            desktop.search.update(cx, |i, _| i.set_value("Navigation"));
+            let term = desktop
+                .snapshot
+                .search_panel
+                .as_ref()
+                .map(|p| p.term.as_str().to_owned());
+            if term.is_some() {
+                desktop.search_kind = SearchKind::Messages;
+            }
+            desktop
+                .search
+                .update(cx, |i, _| i.set_value(term.as_deref().unwrap_or("Produkt")));
+            desktop.switcher_input_changed(cx);
+        }
+        if development
+            && initial_overlay == Some(Overlay::Create)
+            && desktop.snapshot.create_panel.is_some()
+        {
+            desktop.room_ui.create_direct = false;
+            desktop
+                .conversation_name
+                .update(cx, |i, _| i.set_value("Projekt Atlas"));
+            desktop
+                .room_ui
+                .description
+                .update(cx, |i, _| i.set_value("Ideen und Updates für das Projekt."));
         }
         if development {
             desktop
@@ -577,7 +996,61 @@ impl Desktop {
                 .update(cx, |i, _| i.set_value("cloud.example.test"));
         }
         desktop.refresh_message_ui(cx);
+        if development
+            && let Some((context, message, emoji)) =
+                desktop.snapshot.message_panel.as_ref().and_then(|panel| {
+                    panel
+                        .reaction_authors
+                        .as_slice()
+                        .first()
+                        .map(|authors| (panel.context, authors.message, authors.emoji.clone()))
+                })
+        {
+            desktop.show_reaction_authors(context, message, emoji, true);
+        }
         desktop
+            .call_recovery
+            .observe(desktop.snapshot.call.as_ref(), Instant::now());
+        desktop.refresh_message_ui(cx);
+        if desktop
+            .snapshot
+            .call
+            .as_ref()
+            .is_some_and(|c| matches!(c.stage, CallStage::Active | CallStage::Reconnecting))
+        {
+            desktop.start_call_clock(cx);
+        }
+        desktop
+    }
+    // One weak, retained clock drives elapsed labels and reconnect disclosure.
+    // It is cancelled as soon as the observed call leaves these stages.
+    fn start_call_clock(&mut self, cx: &mut Context<Self>) {
+        if self.call_clock.is_some() {
+            return;
+        }
+        self.call_clock = Some(cx.spawn(async move |desktop, cx| {
+            loop {
+                cx.background_executor().timer(CALL_CLOCK_INTERVAL).await;
+                let keep = desktop.update(cx, |this, cx| {
+                    if let Some((scope, at)) = this.call_ended_since
+                        && at.elapsed() >= std::time::Duration::from_secs(3)
+                        && this.snapshot.call.as_ref().is_some_and(|call| {
+                            call.scope == scope && call.stage == CallStage::Ended
+                        })
+                    {
+                        this.dismissed_terminal_call = Some(scope);
+                        this.call_ended_since = None;
+                        cx.notify();
+                        return false;
+                    }
+                    cx.notify();
+                    true
+                });
+                if !matches!(keep, Ok(true)) {
+                    break;
+                }
+            }
+        }));
     }
     fn account_name(&self, account: &talk_core::ui::presentation::AccountView) -> String {
         if account.label.as_str().is_empty() {
@@ -603,9 +1076,16 @@ impl Desktop {
         if self.reduced_motion != reduced_motion {
             self.reduced_motion = reduced_motion;
             self.motion_trigger = None;
+            self.unread_pop = None;
+            self.toolbar_hover.clear();
             cx.notify();
         }
         self.refresh_preferences(cx);
+        if self.theme.reduced_transparency
+            != (self.settings_port.reduced_transparency() && !self.material_preview)
+        {
+            cx.notify();
+        }
         self.refresh_onboarding(cx);
         if let Some(result) = self.pending_ack
             && self
@@ -617,6 +1097,24 @@ impl Desktop {
                 .is_ok()
         {
             self.pending_ack = None;
+        }
+        if let Some(context) = self.snapshot.selected
+            && self.message_ui.editing.is_none()
+            && self.message_ui.composer_load_failed != Some(context)
+            && !self.composer.read(cx).composing()
+        {
+            let _ = self
+                .drafts
+                .save(context, self.composer.read(cx).committed_value());
+        }
+        let _ = self.save_thread_draft(cx);
+        let draft_error = self
+            .drafts
+            .persist(self.port.as_mut())
+            .or(self.thread_drafts.persist(self.port.as_mut()));
+        if self.draft_storage_unavailable != draft_error {
+            self.draft_storage_unavailable = draft_error;
+            cx.notify();
         }
         let Some(next) = self.port.take_snapshot() else {
             return;
@@ -633,9 +1131,40 @@ impl Desktop {
             cx.notify();
             return;
         }
+        if self.snapshot.selected != next.selected
+            || self.snapshot.active_account != next.active_account
+        {
+            self.toolbar_hover.clear();
+        }
+        match motion::unread_update(&self.snapshot, &next, self.reduced_motion) {
+            motion::UnreadUpdate::Retire => self.unread_pop = None,
+            motion::UnreadUpdate::Keep => {}
+            motion::UnreadUpdate::Admit(context) => {
+                self.unread_pop = Some((context, Instant::now()))
+            }
+        }
         self.projection_blocked = false;
+        self.call_recovery
+            .observe(next.call.as_ref(), Instant::now());
+        if self.snapshot.call.as_ref().map(|call| call.scope)
+            != next.call.as_ref().map(|call| call.scope)
+        {
+            self.call_chat_open = false;
+            self.call_participants_open = false;
+            self.call_moderation_open = false;
+            self.call_secondary_open = false;
+            self.call_clock = None;
+        }
         let previous = self.snapshot.selected;
         let previous_account = self.snapshot.active_account;
+        let thread_unchanged = self.thread_parent.is_none_or(|(context, _)| {
+            self.thread_drafts.observe_editor(
+                context,
+                self.thread_composer.read(cx).edit_generation(),
+                self.thread_composer.read(cx).composing(),
+            )
+        });
+        let _ = self.save_thread_draft(cx);
         let selected_rebind = previous
             .and_then(|context| state::cached_draft_context(&self.snapshot, &next, context))
             .is_some_and(|context| Some(context) == next.selected);
@@ -654,6 +1183,7 @@ impl Desktop {
             let _ = self.drafts.save(c, body);
         }
         self.drafts.rebind_cached(&self.snapshot, &next);
+        self.thread_drafts.rebind_cached(&self.snapshot, &next);
         let mut reset_draft = false;
         let completed_context = next
             .submission
@@ -673,9 +1203,49 @@ impl Desktop {
                     "Sendestatus unklar. Vor erneutem Senden muss der Status abgeglichen werden.",
                 )),
             }
-            .map(|feedback| feedback.in_conversation(completed_context.unwrap_or(result.context)));
+            .map(|feedback| {
+                feedback
+                    .in_conversation(completed_context.unwrap_or(result.context))
+                    .on_surface(None)
+            });
             reset_draft = completed_context == next.selected && composer_unchanged;
             // A Busy acknowledgement leaves the same result in the producer's latest slot.
+            self.pending_ack = Some(result);
+        }
+        let thread_completed_context = next
+            .submission
+            .and_then(|result| self.thread_drafts.submission_context(result));
+        if let Some(result) = next.submission
+            && self.thread_drafts.complete(result)
+        {
+            if thread_unchanged
+                && self.thread_parent.is_some_and(|(context, _)| {
+                    Some(context) == thread_completed_context && Some(context) == next.selected
+                })
+            {
+                let text = self
+                    .thread_drafts
+                    .text(thread_completed_context.unwrap_or(result.context))
+                    .to_owned();
+                self.thread_composer.update(cx, |input, cx| {
+                    input.set_context_value(&text);
+                    cx.notify();
+                });
+            }
+            self.feedback = match result.result {
+                Completion::Queued | Completion::ServerAccepted => None,
+                Completion::Failed(_) => Some(Feedback::error(
+                    "Nicht gesendet. Dein Entwurf bleibt erhalten.",
+                )),
+                Completion::Uncertain => Some(Feedback::warning(
+                    "Sendestatus unklar. Vor erneutem Senden muss der Status abgeglichen werden.",
+                )),
+            }
+            .map(|notice| {
+                notice
+                    .in_conversation(result.context)
+                    .on_surface(Some(Overlay::Thread))
+            });
             self.pending_ack = Some(result);
         }
         if let Some(result) = next.organization_result {
@@ -719,12 +1289,188 @@ impl Desktop {
             self.pending_modal_focus = true;
         }
         self.drafts.retain_accounts(&next);
+        self.thread_drafts.retain_accounts(&next);
         if previous != next.selected || previous_account != next.active_account {
             self.retire_emoji_picker();
             self.text_selection.update(cx, |owner, cx| owner.clear(cx));
         }
         self.refresh_account_removal(&next);
+        let consent_scope = call::consent::scope(&next);
+        if self.recording_consent.observe(consent_scope) {
+            if let Some(scope) = consent_scope {
+                if self.overlay.is_none() && self.call_minimized != Some(scope) {
+                    self.overlay = Some(Overlay::RecordingConsent);
+                    self.pending_modal_focus = true;
+                }
+            } else if self.overlay == Some(Overlay::RecordingConsent) {
+                self.overlay = None;
+                self.pending_modal_focus = true;
+            }
+        }
+        let live_scope = next
+            .call
+            .as_ref()
+            .filter(|call| {
+                !matches!(
+                    call.stage,
+                    CallStage::Ended | CallStage::Failed | CallStage::Incoming
+                )
+            })
+            .map(|call| call.scope);
+        if self
+            .call_minimized
+            .is_some_and(|scope| Some(scope) != live_scope)
+        {
+            self.call_minimized = None;
+        }
+        if let Some((scope, started)) = self.call_started
+            && next.call.as_ref().is_none_or(|call| call.scope != scope)
+        {
+            self.call_started = next
+                .call
+                .as_ref()
+                .filter(|call| {
+                    call.replacement_generation
+                        && call.scope.account == scope.account
+                        && call.scope.conversation == scope.conversation
+                })
+                .map(|call| (call.scope, started));
+        }
+        if let Some(call) = next
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Ended)
+        {
+            if self
+                .call_ended_duration
+                .is_none_or(|(scope, _)| scope != call.scope)
+            {
+                self.call_ended_duration = self
+                    .call_started
+                    .filter(|(scope, _)| *scope == call.scope)
+                    .map(|(scope, started)| (scope, started.elapsed()));
+            }
+        } else {
+            self.call_ended_duration = None;
+        }
+        if self
+            .call_reactions_open
+            .is_some_and(|scope| Some(scope) != live_scope)
+        {
+            self.call_reactions_open = None;
+        }
+        if self
+            .call_device_picker
+            .is_some_and(|(scope, _)| Some(scope) != live_scope)
+        {
+            self.call_device_picker = None;
+            self.device_picker = None;
+        }
+        if self.call_started.is_none()
+            && let Some(call) = next
+                .call
+                .as_ref()
+                .filter(|call| call.stage == CallStage::Active)
+        {
+            self.call_started = Some((call.scope, std::time::Instant::now()));
+        }
+        if let Some(call) = next
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Reconnecting)
+        {
+            if self
+                .call_reconnecting_since
+                .is_none_or(|(scope, _)| scope != call.scope)
+            {
+                self.call_reconnecting_since = Some((call.scope, Instant::now()));
+            }
+        } else {
+            self.call_reconnecting_since = None;
+        }
+        if next
+            .call
+            .as_ref()
+            .is_none_or(|call| call.stage != CallStage::Ended)
+        {
+            self.call_ended_since = None;
+            self.call_ended_frame_pending = None;
+        }
+        if next.call.as_ref().is_none_or(|call| {
+            call.recording != talk_core::ui::presentation::CallRecordingState::Failed
+                || Some(call.scope) != self.dismissed_recording_failure
+        }) {
+            self.dismissed_recording_failure = None;
+        }
+        if next
+            .call
+            .as_ref()
+            .is_some_and(|call| matches!(call.stage, CallStage::Active | CallStage::Reconnecting))
+        {
+            self.start_call_clock(cx);
+        } else if next
+            .call
+            .as_ref()
+            .is_none_or(|call| call.stage != CallStage::Ended)
+        {
+            self.call_clock = None;
+        }
+        if next
+            .call
+            .as_ref()
+            .is_none_or(|call| call.stage != CallStage::Active || call.latest_reaction.is_none())
+        {
+            self.recent_call_reaction = None;
+        }
+        if let Some(call) = next.call.as_ref()
+            && call.stage == CallStage::Active
+            && let Some(reaction) = call.latest_reaction.as_ref()
+            && self
+                .recent_call_reaction
+                .as_ref()
+                .is_none_or(|(scope, old, _)| {
+                    *scope != call.scope || old.sequence != reaction.sequence
+                })
+        {
+            self.recent_call_reaction = Some((call.scope, reaction.clone(), Instant::now()));
+        }
+        self.observe_reference_previews(&next);
         self.snapshot = next;
+        if let Some(context) = self.snapshot.selected {
+            let stored = self.port.composer_drafts(context);
+            if self
+                .drafts
+                .restore_durable(context, stored.as_slice(), false)
+            {
+                reset_draft = true;
+            }
+            self.thread_drafts
+                .restore_durable(context, stored.as_slice(), true);
+        }
+        let draft_error = self
+            .drafts
+            .persist(self.port.as_mut())
+            .or(self.thread_drafts.persist(self.port.as_mut()));
+        if self.draft_storage_unavailable != draft_error {
+            self.draft_storage_unavailable = draft_error;
+            cx.notify();
+        }
+        self.retain_thread_edit();
+        if self.waiting_in_lobby() {
+            self.call_chat_open = false;
+            self.call_participants_open = false;
+            self.call_secondary_open = false;
+            self.call_reactions_open = None;
+            self.call_device_picker = None;
+            if self
+                .overlay
+                .is_some_and(|overlay| !lobby_allows_overlay(overlay))
+            {
+                self.overlay = None;
+                self.return_focus = None;
+                self.pending_modal_focus = false;
+            }
+        }
         let limit = self.composer_message_limit();
         self.composer
             .update(cx, |input, _| input.configure_message_limit(limit));
@@ -732,7 +1478,10 @@ impl Desktop {
         self.refresh_offline_notice(cx);
         self.refresh_action_toast(cx);
         self.refresh_content_ui(cx);
+        self.refresh_private_reply();
         self.refresh_creation(cx);
+        self.refresh_account_search_jump();
+        self.refresh_discovery();
         self.refresh_room_dialog(cx);
         self.refresh_message_ui_after_rebind(
             selected_rebind && self.message_ui.editing.is_some(),
@@ -746,13 +1495,18 @@ impl Desktop {
             self.stop_device_preview(cx);
         }
         if previous_account != self.snapshot.active_account {
+            self.room_menu = None;
             self.permission_ui.microphone_ready = false;
             self.destination = SidebarDestination::Conversations;
             self.collapsed_sections = [false; 5];
             self.stop_device_preview(cx);
             self.feedback = None;
             self.highlighted_message = None;
+            self.highlight_started = None;
             self.sidebar_filter.update(cx, |i, _| i.reset());
+            self.account_search_ui.reset(cx);
+            self.discovery_search.update(cx, |input, _| input.reset());
+            self.discovery_join = None;
             self.feedback_return_focus = None;
             self.pending_feedback_focus = false;
             self.search.update(cx, |i, cx| {
@@ -764,7 +1518,17 @@ impl Desktop {
                 cx.notify();
             });
             self.thread_parent = None;
+            self.pending_thread_open = None;
         }
+        if previous != self.snapshot.selected && self.overlay == Some(Overlay::Thread) {
+            self.overlay = None;
+            self.thread_parent = None;
+            self.return_focus = None;
+            self.pending_modal_focus = false;
+            self.thread_options_open = false;
+            self.thread_renaming = false;
+        }
+        self.open_pending_thread(cx);
         if (previous != self.snapshot.selected || reset_draft)
             && !(selected_rebind && self.message_ui.editing.is_some())
         {
@@ -882,6 +1646,33 @@ impl Desktop {
             }
         }
     }
+    pub(crate) fn activate_notification(
+        &mut self,
+        activation: talk_core::preferences::notifications::NotificationActivation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let talk_core::preferences::notifications::NotificationActivation::OpenMessage {
+            scope,
+            conversation,
+            message,
+        } = activation
+        else {
+            return;
+        };
+        let context = ConversationRef {
+            account: scope,
+            conversation,
+        };
+        if self.save_draft(cx) && self.submit_notification_message(context, u128::from(message)) {
+            self.overlay = None;
+            self.return_focus = None;
+            self.navigation_open = false;
+            self.destination = SidebarDestination::Conversations;
+            self.root_focus.focus(window);
+        }
+        cx.notify();
+    }
     // Deferred GPUI elements render after the surrounding surface has finished.
     // Restore their captured interaction policy for every nested control.
     fn in_surface<R>(&mut self, inert: bool, render: impl FnOnce(&Self) -> R) -> R {
@@ -908,10 +1699,12 @@ impl Desktop {
                 .message_ui
                 .composer_load_failed
                 .is_none_or(|context| Some(context) != self.snapshot.selected)
+            && !self.waiting_in_lobby()
             && composer_allowed(
                 self.overlay,
                 self.prejoin.is_some(),
                 self.incoming_visible(),
+                self.content_ui.voice.is_some(),
             )
     }
     fn account_connection_failure(
@@ -965,6 +1758,17 @@ impl Desktop {
         {
             return;
         }
+        if matches!(
+            &action,
+            LocalAction::Navigate(_)
+                | LocalAction::ReturnConversation
+                | LocalAction::Destination(_)
+                | LocalAction::Call
+                | LocalAction::Accept
+                | LocalAction::Intent(UiIntent::SelectAccount(_) | UiIntent::OpenConversation(_))
+        ) {
+            self.cancel_pending_person_call();
+        }
         if self.local_preference_action(&action, cx) {
             return;
         }
@@ -1005,6 +1809,9 @@ impl Desktop {
         let invoker = window.focused(cx);
         let mut server_input_rejected = false;
         let mut sent_in = None;
+        if matches!(action, LocalAction::Send) {
+            self.stop_local_typing();
+        }
         match action {
             LocalAction::RemoveAccount(account, scope) => {
                 self.request_account_removal(account, scope, window, cx)
@@ -1014,6 +1821,14 @@ impl Desktop {
             LocalAction::Window(action) => action.perform(window),
             LocalAction::Content(action) => self.content_action(action, window, cx),
             LocalAction::CreateMode(direct) => self.room_ui.create_direct = direct,
+            LocalAction::CreatePublic(public) => self.room_ui.create_public = public,
+            LocalAction::CreatePreset(preset) => self.room_ui.create_preset = preset,
+            LocalAction::AddCreationInvite(person) => {
+                self.submit_creation(talk_core::ui::conversation::CreateAction::AddInvite(person))
+            }
+            LocalAction::RemoveCreationInvite(person) => self.submit_creation(
+                talk_core::ui::conversation::CreateAction::RemoveInvite(person),
+            ),
             LocalAction::FindPeople => {
                 if let Ok(query) =
                     talk_core::ui::Text::new(self.room_ui.search.read(cx).content.trim())
@@ -1023,15 +1838,33 @@ impl Desktop {
                     ));
                 }
             }
-            LocalAction::FindSearchPeople => self.find_search_people(cx),
             LocalAction::CreateConversation => {
-                if let Ok(name) =
-                    talk_core::ui::Text::new(self.conversation_name.read(cx).content.trim())
-                {
-                    self.submit_creation(talk_core::ui::conversation::CreateAction::Group(name));
+                if let (Ok(name), Ok(description)) = (
+                    talk_core::ui::Text::new(self.conversation_name.read(cx).content.trim()),
+                    talk_core::ui::Text::new(self.room_ui.description.read(cx).content.trim()),
+                ) {
+                    self.submit_creation(talk_core::ui::conversation::CreateAction::Conversation {
+                        name,
+                        description,
+                        public: self.room_ui.create_public,
+                        preset: self.room_ui.create_preset.clone(),
+                    });
                 }
             }
+            LocalAction::Person(action) => self.person_action(action, window, cx),
             LocalAction::CreateDirect(person) => {
+                if self.overlay == Some(Overlay::Search)
+                    && !self
+                        .directory_query
+                        .as_ref()
+                        .is_some_and(|(account, query)| {
+                            Some(*account) == self.snapshot.active_account
+                                && *account == person.account
+                                && query == &self.search.read(cx).content.trim().to_lowercase()
+                        })
+                {
+                    return;
+                }
                 self.submit_creation(talk_core::ui::conversation::CreateAction::Direct(person))
             }
             LocalAction::CheckUpdates => {
@@ -1045,11 +1878,14 @@ impl Desktop {
             LocalAction::InstallUpdate(generation) => {
                 if generation == self.updates.generation
                     && self.can_install_update()
+                    && self.save_thread_draft(cx)
                     && self.save_draft(cx)
                 {
                     if self.drafts.has_unsent()
+                        || self.thread_drafts.has_unsent()
                         || !self.composer.read(cx).content.is_empty()
                         || self.message_ui.pending_edit.is_some()
+                        || self.has_thread_edit(None)
                         || self.input_composing(cx)
                     {
                         self.feedback = Some(Feedback::info(
@@ -1078,23 +1914,95 @@ impl Desktop {
             }
             LocalAction::EmojiPicker(context) => {
                 if Some(context) == self.snapshot.selected {
-                    self.show_composer_emoji(window, cx);
+                    self.show_composer_emoji(false, window, cx);
+                }
+            }
+            LocalAction::ThreadEmojiPicker(context) => {
+                if Some(context) == self.snapshot.selected {
+                    self.show_composer_emoji(true, window, cx);
+                }
+            }
+            LocalAction::OpenRoomNotifications => {
+                self.handle(LocalAction::Open(Overlay::RoomInfo), window, cx);
+                if self.overlay == Some(Overlay::RoomInfo) {
+                    self.handle(
+                        LocalAction::Room(conversation_dialog::Action::Tab(
+                            conversation_dialog::Tab::Notifications,
+                        )),
+                        window,
+                        cx,
+                    );
                 }
             }
             LocalAction::Open(overlay) => {
+                if self.waiting_in_lobby() && !lobby_allows_overlay(overlay) {
+                    return;
+                }
+                self.own_status_open = false;
+                self.own_status_editing = false;
+                if overlay == Overlay::RecordingConsent {
+                    if call::consent::scope(&self.snapshot).is_none() {
+                        return;
+                    }
+                    self.recording_consent.reset();
+                }
+                if overlay == Overlay::ConfirmEndCall
+                    && self.snapshot.call.as_ref().is_none_or(|call| {
+                        !call.can_end_everyone
+                            || call.end_pending
+                            || call.stage != CallStage::Active
+                    })
+                {
+                    return;
+                }
+                if overlay == Overlay::ConfirmRecording
+                    && self.snapshot.call.as_ref().is_none_or(|call| {
+                        call.recording_control != Some(true)
+                            || call.recording_pending
+                            || call.recording_uncertain
+                            || call.stage != CallStage::Active
+                    })
+                {
+                    return;
+                }
+                self.room_menu = None;
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
-                if !self.save_draft(cx) {
+                if !self.save_thread_draft(cx) || !self.save_draft(cx) {
                     cx.notify();
                     return;
                 }
+                if matches!(overlay, Overlay::Settings | Overlay::Accounts)
+                    && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                        !matches!(
+                            call.stage,
+                            CallStage::Incoming | CallStage::Ended | CallStage::Failed
+                        )
+                    })
+                {
+                    self.call_minimized = Some(call.scope);
+                }
+                self.call_device_picker = None;
+                self.device_picker = None;
+                self.call_reactions_open = None;
+                self.call_moderation_open = false;
                 self.startup_account_dialog = false;
                 self.retire_emoji_picker();
                 if self.overlay.is_none() {
                     self.return_focus = window.focused(cx);
                 }
                 self.overlay = Some(overlay);
+                if overlay == Overlay::Reminders
+                    && let Some(scope) = self.snapshot.active_account
+                {
+                    self.submit(UiIntent::RefreshAccountReminders(scope));
+                }
+                if overlay == Overlay::Federation
+                    && let Some(scope) = self.snapshot.active_account
+                {
+                    self.submit(UiIntent::RefreshFederationInvitations(scope));
+                }
                 if overlay == Overlay::Settings
                     && self.settings_tab == preferences::SettingsTab::Notifications
                 {
@@ -1105,19 +2013,27 @@ impl Desktop {
                 if overlay == Overlay::Create {
                     self.open_creation(cx);
                 }
+                if overlay == Overlay::Discover {
+                    self.open_discovery(cx);
+                }
                 if matches!(overlay, Overlay::RoomInfo | Overlay::Participants) {
                     self.open_room_dialog(overlay, cx);
                 }
                 self.pending_modal_focus = true;
                 if overlay == Overlay::Search {
                     self.directory_query = None;
+                    self.switcher_input_changed(cx);
+                    self.schedule_switcher_directory(cx);
                     self.search.focus_handle(cx).focus(window);
+                } else if overlay == Overlay::Discover {
+                    self.discovery_search.focus_handle(cx).focus(window);
                 } else {
                     self.modal_focus.focus(window);
                 }
             }
             LocalAction::Thread(context, id) => {
                 if Some(context) == self.snapshot.selected
+                    && self.can_open_thread(context, id)
                     && ((self.thread_parent == Some((context, id))
                         && self.overlay == Some(Overlay::Thread))
                         || self
@@ -1127,9 +2043,21 @@ impl Desktop {
                             .iter()
                             .any(|m| m.local_id == id || m.metadata.thread == Some(id)))
                 {
+                    if !self.prepare_thread_draft(context, id, cx) {
+                        return;
+                    }
+                    if self.thread_parent != Some((context, id)) {
+                        self.thread_options_open = false;
+                        self.thread_renaming = false;
+                    }
                     self.thread_parent = Some((context, id));
                     let request =
                         self.submit_message(talk_core::ui::messaging::MessageAction::Thread(id));
+                    if self.snapshot.content == ContentState::Ready {
+                        self.submit_message(talk_core::ui::messaging::MessageAction::ThreadInfo(
+                            id,
+                        ));
+                    }
                     self.message_ui.thread_load = Some(messaging::ThreadLoad {
                         context,
                         root: id,
@@ -1138,7 +2066,62 @@ impl Desktop {
                     self.handle(LocalAction::Open(Overlay::Thread), window, cx);
                 }
             }
-            LocalAction::SearchKind(kind) => self.search_kind = kind,
+            LocalAction::SearchKind(kind) => {
+                self.search_kind = kind;
+                self.schedule_switcher_directory(cx);
+            }
+            LocalAction::AccountSearchSubmit => self.start_account_search(cx),
+            LocalAction::AccountSearchMore => self.next_account_search(cx),
+            LocalAction::AccountSearchFindPerson => self.find_account_search_person(cx),
+            LocalAction::AccountSearchSelf => self.account_search_toggle_self(cx),
+            LocalAction::AccountSearchPerson(person) => {
+                self.select_account_search_person(person, cx)
+            }
+            LocalAction::AccountSearchRooms => self.account_search_room_picker(),
+            LocalAction::AccountSearchRoom(room) => self.select_account_search_room(room),
+            LocalAction::AccountSearchHit(context, message) => {
+                if Some(context) == self.snapshot.selected
+                    && self.snapshot.search_panel.as_ref().is_some_and(|p| {
+                        p.hits
+                            .as_slice()
+                            .iter()
+                            .any(|hit| hit.context == context && hit.message == message)
+                    })
+                    && self
+                        .snapshot
+                        .messages
+                        .as_slice()
+                        .iter()
+                        .any(|row| row.local_id == message)
+                {
+                    self.handle(LocalAction::LocateMessage(context, message), window, cx);
+                    return;
+                }
+                if Some(context.account) == self.snapshot.active_account
+                    && self.snapshot.search_panel.as_ref().is_some_and(|p| {
+                        p.hits
+                            .as_slice()
+                            .iter()
+                            .any(|hit| hit.context == context && hit.message == message)
+                    })
+                    && self.save_draft(cx)
+                    && self.submit(UiIntent::OpenConversation(context))
+                {
+                    self.account_search_ui.jump =
+                        Some((context, message, self.snapshot.selected, Instant::now()));
+                    self.overlay = None;
+                    self.refresh_account_search_jump();
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::DiscoverSearch => self.search_discovery(cx),
+            LocalAction::DiscoverJoin(context) => self.join_discovery(context, window, cx),
+            LocalAction::ToggleReference(context, message, ordinal) => {
+                self.toggle_reference(context, message, ordinal)
+            }
+            LocalAction::OpenReference(context, message, ordinal) => {
+                self.open_reference(context, message, ordinal)
+            }
             LocalAction::CreateGroup => self.create_group(cx),
             LocalAction::RenameLocalGroup(id) => self.rename_local_group(id, cx),
             LocalAction::MoveLocalGroup(id, up) => self.move_local_group(id, up, cx),
@@ -1159,8 +2142,10 @@ impl Desktop {
                 {
                     self.overlay = None;
                     self.return_focus = None;
-                    self.highlighted_message = Some((context, id));
-                    self.message_ui.list.scroll_to_reveal_item(index);
+                    // Search and shared-item jumps need the same measured header
+                    // clearance as pins and context loads. GPUI's generic reveal
+                    // only knows the full list viewport beneath the overlay.
+                    self.locate_message_smooth(context, id);
                     self.navigation.locate_message(index, window);
                 }
             }
@@ -1220,11 +2205,220 @@ impl Desktop {
                     self.pending_navigation_focus = Some(open);
                 }
             }
+            LocalAction::MinimizeCall(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && !matches!(
+                            call.stage,
+                            CallStage::Incoming | CallStage::Ended | CallStage::Failed
+                        )
+                }) {
+                    self.call_minimized = Some(scope);
+                    self.call_reactions_open = None;
+                    self.call_secondary_open = false;
+                    self.call_device_picker = None;
+                    self.device_picker = None;
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::ExpandCall(scope) => {
+                if self.call_minimized == Some(scope)
+                    && self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .is_some_and(|call| call.scope == scope)
+                {
+                    self.call_minimized = None;
+                    self.overlay = None;
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::ToggleCallFullscreen(scope) => {
+                if self
+                    .snapshot
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.scope == scope)
+                {
+                    self.call_secondary_open = false;
+                    window.toggle_fullscreen();
+                }
+            }
+            LocalAction::JoinRoomCall(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && !matches!(
+                            call.stage,
+                            CallStage::Incoming | CallStage::Ended | CallStage::Failed
+                        )
+                }) {
+                    self.call_minimized = None;
+                    self.root_focus.focus(window);
+                } else if let Some(row) = self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .find(|row| row.call_scope == Some(scope) && row.call_active == Some(true))
+                {
+                    let context = row.context;
+                    match call_entry(row, self.snapshot.content) {
+                        Some(CallEntry::Direct(_)) => {
+                            self.submit(UiIntent::StartDirect {
+                                call: scope,
+                                media: MediaIntent::MicrophoneOnCameraOff,
+                            });
+                        }
+                        Some(CallEntry::Conference(_)) => {
+                            if self.snapshot.selected == Some(context) {
+                                self.handle(LocalAction::Call, window, cx);
+                            } else {
+                                // Conference prejoin must use the newly selected room's
+                                // current snapshot; navigation alone never opens capture.
+                                self.handle(LocalAction::Navigate(context), window, cx);
+                            }
+                        }
+                        None => {}
+                    }
+                }
+            }
+            LocalAction::SpeakerCallLayout(scope, enabled) => {
+                if self
+                    .snapshot
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.scope == scope)
+                {
+                    self.call_focus = None;
+                    self.call_speaker = enabled.then_some(scope);
+                }
+            }
+            LocalAction::FocusCallParticipant(scope, participant) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && participant.is_none_or(|id| {
+                            call.participants
+                                .as_slice()
+                                .iter()
+                                .any(|p| p.local_id == id)
+                        })
+                }) {
+                    self.call_focus = participant.map(|id| (scope, id));
+                    self.call_speaker = None;
+                }
+            }
+            LocalAction::ConfirmEndCall => {
+                if self.overlay == Some(Overlay::ConfirmEndCall)
+                    && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                        call.can_end_everyone
+                            && !call.end_pending
+                            && call.stage == CallStage::Active
+                    })
+                {
+                    let scope = call.scope;
+                    if self.submit(UiIntent::EndCallForEveryone(scope)) {
+                        self.overlay = None;
+                        self.root_focus.focus(window);
+                    }
+                }
+            }
+            LocalAction::ToggleCallReactions(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && !call.reactions.as_slice().is_empty()
+                        && matches!(call.stage, CallStage::Active | CallStage::Connecting)
+                }) {
+                    self.call_reactions_open =
+                        (self.call_reactions_open != Some(scope)).then_some(scope);
+                    self.call_device_picker = None;
+                    self.device_picker = None;
+                }
+            }
+            LocalAction::ConfirmRecording => {
+                if self.overlay == Some(Overlay::ConfirmRecording)
+                    && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                        call.recording_control == Some(true)
+                            && !call.recording_pending
+                            && !call.recording_uncertain
+                            && call.stage == CallStage::Active
+                    })
+                {
+                    let scope = call.scope;
+                    if self.submit(UiIntent::SetCallRecording {
+                        call: scope,
+                        start: true,
+                    }) {
+                        self.overlay = None;
+                        self.root_focus.focus(window);
+                    }
+                }
+            }
+            LocalAction::ToggleRecordingConsent(scope) => {
+                if self.overlay == Some(Overlay::RecordingConsent)
+                    && call::consent::scope(&self.snapshot) == Some(scope)
+                {
+                    self.recording_consent.toggle(scope);
+                }
+            }
+            LocalAction::ConfirmRecordingConsent(scope) => {
+                if self.overlay == Some(Overlay::RecordingConsent)
+                    && call::consent::scope(&self.snapshot) == Some(scope)
+                    && self.recording_consent.selected(scope)
+                    && self.submit(UiIntent::ResolveRequiredGate {
+                        call: scope,
+                        gate: talk_core::ui::presentation::RequiredGate::RecordingConsent,
+                    })
+                {
+                    self.recording_consent.reset();
+                    self.overlay = None;
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::DeclineRecordingConsent(scope) => {
+                if self.overlay == Some(Overlay::RecordingConsent)
+                    && call::consent::scope(&self.snapshot) == Some(scope)
+                    && self.submit(UiIntent::Legacy(UserIntent::Leave(scope)))
+                {
+                    self.recording_consent.reset();
+                    self.overlay = None;
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::DismissRecordingFailure(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && call.recording == talk_core::ui::presentation::CallRecordingState::Failed
+                }) {
+                    self.dismissed_recording_failure = Some(scope);
+                }
+            }
+            LocalAction::ToggleCallSecondary => {
+                self.call_secondary_open = !self.call_secondary_open
+            }
+            LocalAction::ToggleCallModeration => {
+                self.call_moderation_open = !self.call_moderation_open
+            }
+            LocalAction::ToggleCallParticipants => {
+                self.call_secondary_open = false;
+                if window.viewport_size().width < px(900.) || self.scale >= 150 {
+                    self.handle(LocalAction::Open(Overlay::CallParticipants), window, cx);
+                } else {
+                    self.call_participants_open = !self.call_participants_open;
+                    self.call_moderation_open = false;
+                    self.call_chat_open = false;
+                }
+            }
             LocalAction::ToggleCallChat => {
-                if window.viewport_size().width < px(1000.) || self.scale >= 150 {
+                if self.waiting_in_lobby() {
+                    return;
+                }
+                self.call_secondary_open = false;
+                if window.viewport_size().width < px(900.) || self.scale >= 150 {
                     self.handle(LocalAction::Open(Overlay::CallChat), window, cx);
                 } else {
                     self.call_chat_open = !self.call_chat_open;
+                    self.call_participants_open = false;
                 }
             }
             LocalAction::DismissIncoming => {
@@ -1241,6 +2435,44 @@ impl Desktop {
             }
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
+                if self.overlay == Some(Overlay::RecordingConsent) {
+                    self.recording_consent.reset();
+                }
+                if self.call_reactions_open.take().is_some() {
+                    if let Some(focus) = self.control_focus.current(&"call-reactions".into()) {
+                        focus.focus(window);
+                    }
+                    cx.notify();
+                    return;
+                }
+                if let Some((_, kind)) = self.call_device_picker.take() {
+                    self.device_picker = None;
+                    if let Some(focus) = self
+                        .control_focus
+                        .current(&("call-device", kind as usize).into())
+                    {
+                        focus.focus(window);
+                    }
+                    cx.notify();
+                    return;
+                }
+                if let Some((context, namespace)) = self.room_menu.take() {
+                    if let Some(focus) =
+                        self.control_focus(controls::scoped_id(namespace, context, 1, 1), cx)
+                    {
+                        focus.focus(window);
+                    }
+                    cx.notify();
+                    return;
+                }
+                if self.overlay == Some(Overlay::Thread) && !self.save_thread_draft(cx) {
+                    return;
+                }
+                if self.overlay == Some(Overlay::Thread) {
+                    self.retire_thread_deadline();
+                }
+                self.thread_options_open = false;
+                self.thread_renaming = false;
                 self.startup_account_dialog = false;
                 if self.close_forward_dialog(window, cx) {
                     cx.notify();
@@ -1274,6 +2506,10 @@ impl Desktop {
                     self.pending_prejoin_return = self.prejoin_return_focus.take();
                     None
                 } else {
+                    self.call_chat_open = false;
+                    self.call_participants_open = false;
+                    self.call_moderation_open = false;
+                    self.call_secondary_open = false;
                     None
                 };
                 if let Some(focus) = target.filter(|f| self.root_focus.contains(f, window)) {
@@ -1283,10 +2519,20 @@ impl Desktop {
                 }
             }
             LocalAction::Navigate(context) => {
-                if self.save_draft(cx) && self.submit(UiIntent::OpenConversation(context)) {
+                self.own_status_open = false;
+                self.room_menu = None;
+                if self.save_thread_draft(cx)
+                    && self.save_draft(cx)
+                    && self.submit(UiIntent::OpenConversation(context))
+                {
+                    self.pending_thread_open = None;
+                    self.release_unread_hold(context);
                     self.retire_emoji_picker();
                     self.navigation_open = false;
-                    if self.destination == SidebarDestination::Inbox {
+                    if matches!(
+                        self.destination,
+                        SidebarDestination::Inbox | SidebarDestination::Threads
+                    ) {
                         self.destination = SidebarDestination::Conversations;
                     }
                     if self.overlay == Some(Overlay::Search) {
@@ -1295,8 +2541,125 @@ impl Desktop {
                     }
                 }
             }
+            LocalAction::ToggleRoomMenu(context, namespace) => {
+                let target = (context, namespace);
+                self.room_menu = (self.room_menu != Some(target)).then_some(target);
+            }
+            LocalAction::MarkRoomUnread(context) => {
+                self.room_menu = None;
+                self.submit_sidebar_unread(context);
+            }
+            LocalAction::NewThread(context) => self.begin_new_thread(context, window, cx),
+            LocalAction::OpenSubscribedThread(context, root) => {
+                if self
+                    .snapshot
+                    .threads
+                    .entries
+                    .as_slice()
+                    .iter()
+                    .any(|item| item.context == context && item.root == root)
+                    && self
+                        .snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .any(|room| room.context == context)
+                    && self.save_thread_draft(cx)
+                    && self.save_draft(cx)
+                {
+                    self.return_focus = window.focused(cx);
+                    self.pending_thread_open = Some((context, root));
+                    if Some(context) == self.snapshot.selected {
+                        self.open_pending_thread(cx);
+                    } else if !self.submit(UiIntent::OpenConversation(context)) {
+                        self.pending_thread_open = None;
+                    }
+                }
+            }
+            LocalAction::OpenReminder(context, message) => {
+                if self.save_thread_draft(cx)
+                    && self.save_draft(cx)
+                    && self.submit_open_reminder(context, message)
+                {
+                    self.overlay = None;
+                    self.return_focus = None;
+                    self.navigation_open = false;
+                    self.destination = SidebarDestination::Conversations;
+                    self.root_focus.focus(window);
+                }
+            }
             LocalAction::Destination(destination) => self.destination = destination,
+            LocalAction::SendThread => self.send_thread_draft(cx),
+            LocalAction::ToggleThreadOptions => {
+                self.thread_options_open = !self.thread_options_open
+            }
+            LocalAction::BeginThreadRename => {
+                if let Some((context, root)) = self.thread_parent
+                    && let Some(details) = self
+                        .snapshot
+                        .message_panel
+                        .as_ref()
+                        .filter(|panel| panel.context == context)
+                        .and_then(|panel| panel.thread_details.as_ref())
+                        .filter(|details| details.root == root)
+                {
+                    let title = details.title.as_str().to_owned();
+                    self.thread_title.update(cx, |input, cx| {
+                        input.set_context_value(&title);
+                        cx.notify();
+                    });
+                    self.thread_renaming = true;
+                    self.thread_title.focus_handle(cx).focus(window);
+                }
+            }
+            LocalAction::SaveThreadRename => {
+                if let Some((context, root)) = self.thread_parent
+                    && Some(context) == self.snapshot.selected
+                    && !self.thread_title.read(cx).composing()
+                    && let Ok(title) =
+                        talk_core::ui::Text::new(self.thread_title.read(cx).content.trim())
+                    && !title.as_str().is_empty()
+                    && self
+                        .submit_message(talk_core::ui::messaging::MessageAction::RenameThread {
+                            root,
+                            title,
+                        })
+                        .is_some()
+                {
+                    self.thread_renaming = false;
+                }
+            }
+            LocalAction::ThreadNotification(level) => {
+                if let Some((context, root)) = self.thread_parent
+                    && Some(context) == self.snapshot.selected
+                    && (0..=3).contains(&level)
+                {
+                    self.submit_message(
+                        talk_core::ui::messaging::MessageAction::ThreadNotifications {
+                            root,
+                            level,
+                        },
+                    );
+                }
+            }
             LocalAction::CollapseSection(section) => self.collapse_sidebar_section(section, cx),
+            LocalAction::SidebarFilter(filter) => self.edit_navigation(
+                talk_core::preferences::navigation::RemoteNavigationSupport::Unsupported,
+                talk_core::preferences::navigation::NavigationEdit::SetFilter(filter),
+                cx,
+            ),
+            LocalAction::SidebarRoomNotifications(context) => {
+                self.room_menu = None;
+                if self.save_thread_draft(cx)
+                    && self.save_draft(cx)
+                    && self.submit(UiIntent::OpenConversation(context))
+                {
+                    self.refresh(cx);
+                    if self.snapshot.selected == Some(context) {
+                        self.handle(LocalAction::OpenRoomNotifications, window, cx);
+                    }
+                }
+            }
             LocalAction::Favorite(context, favorite) => {
                 if let Some(row) = self
                     .snapshot
@@ -1323,10 +2686,11 @@ impl Desktop {
                 }
             }
             LocalAction::Archive(context, archived) => {
+                self.room_menu = None;
                 if self.snapshot.conversation_list.content == ContentState::Ready
                     && self.snapshot.conversations.as_slice().iter().any(|r| {
                         r.context == context
-                            && r.archive == Decision::Allowed
+                            && r.archive != Decision::Denied
                             && r.archived == Some(!archived)
                     })
                     && let Some(request) = self.archive_request.checked_add(1)
@@ -1341,6 +2705,11 @@ impl Desktop {
             }
             LocalAction::Send => {
                 if self.composer_submission(cx).is_none() {
+                    return;
+                }
+                if self.snapshot.selected.is_some_and(|context| {
+                    self.drafts.target(context).new_thread && !self.can_start_thread()
+                }) {
                     return;
                 }
                 // The scoped queue decision admits offline work. A connection
@@ -1466,11 +2835,14 @@ impl Desktop {
                     self.feedback = None;
                 }
                 let cancelled_login = matches!(intent, UiIntent::CancelLogin(_));
-                if self.submit(intent)
-                    && cancelled_login
-                    && !self.snapshot.accounts.as_slice().is_empty()
-                {
-                    self.onboarding_open = false;
+                let call_reaction = matches!(intent, UiIntent::SendCallReaction { .. });
+                if self.submit(intent) {
+                    if cancelled_login && !self.snapshot.accounts.as_slice().is_empty() {
+                        self.onboarding_open = false;
+                    }
+                    if call_reaction {
+                        self.call_reactions_open = None;
+                    }
                 }
             }
             LocalAction::Call => match self.selected_call() {
@@ -1505,6 +2877,29 @@ impl Desktop {
                     self.submit(UiIntent::Legacy(UserIntent::AcceptDirect {
                         call: call.scope,
                         media: MediaIntent::MicrophoneOnCameraOff,
+                    }));
+                }
+            }
+            LocalAction::StartDirectWithVideo => {
+                if self.selected().is_some_and(|row| {
+                    row.kind == talk_core::ui::presentation::ConversationKind::Direct
+                }) && let Some(CallEntry::Direct(call)) = self.selected_call()
+                {
+                    self.submit(UiIntent::StartDirect {
+                        call,
+                        media: MediaIntent::MicrophoneOnCameraOn,
+                    });
+                }
+            }
+            LocalAction::AcceptCallWithVideo => {
+                if let Some(call) = &self.snapshot.call
+                    && call.direct
+                    && call.stage == CallStage::Incoming
+                    && call.accept == Decision::Allowed
+                {
+                    self.submit(UiIntent::Legacy(UserIntent::AcceptDirect {
+                        call: call.scope,
+                        media: MediaIntent::MicrophoneOnCameraOn,
                     }));
                 }
             }
@@ -1570,6 +2965,23 @@ impl Desktop {
                 self.settings_tab = preferences::SettingsTab::Devices;
                 self.enter_device_page();
             }
+            LocalAction::CallDevicePicker(scope, kind) => {
+                self.call_reactions_open = None;
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && matches!(call.stage, CallStage::Active | CallStage::Connecting)
+                }) {
+                    if self.call_device_picker == Some((scope, kind)) {
+                        self.call_device_picker = None;
+                        self.device_picker = None;
+                    } else {
+                        self.call_device_picker = Some((scope, kind));
+                        self.device_picker = None;
+                        self.enumerate_devices();
+                        self.toggle_device_picker(kind);
+                    }
+                }
+            }
             LocalAction::ToggleDevicePicker(kind) => self.toggle_device_picker(kind),
             LocalAction::RefreshDevice(kind) => self.refresh_device_kind(kind),
             LocalAction::Permission(kind, action) => {
@@ -1578,11 +2990,22 @@ impl Desktop {
                 }
             }
             LocalAction::SelectDevice(kind, selection) => {
+                let from_call = self.call_device_picker.is_some();
+                if from_call {
+                    self.call_device_picker = None;
+                    if let Some(focus) = self
+                        .control_focus
+                        .current(&("call-device", kind as usize).into())
+                    {
+                        focus.focus(window);
+                    }
+                }
                 self.device_picker = None;
                 self.pending_device_focus = None;
-                if let Some(focus) = self
-                    .control_focus
-                    .current(&("device-picker", kind as usize).into())
+                if !from_call
+                    && let Some(focus) = self
+                        .control_focus
+                        .current(&("device-picker", kind as usize).into())
                 {
                     focus.focus(window);
                 }
@@ -1604,6 +3027,31 @@ impl Desktop {
             }
             LocalAction::StartDevice(kind) => self.start_device_preview(kind),
             LocalAction::StopDevice(kind) => self.stop_one_device(kind, cx),
+            LocalAction::ToggleOwnStatus => self.toggle_own_status(window, cx),
+            LocalAction::EditStatusMessage => self.edit_status_message(window, cx),
+            LocalAction::ToggleStatusExpiry => {
+                self.own_status_expiry_open = !self.own_status_expiry_open
+            }
+            LocalAction::ToggleStatusEmoji => {
+                self.own_status_emoji_open = !self.own_status_emoji_open
+            }
+            LocalAction::SelectStatusEmoji(emoji) => {
+                self.own_status_icon_input
+                    .update(cx, |input, _| input.set_context_value(emoji));
+                self.own_status_emoji_open = false;
+            }
+            LocalAction::BackStatusMenu => {
+                self.own_status_editing = false;
+                self.own_status_focus = true;
+            }
+            LocalAction::SaveStatusMessage => self.save_status_message(cx),
+            LocalAction::ClearStatusMessage => self.clear_status_message(cx),
+            LocalAction::SelectStatusExpiry(choice) => {
+                self.own_status_clear_after = choice;
+                self.own_status_expiry_open = false;
+            }
+            LocalAction::SelectPredefinedStatus(index) => self.select_predefined_status(index, cx),
+            LocalAction::SetOwnStatus(choice) => self.set_own_status(choice, cx),
             LocalAction::ReloadAccountPreferences => self.load_account_preferences(cx),
             LocalAction::AccountPreference(change) => self.change_account_preference(change, cx),
             LocalAction::SaveUploadFolder => {
@@ -1802,6 +3250,62 @@ impl Desktop {
             cx.notify();
             cx.stop_propagation();
         } else if matches!(
+            self.overlay,
+            None | Some(Overlay::CallParticipants | Overlay::CallChat)
+        ) && self.prejoin.is_none()
+            && !self.incoming_visible()
+            && !self.text_input_focused(window, cx)
+            && registry_modifiers == Some(Modifiers::None)
+            && matches!(key.as_str(), "m" | "v" | "h")
+            && self.snapshot.call.as_ref().is_some_and(|call| {
+                self.call_minimized != Some(call.scope)
+                    && matches!(
+                        call.stage,
+                        CallStage::Active | CallStage::Connecting | CallStage::Reconnecting
+                    )
+            })
+        {
+            if let Some(call) = self.snapshot.call.as_ref() {
+                let scope = call.scope;
+                if key == "h" {
+                    if call.hand_supported && call.stage == CallStage::Active {
+                        let intent = UiIntent::SetCallHand {
+                            call: scope,
+                            raised: !call.hand_raised,
+                        };
+                        self.handle(LocalAction::Intent(intent), window, cx);
+                        cx.stop_propagation();
+                    }
+                    return;
+                }
+                let state = if key == "m" {
+                    call.microphone
+                } else {
+                    call.camera
+                };
+                if matches!(
+                    state,
+                    talk_core::ui::presentation::MediaState::Off
+                        | talk_core::ui::presentation::MediaState::Active
+                        | talk_core::ui::presentation::MediaState::Requested
+                ) {
+                    let enabled = state == talk_core::ui::presentation::MediaState::Off;
+                    let intent = if key == "m" {
+                        UiIntent::SetMicrophone {
+                            call: scope,
+                            enabled,
+                        }
+                    } else {
+                        UiIntent::SetCamera {
+                            call: scope,
+                            enabled,
+                        }
+                    };
+                    self.handle(LocalAction::Intent(intent), window, cx);
+                    cx.stop_propagation();
+                }
+            }
+        } else if matches!(
             action,
             Some(ActionId::NextControl | ActionId::PreviousControl)
         ) {
@@ -1813,6 +3317,21 @@ impl Desktop {
             }
             cx.stop_propagation();
         } else if action == Some(ActionId::Close) {
+            if self.own_status_open {
+                self.own_status_open = false;
+                self.own_status_editing = false;
+                if let Some(focus) = self.control_focus.current(&"own-status-menu".into()) {
+                    focus.focus(window);
+                }
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
+            if self.overlay.is_none() && self.room_menu.take().is_some() {
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
             if self.conversation_search_open() && self.composer_available() {
                 self.handle(
                     LocalAction::Message(messaging::Action::CloseSearch),
@@ -1841,11 +3360,28 @@ impl Desktop {
             self.handle(LocalAction::Open(Overlay::Settings), window, cx);
             cx.stop_propagation();
         } else if key == "enter"
+            && self.overlay == Some(Overlay::Discover)
+            && self.discovery_search.focus_handle(cx).is_focused(window)
+            && !self.discovery_search.read(cx).composing()
+        {
+            self.search_discovery(cx);
+            cx.stop_propagation();
+        } else if key == "enter"
             && self.overlay == Some(Overlay::Search)
             && self.search.focus_handle(cx).is_focused(window)
             && !self.search.read(cx).composing()
         {
-            self.handle(LocalAction::FindSearchPeople, window, cx);
+            if self.search_kind == SearchKind::Messages {
+                if self.account_search_current(cx) {
+                    if let Some((context, message)) = self.account_search_selected() {
+                        self.handle(LocalAction::AccountSearchHit(context, message), window, cx);
+                    }
+                } else {
+                    self.handle(LocalAction::AccountSearchSubmit, window, cx);
+                }
+            } else if let Some(action) = self.switcher_action() {
+                self.handle(action, window, cx);
+            }
             cx.stop_propagation();
         } else if self.composer_available()
             && !self.onboarding_open
@@ -1873,6 +3409,14 @@ impl Desktop {
                 let _ = self.port.try_submit(UiIntent::Refresh(context));
                 self.refresh(cx);
             }
+            cx.stop_propagation();
+        } else if self.composer_available()
+            && self.overlay == Some(Overlay::Thread)
+            && registry_modifiers.and_then(|m| matching(key, m, KeyContext::Composer))
+                == Some(ActionId::SendMessage)
+            && self.thread_composer.focus_handle(cx).is_focused(window)
+        {
+            self.handle(LocalAction::SendThread, window, cx);
             cx.stop_propagation();
         } else if self.composer_available()
             && registry_modifiers.and_then(|m| matching(key, m, KeyContext::Composer))
@@ -1903,18 +3447,47 @@ impl Desktop {
             &self.search,
             &self.sidebar_filter,
             &self.composer,
+            &self.thread_composer,
+            &self.thread_title,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
             &self.message_ui.search,
-            &self.message_ui.time_input,
+            &self.discovery_search,
+            &self.message_ui.scheduled_input,
         ]
         .into_iter()
+        .chain(self.account_search_ui.inputs().iter())
         .chain(self.room_ui.inputs().iter())
         .chain(self.content_ui.inputs())
         {
             input.update(cx, |input, _| input.interactive = false);
         }
+    }
+    fn text_input_focused(&self, window: &Window, cx: &App) -> bool {
+        [
+            &self.server,
+            &self.search,
+            &self.sidebar_filter,
+            &self.composer,
+            &self.thread_composer,
+            &self.thread_title,
+            &self.conversation_name,
+            &self.group_name,
+            &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
+            &self.message_ui.search,
+            &self.discovery_search,
+            &self.message_ui.scheduled_input,
+        ]
+        .into_iter()
+        .chain(self.account_search_ui.inputs().iter())
+        .chain(self.room_ui.inputs().iter())
+        .chain(self.content_ui.inputs())
+        .any(|input| input.focus_handle(cx).is_focused(window))
     }
     fn input_composing(&self, cx: &App) -> bool {
         [
@@ -1922,13 +3495,19 @@ impl Desktop {
             &self.search,
             &self.sidebar_filter,
             &self.composer,
+            &self.thread_composer,
+            &self.thread_title,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
             &self.message_ui.search,
-            &self.message_ui.time_input,
+            &self.discovery_search,
+            &self.message_ui.scheduled_input,
         ]
         .into_iter()
+        .chain(self.account_search_ui.inputs().iter())
         .chain(self.room_ui.inputs().iter())
         .chain(self.content_ui.inputs())
         .any(|input| {
@@ -1977,17 +3556,72 @@ impl Desktop {
 }
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(feature = "dev-probes")]
+        let build_started = std::time::Instant::now();
+        #[cfg(feature = "dev-probes")]
+        self.observe_perf_frame(window, cx);
+        #[cfg(debug_assertions)]
+        if self.latency_probe {
+            let snapshot = self.snapshot.clone();
+            let view = cx.entity().downgrade();
+            window.on_next_frame(move |_, cx| {
+                if view
+                    .update(cx, |view, _| view.port.observe_rendered(&snapshot))
+                    .is_err()
+                {
+                    println!("DEV_FRAME_UNAVAILABLE");
+                }
+            });
+        }
+        self.materials.begin_frame();
+        if let Some(started) = self.highlight_started {
+            if started.elapsed() >= std::time::Duration::from_millis(1400) {
+                self.highlight_started = None;
+                self.highlighted_message = None;
+            } else {
+                window.request_animation_frame();
+            }
+        }
+        if let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+            call.stage == CallStage::Ended && self.dismissed_terminal_call != Some(call.scope)
+        }) && self.call_ended_since.is_none()
+            && self.call_ended_frame_pending != Some(call.scope)
+        {
+            let scope = call.scope;
+            self.call_ended_frame_pending = Some(scope);
+            let weak = cx.weak_entity();
+            window.on_next_frame(move |_, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    if this.call_ended_frame_pending == Some(scope) {
+                        this.call_ended_frame_pending = None;
+                        if this.snapshot.call.as_ref().is_some_and(|call| {
+                            call.scope == scope && call.stage == CallStage::Ended
+                        }) && this.dismissed_terminal_call != Some(scope)
+                        {
+                            this.call_ended_since = Some((scope, Instant::now()));
+                            this.start_call_clock(cx);
+                        }
+                    }
+                });
+            });
+        }
         self.text_selection
             .update(cx, |owner, _| owner.begin_frame());
         // Retained parent focus includes toolbar controls reached by Tab.
         // Only entry/exit notifications rebuild the optional composer details.
         self.composer_active =
             window.is_window_active() && self.composer_focus.contains_focused(window, cx);
+        self.thread_composer_active = window.is_window_active()
+            && self.overlay == Some(Overlay::Thread)
+            && self.thread_composer_focus.contains_focused(window, cx);
+        self.prepare_typing(window, cx);
         self.prepare_message_motion(window);
+        self.prepare_message_tool_fixture(window, cx);
         self.prepare_pin_motion(window, cx);
         self.prepare_message_menu(window, cx);
         self.prepare_composer_menu(window, cx);
         self.prepare_member_dialog(window, cx);
+        self.prepare_person_card(window);
         // One native frame deadline for the current eligible control only.
         // No background task survives this view; at most one queued frame can
         // drain after cancellation. Pending and displayed IDs must remain live.
@@ -2015,11 +3649,25 @@ impl Render for Desktop {
             self.incoming_return_focus = window.focused(cx);
             self.last_incoming_scope = self.snapshot.call.as_ref().map(|c| c.scope);
         }
+        if self
+            .recent_call_reaction
+            .as_ref()
+            .is_some_and(|(scope, _, at)| {
+                at.elapsed() < std::time::Duration::from_millis(1800)
+                    && self.snapshot.call.as_ref().is_some_and(|call| {
+                        call.scope == *scope && self.call_minimized != Some(*scope)
+                    })
+            })
+        {
+            window.request_animation_frame();
+        }
         self.control_focus.begin_frame();
         self.navigation.reveal.begin();
         self.navigation.hints.begin();
         self.navigation.prepare_history(self.snapshot.selected);
         self.theme = Theme::resolve(self.palette, self.appearance, cx.window_appearance());
+        self.theme.reduced_transparency =
+            self.settings_port.reduced_transparency() && !self.material_preview;
         let t = self.theme;
         for input in self.content_ui.inputs() {
             input.update(cx, |i, _| {
@@ -2031,6 +3679,20 @@ impl Render for Desktop {
                     && !incoming;
             });
         }
+        self.content_ui.browser_search.update(cx, |input, _| {
+            input.theme = t;
+            input.text_scale = f32::from(self.scale) / 100.;
+            input.clipboard_export_allowed = true;
+            input.interactive = self.overlay == Some(Overlay::CloudFiles)
+                && self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .is_some_and(|browser| browser.search_available)
+                && !incoming;
+            input.set_placeholder(self.l("Dateien suchen …"));
+        });
         self.content_ui
             .question
             .update(cx, |i, _| i.set_placeholder(self.l("Frage der Umfrage")));
@@ -2042,6 +3704,8 @@ impl Render for Desktop {
             &self.search,
             &self.sidebar_filter,
             &self.composer,
+            &self.thread_composer,
+            &self.thread_title,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
@@ -2052,6 +3716,28 @@ impl Render for Desktop {
                 i.text_scale = f32::from(self.scale) / 100.;
             });
         }
+        for (input, key) in [
+            (&self.account_search_ui.person, "Person suchen …"),
+            (&self.account_search_ui.since, "TT.MM.JJJJ"),
+            (&self.account_search_ui.until, "TT.MM.JJJJ"),
+        ] {
+            input.update(cx, |i, _| i.set_placeholder(self.l(key)));
+        }
+        for input in self.account_search_ui.inputs() {
+            input.update(cx, |i, _| {
+                i.theme = t;
+                i.text_scale = f32::from(self.scale) / 100.;
+                i.interactive = self.overlay == Some(Overlay::Search)
+                    && self.search_kind == SearchKind::Messages
+                    && !incoming;
+            });
+        }
+        self.discovery_search.update(cx, |input, _| {
+            input.theme = t;
+            input.text_scale = f32::from(self.scale) / 100.;
+            input.interactive = self.overlay == Some(Overlay::Discover) && !incoming;
+            input.set_placeholder(self.l("Freigegebene Gespräche suchen …"));
+        });
         for input in self.room_ui.inputs() {
             input.update(cx, |i, _| {
                 i.theme = t;
@@ -2066,11 +3752,18 @@ impl Render for Desktop {
         }
         self.configure_member_inputs(incoming, cx);
         if self.overlay == Some(Overlay::Create) {
-            self.room_ui.search.update(cx, |i, _| {
-                i.interactive = !incoming && self.room_ui.create_direct
+            self.room_ui
+                .search
+                .update(cx, |i, _| i.interactive = !incoming);
+            self.room_ui.description.update(cx, |i, _| {
+                i.interactive = !incoming
+                    && !self.room_ui.create_direct
+                    && self.snapshot.create_panel.as_ref().is_some_and(|p| {
+                        p.extended == talk_core::ui::presentation::FeatureSupport::Supported
+                    });
             });
         }
-        for input in [&self.message_ui.search, &self.message_ui.time_input] {
+        for input in [&self.message_ui.search, &self.message_ui.scheduled_input] {
             input.update(cx, |i, _| {
                 i.theme = t;
                 i.text_scale = f32::from(self.scale) / 100.;
@@ -2090,7 +3783,7 @@ impl Render for Desktop {
             (&self.room_ui.avatar, "Emoji"),
             (&self.room_ui.password, "Neues Passwort"),
             (&self.message_ui.search, "Im Gespräch suchen …"),
-            (&self.message_ui.time_input, "JJJJ-MM-TT HH:MM"),
+            (&self.message_ui.scheduled_input, "Nachricht bearbeiten"),
         ] {
             input.update(cx, |i, _| i.set_placeholder(self.l(key)));
         }
@@ -2121,6 +3814,21 @@ impl Render for Desktop {
             i.interactive =
                 !incoming && (self.overlay.is_none() || self.overlay == Some(Overlay::Search));
         });
+        for input in [&self.own_status_message_input, &self.own_status_icon_input] {
+            input.update(cx, |i, _| {
+                i.theme = t;
+                i.text_scale = f32::from(self.scale) / 100.;
+                i.interactive = !incoming
+                    && self.overlay.is_none()
+                    && self.own_status_open
+                    && self.own_status_editing;
+                i.clipboard_export_allowed = true;
+            });
+        }
+        self.own_status_message_input
+            .update(cx, |i, _| i.set_placeholder(self.l("Statusnachricht")));
+        self.own_status_icon_input
+            .update(cx, |i, _| i.set_placeholder(self.l("Emoji")));
         self.upload_folder.update(cx, |i, _| {
             i.interactive = !incoming
                 && self.overlay == Some(Overlay::Settings)
@@ -2139,7 +3847,17 @@ impl Render for Desktop {
             i.borderless = true;
         });
         if let Some(row) = self.selected() {
-            let placeholder = self.lf("Nachricht an {name}", &[("name", row.title.as_str())]);
+            let name = self
+                .snapshot
+                .call
+                .as_ref()
+                .filter(|call| {
+                    (self.call_chat_open || self.overlay == Some(Overlay::CallChat))
+                        && call.scope.account == row.context.account
+                        && call.scope.conversation == row.context.conversation
+                })
+                .map_or(row.title.as_str(), |call| call.title.as_str());
+            let placeholder = self.lf("Nachricht an {name}", &[("name", name)]);
             self.composer
                 .update(cx, |i, _| i.set_placeholder(&placeholder));
         }
@@ -2166,6 +3884,23 @@ impl Render for Desktop {
             i.clipboard_export_allowed = clipboard_export;
             i.max_visible_rows = max_rows.clamp(1, 5);
         });
+        self.thread_composer.update(cx, |input, _| {
+            input.set_placeholder(self.l("Im Thread antworten …"));
+            input.interactive = !incoming
+                && self.overlay == Some(Overlay::Thread)
+                && self
+                    .thread_parent
+                    .is_some_and(|(context, _)| Some(context) == self.snapshot.selected);
+            input.configure_message_limit(self.composer_message_limit());
+            input.clipboard_export_allowed = clipboard_export;
+            input.max_visible_rows = max_rows.clamp(1, 5);
+        });
+        self.thread_title.update(cx, |input, _| {
+            input.set_placeholder(self.l("Thread-Titel"));
+            input.interactive =
+                !incoming && self.overlay == Some(Overlay::Thread) && self.thread_renaming;
+            input.clipboard_export_allowed = clipboard_export;
+        });
         if self.update_restart_pending {
             self.disable_update_inputs(cx);
         }
@@ -2174,13 +3909,19 @@ impl Render for Desktop {
             &self.search,
             &self.sidebar_filter,
             &self.composer,
+            &self.thread_composer,
+            &self.thread_title,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
             &self.message_ui.search,
-            &self.message_ui.time_input,
+            &self.discovery_search,
+            &self.message_ui.scheduled_input,
         ]
         .into_iter()
+        .chain(self.account_search_ui.inputs().iter())
         .chain(self.room_ui.inputs().iter())
         .chain(self.content_ui.inputs())
         {
@@ -2188,7 +3929,8 @@ impl Render for Desktop {
         }
         // Text scaling is independent of spacing; scaling both exhausts small windows.
         window.set_rem_size(px(16.));
-        self.background_inert = self.overlay.is_some() || incoming;
+        self.background_inert =
+            (self.overlay.is_some() && !self.thread_is_docked(window)) || incoming;
         let mut shell_visible = false;
         let body = if self.update_restart_pending {
             use talk_core::preferences::updates::UpdateState;
@@ -2228,6 +3970,7 @@ impl Render for Desktop {
             self.prejoin_view(window, cx).into_any_element()
         } else if self.snapshot.call.as_ref().is_some_and(|c| {
             c.stage != CallStage::Incoming
+                && self.call_minimized != Some(c.scope)
                 && !(matches!(c.stage, CallStage::Ended | CallStage::Failed)
                     && self.dismissed_terminal_call == Some(c.scope))
         }) {
@@ -2244,7 +3987,7 @@ impl Render for Desktop {
         self.background_inert = incoming || self.account_removal.confirming();
         let overlay = self
             .overlay
-            .filter(|_| !self.update_restart_pending)
+            .filter(|_| !self.update_restart_pending && !self.thread_is_docked(window))
             .map(|overlay| {
                 self.dialog_backdrop(
                     motion::DialogSurface::Overlay(overlay),
@@ -2257,7 +4000,6 @@ impl Render for Desktop {
             .flatten()
             .map(|dialog| self.dialog_backdrop(motion::DialogSurface::AccountRemoval, dialog));
         let incoming_card = incoming.then(|| self.incoming(cx));
-        let action_toast = self.action_toast_view(window, cx);
         let message_menu = self.message_menu_popup(window, cx);
         let composer_menu = self.composer_menu_popup(window, cx);
         let pin_motion_overlay = self.pin_motion_overlay(cx);
@@ -2300,9 +4042,49 @@ impl Render for Desktop {
             .text_size(self.sp(14.))
             .line_height(self.sp(22.))
             .bg(t.chrome())
+            .children(self.materials.layer(
+                if t.dark {
+                    controls::Texture::PatternDark
+                } else {
+                    controls::Texture::PatternLight
+                },
+                t.reduced_transparency,
+            ))
+            .children(
+                self.materials
+                    .layer(controls::Texture::Grain, t.reduced_transparency),
+            )
             .text_color(t.text)
             .track_focus(&self.root_focus)
             .tab_group()
+            .capture_action(cx.listener(|this, _: &input::Up, window, cx| {
+                if this.overlay == Some(Overlay::Search)
+                    && this.search.focus_handle(cx).is_focused(window)
+                    && !this.input_composing(cx)
+                {
+                    if this.search_kind == SearchKind::Messages {
+                        this.account_search_move(-1);
+                    } else {
+                        this.switcher_move(-1);
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &input::Down, window, cx| {
+                if this.overlay == Some(Overlay::Search)
+                    && this.search.focus_handle(cx).is_focused(window)
+                    && !this.input_composing(cx)
+                {
+                    if this.search_kind == SearchKind::Messages {
+                        this.account_search_move(1);
+                    } else {
+                        this.switcher_move(1);
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let composing = this.input_composing(cx);
                 if event.keystroke.key != "f7" {
@@ -2314,7 +4096,20 @@ impl Render for Desktop {
                     }
                 }
                 if !composing
-                    && (this.member_dialog_key(event, window, cx)
+                    && this.overlay == Some(Overlay::Search)
+                    && this.search.focus_handle(cx).is_focused(window)
+                    && !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "up" | "down")
+                {
+                    this.switcher_move(if event.keystroke.key == "up" { -1 } else { 1 });
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                if !composing
+                    && (this.person_key(event, window, cx)
+                        || this.cloud_browser_key(event, window, cx)
+                        || this.member_dialog_key(event, window, cx)
                         || this.composer_menu_key(event, window, cx)
                         || this.message_menu_key(event, window, cx)
                         || this.message_deadline_key(event, window, cx)
@@ -2324,11 +4119,32 @@ impl Render for Desktop {
                     cx.notify();
                     return;
                 }
+                // Application settings must be routed before a focused text
+                // input can consume its modified keystroke. Keep IME and incoming
+                // call priority identical to the ordinary application handler.
+                let modifiers = event.keystroke.modifiers;
+                let primary = if cfg!(target_os = "macos") {
+                    modifiers.platform
+                } else {
+                    modifiers.control
+                };
+                if !composing
+                    && !this.incoming_visible()
+                    && event.keystroke.key == ","
+                    && primary
+                    && !modifiers.shift
+                    && !modifiers.alt
+                    && !(cfg!(target_os = "macos") && modifiers.control)
+                {
+                    this.key(event, window, cx);
+                    return;
+                }
                 cx.notify();
             }))
             .on_key_down(cx.listener(Self::key))
             .child(self.pointer_modality(cx))
             .child(self.window_chrome(window, shell_visible, cx))
+            .children(self.connection_banner())
             .child(
                 div()
                     .relative()
@@ -2338,7 +4154,6 @@ impl Render for Desktop {
                     .when_some(overlay, |d, overlay| d.child(overlay))
                     .when_some(account_removal_dialog, |d, dialog| d.child(dialog))
                     .when_some(incoming_card, |d, card| d.child(card))
-                    .when_some(action_toast, |d, toast| d.child(toast))
                     .when_some(message_menu, |d, menu| d.child(menu))
                     .when_some(composer_menu, |d, menu| d.child(menu))
                     .when_some(pin_motion_overlay, |d, motion| d.child(motion)),
@@ -2371,12 +4186,29 @@ impl Render for Desktop {
                 window.refresh();
             });
         }
+        if self.own_status_focus
+            && self.own_status_open
+            && let Some(focus) = self
+                .control_focus
+                .current(&("own-status-choice", 0usize).into())
+        {
+            self.own_status_focus = false;
+            focus.focus(window);
+        }
         if let Some(id) = self.pending_device_focus.take()
-            && self.devices_open()
+            && (self.devices_open() || self.call_device_picker.is_some())
             && let Some(focus) = self.control_focus.current(&id)
         {
             focus.focus(window);
             self.navigation.reveal.request();
+        }
+        if let Some(context) = self.message_ui.private_reply_focus {
+            if self.snapshot.selected != Some(context) {
+                self.message_ui.private_reply_focus = None;
+            } else if self.composer_available() && self.overlay.is_none() {
+                self.message_ui.private_reply_focus = None;
+                self.composer.focus_handle(cx).focus(window);
+            }
         }
         if self.account_removal.focus_cancel && !incoming && !self.update_restart_pending {
             self.account_removal.focus_cancel = false;
@@ -2411,6 +4243,13 @@ impl Render for Desktop {
                     self.search.focus_handle(cx).focus(window);
                     None
                 }
+                Some(Overlay::Discover) => {
+                    self.discovery_search.focus_handle(cx).focus(window);
+                    None
+                }
+                Some(Overlay::ConfirmEndCall) => Some("cancel-end-everyone".into()),
+                Some(Overlay::ConfirmRecording) => Some("cancel-recording".into()),
+                Some(Overlay::RecordingConsent) => Some("decline-recording-consent".into()),
                 Some(Overlay::CreatePoll) => {
                     self.content_ui.question.focus_handle(cx).focus(window);
                     None
@@ -2456,14 +4295,22 @@ impl Render for Desktop {
         }
         self.finish_onboarding_focus(window, cx);
         self.finish_search_focus(window, cx);
+        #[cfg(feature = "dev-probes")]
+        self.observe_perf_build(build_started);
         view
     }
 }
 
 // The call-chat dialog owns the same editor as the docked call chat. Other
 // dialogs and incoming-call priority always exclude editor input and dispatch.
-fn composer_allowed(overlay: Option<Overlay>, prejoin: bool, incoming: bool) -> bool {
-    !prejoin && !incoming && matches!(overlay, None | Some(Overlay::CallChat))
+fn composer_allowed(overlay: Option<Overlay>, prejoin: bool, incoming: bool, voice: bool) -> bool {
+    !voice
+        && !prejoin
+        && !incoming
+        && matches!(overlay, None | Some(Overlay::CallChat | Overlay::Thread))
+}
+fn lobby_allows_overlay(overlay: Overlay) -> bool {
+    matches!(overlay, Overlay::Settings | Overlay::Accounts)
 }
 fn docked_call_chat(wide: bool, open: bool, overlay: Option<Overlay>) -> bool {
     wide && open && overlay != Some(Overlay::CallChat)
@@ -2493,7 +4340,10 @@ fn finish_startup_account_dialog(
 
 #[cfg(test)]
 mod interaction_tests {
-    use super::{Overlay, composer_allowed, docked_call_chat, finish_startup_account_dialog};
+    use super::{
+        Overlay, composer_allowed, docked_call_chat, finish_startup_account_dialog,
+        lobby_allows_overlay,
+    };
 
     #[test]
     fn automatic_account_prompt_waits_for_a_valid_activation_and_then_releases_the_modal() {
@@ -2551,17 +4401,50 @@ mod interaction_tests {
         }
     }
     #[test]
+    fn voice_owns_the_composer_until_recording_or_review_retires() {
+        for overlay in [None, Some(Overlay::CallChat), Some(Overlay::Thread)] {
+            assert!(composer_allowed(overlay, false, false, false));
+            assert!(!composer_allowed(overlay, false, false, true));
+            assert!(composer_allowed(overlay, false, false, false));
+        }
+    }
+    #[test]
     fn call_chat_retains_one_editor_owner_through_resize_and_modal_exclusion() {
         for wide in [false, true] {
             assert!(!docked_call_chat(wide, true, Some(Overlay::CallChat)));
-            assert!(composer_allowed(Some(Overlay::CallChat), false, false));
+            assert!(composer_allowed(
+                Some(Overlay::CallChat),
+                false,
+                false,
+                false
+            ));
         }
         assert!(docked_call_chat(true, true, None));
         assert!(!docked_call_chat(false, true, None));
+        assert!(composer_allowed(Some(Overlay::Thread), false, false, false));
         for modal in [Overlay::Settings, Overlay::Search, Overlay::Accounts] {
-            assert!(!composer_allowed(Some(modal), false, false));
+            assert!(!composer_allowed(Some(modal), false, false, false));
         }
-        assert!(!composer_allowed(Some(Overlay::CallChat), false, true));
-        assert!(!composer_allowed(None, true, false));
+        assert!(!composer_allowed(
+            Some(Overlay::CallChat),
+            false,
+            true,
+            false
+        ));
+        assert!(!composer_allowed(None, true, false, false));
+    }
+    #[test]
+    fn waiting_lobby_keeps_conversation_overlays_closed() {
+        for overlay in [
+            Overlay::CallChat,
+            Overlay::CallParticipants,
+            Overlay::Thread,
+            Overlay::Files,
+            Overlay::RoomInfo,
+        ] {
+            assert!(!lobby_allows_overlay(overlay));
+        }
+        assert!(lobby_allows_overlay(Overlay::Settings));
+        assert!(lobby_allows_overlay(Overlay::Accounts));
     }
 }

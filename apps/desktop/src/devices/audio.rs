@@ -1,5 +1,6 @@
 //! CPAL owns CoreAudio/WASAPI/ALSA/PulseAudio callbacks and native destruction.
-//! Samples are reduced in the input callback, never copied, retained or uploaded.
+//! Meter samples are reduced in the input callback. Explicit voice capture feeds
+//! a bounded in-memory recording, which is handed to the scoped upload owner.
 use super::{DeviceError, DeviceId, DeviceInfo, DeviceKind, Signal, safe_label};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
@@ -26,6 +27,14 @@ impl Backend {
         signal: Arc<Signal>,
     ) -> Result<Capture, DeviceError> {
         Capture::microphone(&self.host, id, signal)
+    }
+    pub(super) fn record_voice(
+        &self,
+        id: &DeviceId,
+        signal: Arc<Signal>,
+        recording: Arc<super::voice::Recording>,
+    ) -> Result<Capture, DeviceError> {
+        Capture::record_voice(&self.host, id, signal, recording)
     }
     pub(super) fn tone(&self, id: &DeviceId, signal: Arc<Signal>) -> Result<Capture, DeviceError> {
         Capture::tone(&self.host, id, signal)
@@ -83,6 +92,44 @@ pub(super) struct Capture {
 impl Capture {
     pub(super) fn id(&self) -> &DeviceId {
         &self.id
+    }
+    fn record_voice(
+        host: &cpal::Host,
+        id: &DeviceId,
+        signal: Arc<Signal>,
+        recording: Arc<super::voice::Recording>,
+    ) -> Result<Self, DeviceError> {
+        let device = selected_device(host, id)?;
+        let config = device.default_input_config().map_err(map_error)?;
+        validate_config(&config)?;
+        if config.sample_rate() < super::voice::RATE {
+            return Err(DeviceError::CaptureFailed);
+        }
+        macro_rules! build {
+            ($t:ty) => {
+                voice_input::<$t>(&device, config.config(), signal, recording)
+            };
+        }
+        let stream = match config.sample_format() {
+            SampleFormat::F32 => build!(f32),
+            SampleFormat::F64 => build!(f64),
+            SampleFormat::I8 => build!(i8),
+            SampleFormat::I16 => build!(i16),
+            SampleFormat::I24 => build!(cpal::I24),
+            SampleFormat::I32 => build!(i32),
+            SampleFormat::I64 => build!(i64),
+            SampleFormat::U8 => build!(u8),
+            SampleFormat::U16 => build!(u16),
+            SampleFormat::U24 => build!(cpal::U24),
+            SampleFormat::U32 => build!(u32),
+            SampleFormat::U64 => build!(u64),
+            _ => return Err(DeviceError::CaptureFailed),
+        }?;
+        stream.play().map_err(map_error)?;
+        Ok(Self {
+            _stream: stream,
+            id: id.clone(),
+        })
     }
     fn microphone(
         host: &cpal::Host,
@@ -148,6 +195,41 @@ impl Capture {
             id: id.clone(),
         })
     }
+}
+fn voice_input<T>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    signal: Arc<Signal>,
+    recording: Arc<super::voice::Recording>,
+) -> Result<cpal::Stream, DeviceError>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    let errors = signal.clone();
+    let channels = usize::from(config.channels);
+    let rate = config.sample_rate;
+    let mut resampler = super::voice::Resampler::default();
+    device
+        .build_input_stream(
+            config,
+            move |data: &[T], _| {
+                if !signal.valid() || data.is_empty() {
+                    return;
+                }
+                recording.push(data, channels, rate, &mut resampler);
+                if recording.failed() {
+                    signal.fail(DeviceError::CaptureFailed);
+                }
+                signal.touch();
+                signal.observed.store(true, Ordering::Release);
+            },
+            move |error| {
+                errors.fail(map_error(error));
+            },
+            None,
+        )
+        .map_err(map_error)
 }
 fn selected_device(host: &cpal::Host, id: &DeviceId) -> Result<cpal::Device, DeviceError> {
     let native_id: cpal::DeviceId = id
@@ -302,24 +384,18 @@ impl Backend {
         sink: talk_adapters::media::CaptureHandle,
     ) -> Result<Capture, DeviceError> {
         let device = selected_device(&self.host, id)?;
-        let choose = |c: &cpal::SupportedStreamConfigRange| {
-            c.channels() <= 2
-                && c.channels() > 0
-                && c.min_sample_rate() <= 48_000
-                && c.max_sample_rate() >= 48_000
-        };
         let config = if input {
             device
                 .supported_input_configs()
                 .map_err(map_error)?
                 .take(64)
-                .find(choose)
+                .find(call_config_supported)
         } else {
             device
                 .supported_output_configs()
                 .map_err(map_error)?
                 .take(64)
-                .find(choose)
+                .find(call_config_supported)
         }
         .ok_or(DeviceError::Unavailable)?
         .with_sample_rate(48_000);
@@ -343,6 +419,23 @@ impl Backend {
         })
     }
 }
+fn call_config_supported(c: &cpal::SupportedStreamConfigRange) -> bool {
+    // PulseAudio advertises U8 before I16. Select a format handled by the
+    // stream builder, rather than failing a working device on its first range.
+    c.channels() <= 2
+        && c.channels() > 0
+        && c.min_sample_rate() <= 48_000
+        && c.max_sample_rate() >= 48_000
+        && matches!(
+            c.sample_format(),
+            SampleFormat::F32
+                | SampleFormat::F64
+                | SampleFormat::I16
+                | SampleFormat::I32
+                | SampleFormat::U16
+        )
+}
+
 fn call_stream<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
@@ -499,7 +592,39 @@ fn ringback_sample(position: u64) -> i16 {
 
 #[cfg(test)]
 mod call_sound_tests {
-    use super::ringback_sample;
+    use super::{call_config_supported, ringback_sample};
+
+    #[test]
+    fn call_selection_skips_unsupported_first_formats_and_keeps_rate_channel_bounds() {
+        use cpal::{SampleFormat, SupportedBufferSize, SupportedStreamConfigRange};
+        let range = |format, channels, min, max| {
+            SupportedStreamConfigRange::new(
+                channels,
+                min,
+                max,
+                SupportedBufferSize::Unknown,
+                format,
+            )
+        };
+        // The pinned PulseAudio backend advertises these in this order.
+        let formats = [SampleFormat::U8, SampleFormat::I24, SampleFormat::I16];
+        let selected = formats
+            .map(|format| range(format, 2, 8_000, 192_000))
+            .into_iter()
+            .find(call_config_supported)
+            .unwrap();
+        assert_eq!(selected.sample_format(), SampleFormat::I16);
+        assert_eq!(selected.with_sample_rate(48_000).sample_rate(), 48_000);
+        for rejected in [
+            range(SampleFormat::I16, 0, 48_000, 48_000),
+            range(SampleFormat::I16, 3, 48_000, 48_000),
+            range(SampleFormat::I16, 2, 8_000, 44_100),
+            range(SampleFormat::I16, 2, 96_000, 192_000),
+        ] {
+            assert!(!call_config_supported(&rejected));
+        }
+    }
+
     #[test]
     fn shipped_stereo_48k_ringback_has_audio_then_gap_and_finite_end() {
         assert!((0..4 * 48_000).step_by(17).any(|n| ringback_sample(n) != 0));

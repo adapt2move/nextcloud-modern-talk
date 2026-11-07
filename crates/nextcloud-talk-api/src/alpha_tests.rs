@@ -223,6 +223,22 @@ fn malformed_or_cross_room_parent_cannot_smuggle_context() {
         models::Message::decode(&m).err().unwrap(),
         ErrorKind::WrongScope
     );
+    m["parent"]["metaData"] = json!({
+        "replyToConversationToken": "otherroom",
+        "replyToMessageId": 2
+    });
+    assert!(
+        models::Message::decode(&m)
+            .unwrap()
+            .parent
+            .unwrap()
+            .external
+    );
+    m["parent"]["metaData"]["replyToMessageId"] = json!(0);
+    assert_eq!(
+        models::Message::decode(&m).err().unwrap(),
+        ErrorKind::WrongScope
+    );
     m["parent"]["token"] = json!("testroom");
     m["parent"]["parent"] = message(1, "");
     assert_eq!(
@@ -325,6 +341,31 @@ fn routes_validate_and_place_delete_parameters_in_query() {
     );
 }
 
+#[test]
+fn voice_share_uses_talk_metadata_without_changing_regular_attachments() {
+    for voice_message in [false, true] {
+        let planned = plan(&Request::Chat {
+            room: room(),
+            command: chat::Command::ShareAttachment {
+                path: "/Talk/recording".into(),
+                file_name: "Voice message.wav".into(),
+                reference: "fixture-reference".into(),
+                caption: String::new(),
+                voice_message,
+                options: Default::default(),
+            },
+        })
+        .unwrap();
+        let metadata = planned.3.iter().find(|(key, _)| *key == "talkMetaData");
+        if voice_message {
+            let value: serde_json::Value = serde_json::from_str(&metadata.unwrap().1).unwrap();
+            assert_eq!(value["messageType"], "voice-message");
+        } else {
+            assert!(metadata.is_none());
+        }
+    }
+}
+
 #[derive(Default)]
 struct CountingSink {
     bytes: usize,
@@ -369,7 +410,7 @@ async fn binary_download_streams_beyond_json_ceiling_in_bounded_writes() {
     assert_eq!(bytes, 1024 * 1024);
     assert_eq!(sink.bytes, 1024 * 1024);
     assert!(sink.largest <= files::FILE_CHUNK_BYTES);
-    assert_eq!(MAX_RESPONSE_BYTES, 256 * 1024);
+    assert_eq!(MAX_RESPONSE_BYTES, 1024 * 1024);
 }
 #[tokio::test]
 async fn binary_limits_and_create_only_conflict_do_not_weaken_json_or_replay() {
@@ -577,4 +618,28 @@ async fn image_lane_rejects_non_image_body_and_ambiguous_avatar_targets() {
         assert_eq!(error.kind, ErrorKind::Malformed);
     }
     assert_eq!(server.count(), 1);
+}
+
+#[test]
+fn location_parameters_must_agree_before_becoming_a_map_target() {
+    let object = |id: &str, latitude: &str, longitude: &str| {
+        json!({"place": {
+            "type":"geo-location", "id":id, "name":"Meeting place", "latitude":latitude, "longitude":longitude
+        }})
+    };
+    let good = object("geo:52.5,13.4", "52.5", "13.4");
+    assert_eq!(
+        chat::rich(Some(&good)).unwrap()[0].id.as_deref(),
+        Some("geo:52.5,13.4")
+    );
+    for invalid in [
+        object("geo:52.5,13.4", "52.6", "13.4"),
+        object("geo:91,13.4", "91", "13.4"),
+        object("geo:52.5,13.4&x=1", "52.5", "13.4"),
+        object("geo:NaN,13.4", "NaN", "13.4"),
+    ] {
+        let values = chat::rich(Some(&invalid)).unwrap();
+        assert!(values[0].id.is_none());
+        assert_eq!(values[0].name, "Meeting place");
+    }
 }

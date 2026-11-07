@@ -5,6 +5,7 @@ use nextcloud_talk_api as api;
 use talk_core::policy::Moment;
 use talk_core::protocol::conversation::{Recipient, RecipientId, RecipientSource};
 
+#[derive(Clone)]
 pub(super) struct PersonBinding {
     pub(super) id: RecipientId,
     pub(super) actor_id: String,
@@ -17,6 +18,58 @@ pub(super) struct DirectAttempt {
     uncertain: bool,
 }
 impl NextcloudClient {
+    pub(super) async fn create_private_reply(
+        &mut self,
+        c: &OperationContext,
+        operation: OperationId,
+        source: MessageId,
+        caps: &Capabilities,
+    ) -> Result<ProtocolReply, PortError> {
+        if !caps.has("private-reply") || !caps.has("chat-get-context") {
+            return Err(self.error(ErrorKind::Unsupported));
+        }
+        let room = self.room(c, source.conversation, caps).await?;
+        if !matches!(
+            room.kind,
+            talk_core::protocol::RoomKind::Group | talk_core::protocol::RoomKind::Public
+        ) || room.classified
+            || room.unknown_restrictions
+            || room.actions.read_messages != Decision::Allowed
+            || source.sequence == 0
+        {
+            return Err(self.error(ErrorKind::PermissionDenied));
+        }
+        let message = self.target(c, source).await?;
+        let actor = message
+            .actor_id
+            .as_deref()
+            .filter(|id| {
+                !id.trim().is_empty()
+                    && !id.chars().any(char::is_control)
+                    && *id != self.transport.user()
+            })
+            .filter(|_| message.actor_type.as_deref() == Some("users"))
+            .filter(|_| message.replyable == Some(true))
+            .ok_or_else(|| self.error(ErrorKind::PermissionDenied))?
+            .to_owned();
+        let now = self.transport.now();
+        let recipient = RecipientId {
+            scope: c.scope,
+            local: self.opaque()?,
+        };
+        // A directory selection and a message-derived identity cannot share
+        // authority. The existing direct-creation journal owns the mutation.
+        self.people.clear();
+        self.people.push(PersonBinding {
+            id: recipient,
+            actor_id: actor,
+            expires: Moment {
+                epoch: now.epoch,
+                millis: now.millis.saturating_add(120_000),
+            },
+        });
+        self.create_direct(c, operation, recipient, caps).await
+    }
     pub(super) async fn find_people(
         &mut self,
         c: &OperationContext,
@@ -33,7 +86,16 @@ impl NextcloudClient {
                     search: query.as_str().to_owned(),
                 },
             )
-            .await?;
+            .await;
+        if reply.as_ref().is_err_and(|error| {
+            matches!(
+                error.kind,
+                ErrorKind::PermissionDenied | ErrorKind::ReauthenticationRequired
+            )
+        }) {
+            self.creation_people.clear();
+        }
+        let reply = reply?;
         let api::Reply::Conversation(api::conversation::Response::Directory(entries)) = reply
         else {
             return Err(self.error(ErrorKind::Malformed));
@@ -77,6 +139,55 @@ impl NextcloudClient {
         }
         self.people = people;
         Ok(ProtocolReply::People(page))
+    }
+
+    /// Re-fetch the selected room's membership before converting its scoped handle
+    /// to a direct-chat recipient. Display names never grant this authority.
+    pub(super) async fn create_direct_for_member(
+        &mut self,
+        c: &OperationContext,
+        operation: OperationId,
+        member: talk_core::protocol::conversation::MemberId,
+        caps: &Capabilities,
+    ) -> Result<ProtocolReply, PortError> {
+        if member.conversation.account != c.scope.account {
+            return Err(self.error(ErrorKind::WrongScope));
+        }
+        let room = self.room(c, member.conversation, caps).await?;
+        self.allowed(room.actions.list_participants)?;
+        let result = self.members(c, member.conversation, caps).await?;
+        let talk_core::protocol::conversation::ConversationResult::Members(members) = result else {
+            return Err(self.error(ErrorKind::Malformed));
+        };
+        if !members.as_slice().iter().any(|entry| {
+            entry.id == member && !entry.is_self && entry.source == RecipientSource::User
+        }) {
+            return Err(self.error(ErrorKind::WrongScope));
+        }
+        let actor_id = self
+            .members
+            .iter()
+            .find(|entry| entry.id == member && entry.actor_type == "users")
+            .map(|entry| entry.actor_id.clone())
+            .ok_or_else(|| self.error(ErrorKind::WrongScope))?;
+        let recipient = RecipientId {
+            scope: c.scope,
+            local: member.local,
+        };
+        let now = self.transport.now();
+        self.people.retain(|entry| entry.id != recipient);
+        if self.people.len() >= 100 {
+            self.people.remove(0);
+        }
+        self.people.push(PersonBinding {
+            id: recipient,
+            actor_id,
+            expires: Moment {
+                epoch: now.epoch,
+                millis: now.millis.saturating_add(120_000),
+            },
+        });
+        self.create_direct(c, operation, recipient, caps).await
     }
 
     pub(super) async fn create_direct(

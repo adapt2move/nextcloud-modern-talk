@@ -269,7 +269,22 @@ impl Desktop {
             return;
         }
         if key == "escape" {
-            self.toggle_device_picker(kind);
+            if self
+                .call_device_picker
+                .is_some_and(|(_, current)| current == kind)
+            {
+                self.call_device_picker = None;
+                self.device_picker = None;
+                if let Some(focus) = self
+                    .control_focus
+                    .current(&("call-device", kind as usize).into())
+                {
+                    focus.focus(window);
+                }
+                self.pending_device_focus = None;
+            } else {
+                self.toggle_device_picker(kind);
+            }
         } else if matches!(key, "down" | "up" | "home" | "end") {
             let ids = self.device_option_ids(kind);
             let current = ids.iter().position(|id| {
@@ -360,16 +375,11 @@ impl Desktop {
                     d.child(self.scaled_icon("check", 16., self.theme.accent))
                 }))
             };
-            let mut choices = div()
+            let mut choices = self
+                .context_menu_surface()
                 .flex_none()
-                .flex()
-                .flex_col()
                 .gap_1()
-                .p_1()
-                .rounded_lg()
-                .border_1()
                 .border_color(self.theme.input_border)
-                .bg(self.theme.surface)
                 .child(option(
                     ("device-default", kind as usize).into(),
                     self.l("Systemstandard").to_owned(),
@@ -393,6 +403,107 @@ impl Desktop {
         }
         selector
     }
+    pub(super) fn call_device_popover(
+        &self,
+        scope: talk_core::ui::CallScope,
+        cx: &Context<Self>,
+    ) -> Option<gpui::Stateful<Div>> {
+        let (_, kind) = self
+            .call_device_picker
+            .filter(|(current, _)| *current == scope)?;
+        let kinds: &[DeviceKind] = if kind == DeviceKind::Microphone {
+            &[DeviceKind::Microphone, DeviceKind::Speaker]
+        } else {
+            &[DeviceKind::Camera]
+        };
+        let mut list = self
+            .context_menu_surface()
+            .id("call-device-popover")
+            .absolute()
+            .left(px(-32.))
+            .bottom(px(54.))
+            .w(px(300.))
+            .max_h(px(360.))
+            .overflow_y_scroll()
+            .occlude()
+            .text_color(self.theme.text)
+            .p_3();
+        for (index, &section) in kinds.iter().enumerate() {
+            let chosen = match section {
+                DeviceKind::Microphone => &self.preferences.active.devices.microphone,
+                DeviceKind::Speaker => &self.preferences.active.devices.speaker,
+                DeviceKind::Camera => &self.preferences.active.devices.camera,
+            };
+            list = list.child(
+                div()
+                    .when(index > 0, |d| {
+                        d.mt_2().pt_2().border_t_1().border_color(self.theme.border)
+                    })
+                    .text_size(self.sp(12.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(self.l(match section {
+                        DeviceKind::Microphone => "Mikrofon",
+                        DeviceKind::Speaker => "Lautsprecher",
+                        DeviceKind::Camera => "Kamera",
+                    })),
+            );
+            let option = |id: ElementId, label: String, selection: DeviceSelection| {
+                let selected = *chosen == selection;
+                self.control(
+                    id,
+                    ButtonStyle::Quiet,
+                    self.settings_availability(),
+                    LocalAction::SelectDevice(section, selection),
+                    cx,
+                )
+                .h(px(36.))
+                .min_h(px(36.))
+                .w_full()
+                .justify_between()
+                .child(div().min_w_0().flex_1().text_ellipsis().child(label))
+                .child(div().w(px(16.)).when(selected, |d| {
+                    d.child(self.scaled_icon("check", 16., self.theme.accent))
+                }))
+            };
+            list = list.child(option(
+                ("device-default", section as usize).into(),
+                self.l("Systemstandard").to_owned(),
+                DeviceSelection::SystemDefault,
+            ));
+            if let Ok(snapshot) = &self.devices {
+                for device in snapshot
+                    .devices
+                    .as_slice()
+                    .iter()
+                    .filter(|d| d.kind == section)
+                {
+                    list = list.child(option(
+                        device_option_id(section, &device.id),
+                        self.l(device.label.as_str()).to_owned(),
+                        DeviceSelection::Specific(device.id.clone()),
+                    ));
+                }
+            }
+        }
+        list = list
+            .child(
+                self.hint(self.l("Gerätewechsel stoppt die Übertragung."))
+                    .text_ellipsis(),
+            )
+            .child(
+                self.button(
+                    "call-device-settings",
+                    "Geräteeinstellungen öffnen",
+                    ButtonStyle::Quiet,
+                    true,
+                    LocalAction::OpenDeviceSettings,
+                    cx,
+                )
+                .w_full(),
+            );
+        Some(list)
+    }
+
     pub(super) fn device_page(&self, cx: &Context<Self>) -> Div {
         let mut page = div()
             .flex()

@@ -6,7 +6,7 @@ mod tests;
 use super::*;
 use talk_adapters::identity::{
     DataCommand, DataResult, OutboxEntry, OutboxIntent as Intent, OutboxOptions, OutboxPhase,
-    OutboxRecord,
+    OutboxPrivateReply, OutboxRecord,
 };
 use talk_core::preferences::navigation::NavigationRoomKey;
 use talk_core::protocol::messaging as wire;
@@ -76,6 +76,45 @@ pub(super) struct Outbox {
     next_error: u64,
 }
 impl Outbox {
+    /// Apply pending reminder intents over an account observation, using only
+    /// room keys already bound in the current conversation list.
+    pub(super) fn project_reminders(
+        &self,
+        scope: AccountScope,
+        rooms: &[ConversationView],
+        reminders: &mut Vec<talk_core::ui::presentation::AccountReminderView>,
+    ) {
+        for entry in self.entries.iter().filter(|entry| {
+            entry.account == scope.account
+                && !matches!(
+                    entry.state,
+                    State::Failed | State::Removing | State::ParkedUncertain
+                )
+        }) {
+            let Intent::Reminder { message, timestamp } = &entry.intent else {
+                continue;
+            };
+            let Some(room) = rooms.iter().find(|room| {
+                room.context.account == scope
+                    && room.navigation_key.as_ref() == Some(&entry.record.room)
+            }) else {
+                continue;
+            };
+            reminders.retain(|item| {
+                item.context != room.context || item.message != u128::from(*message)
+            });
+            if let Some(timestamp) = timestamp
+                && reminders.len() < 100
+            {
+                reminders.push(talk_core::ui::presentation::AccountReminderView {
+                    context: room.context,
+                    message: u128::from(*message),
+                    timestamp: *timestamp,
+                    preview: None,
+                });
+            }
+        }
+    }
     fn next_index(&self, account: AccountId, now: Instant) -> Option<usize> {
         if self.entries.iter().any(|entry| {
             entry.account == account && matches!(entry.state, State::Running | State::Marking)
@@ -194,6 +233,8 @@ impl Outbox {
         panel: &mut view::MessagePanel,
     ) {
         panel.queued_actions = 0;
+        panel.unread_queued = false;
+        panel.thread_following_intent = None;
         panel.failed_drafts = Page::empty();
         for entry in self
             .entries
@@ -218,6 +259,11 @@ impl Outbox {
                 && !matches!(e.state, State::Failed | State::Removing)
         }) {
             panel.queued_actions = panel.queued_actions.saturating_add(1);
+            match entry.intent {
+                Intent::MarkUnread => panel.unread_queued = true,
+                Intent::MarkRead { .. } => panel.unread_queued = false,
+                _ => (),
+            }
             if entry.state == State::ParkedUncertain {
                 continue;
             }
@@ -243,6 +289,194 @@ impl Outbox {
     }
 }
 impl Accounts {
+    pub(super) fn queue_room_unread(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+    ) -> Result<(), SubmitError> {
+        if self.snapshot.active_account != Some(context.account)
+            || !self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|row| row.context == context)
+        {
+            return Err(SubmitError::StaleScope);
+        }
+        self.queue_message_action(request, context, &view::MessageAction::MarkUnread)
+            .unwrap_or(Err(SubmitError::Unavailable(
+                UnavailableReason::PolicyStale,
+            )))
+    }
+
+    /// Overlay queued unread state over the newest room observation, not a
+    /// stale copy captured before another device changed the room.
+    pub(super) fn project_room_unread(&self, snapshot: &mut PresentationSnapshot) {
+        snapshot.pending_intents = self
+            .outbox
+            .entries
+            .iter()
+            .filter(|e| {
+                Some(e.account) == snapshot.active_account.map(|s| s.account)
+                    && matches!(
+                        e.state,
+                        State::Saving | State::Queued | State::Marking | State::Ready
+                    )
+            })
+            .count()
+            .min(64) as u16;
+        snapshot.conversations = page(snapshot.conversations.as_slice().iter().cloned().map(
+            |mut room| {
+                room.action_error = room.navigation_key.as_ref().and_then(|key| {
+                    self.outbox
+                        .errors
+                        .iter()
+                        .rev()
+                        .find(|(id, r, _, _)| *id == room.context.account.account && r == key)
+                        .map(|(_, _, _, reason)| *reason)
+                        .or_else(|| {
+                            self.outbox
+                                .entries
+                                .iter()
+                                .any(|e| {
+                                    e.account == room.context.account.account
+                                        && &e.record.room == key
+                                        && e.state == State::Failed
+                                })
+                                .then_some(view::MessageActionError::Failed(
+                                    UnavailableReason::PolicyStale,
+                                ))
+                        })
+                });
+                if let Some(key) = room.navigation_key.as_ref() {
+                    for entry in self.outbox.entries.iter().filter(|e| {
+                        e.account == room.context.account.account
+                            && &e.record.room == key
+                            && !matches!(
+                                e.state,
+                                State::Failed | State::Removing | State::ParkedUncertain
+                            )
+                    }) {
+                        match entry.intent {
+                            Intent::MarkUnread => room.unread = room.unread.max(1),
+                            Intent::MarkRead { message } => {
+                                room.last_read_message = Some(
+                                    room.last_read_message.unwrap_or(0).max(u128::from(message)),
+                                );
+                                if self
+                                    .history
+                                    .get(room.context)
+                                    .is_some_and(|h| h.read_reaches_latest(u128::from(message)))
+                                {
+                                    room.unread = 0;
+                                    room.unread_mention = Some(false);
+                                    room.unread_direct_mention =
+                                        room.unread_direct_mention.map(|_| false);
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+                room
+            },
+        ));
+    }
+
+    /// Apply pending settings to the published account page, leaving its server
+    /// observation intact so a rejection can reveal it again.
+    pub(super) fn project_thread_list(&self, snapshot: &mut PresentationSnapshot) {
+        let Some(scope) = snapshot
+            .threads
+            .account
+            .filter(|scope| Some(*scope) == snapshot.active_account)
+        else {
+            return;
+        };
+        let live = |entry: &&Entry| {
+            entry.account == scope.account
+                && !matches!(
+                    entry.state,
+                    State::Failed | State::Removing | State::ParkedUncertain
+                )
+        };
+        let mut entries = Vec::new();
+        for row in snapshot.threads.entries.as_slice() {
+            let key = self.cache.stable_room(row.context).or_else(|| {
+                snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .find(|room| room.context == row.context)
+                    .and_then(|room| room.navigation_key.clone())
+            });
+            let mut row = row.clone();
+            let mut followed = true;
+            if let Some(key) = key {
+                for entry in self
+                    .outbox
+                    .entries
+                    .iter()
+                    .filter(live)
+                    .filter(|entry| entry.record.room == key)
+                {
+                    match &entry.intent {
+                        Intent::RenameThread { root, title } if u128::from(*root) == row.root => {
+                            row.title = title.clone()
+                        }
+                        Intent::ThreadNotifications { root, level }
+                            if u128::from(*root) == row.root =>
+                        {
+                            followed = *level != 3
+                        }
+                        _ => (),
+                    }
+                }
+            }
+            if followed {
+                entries.push(row);
+            }
+        }
+        // A just-followed thread may not have appeared in the observed page.
+        // Add it only from this open, scoped thread's bounded observation.
+        if snapshot.threads.offset == 0
+            && let Some(panel) = snapshot.message_panel.as_ref()
+            && Some(panel.context) == snapshot.selected
+            && panel.context.account == scope
+            && panel.thread_following_intent == Some(true)
+            && let Some(details) = panel.thread_details.as_ref()
+            && panel.thread_root == Some(details.root)
+            && !entries
+                .iter()
+                .any(|row| row.context == panel.context && row.root == details.root)
+            && entries.len() < 50
+        {
+            let root = panel.thread_root_message.as_ref().or_else(|| {
+                snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .find(|row| row.local_id == details.root)
+            });
+            entries.insert(
+                0,
+                talk_core::ui::presentation::ThreadView {
+                    context: panel.context,
+                    root: details.root,
+                    title: details.title.clone(),
+                    replies: root.map_or(0, |row| u32::from(row.reply_count)),
+                    last_message: panel
+                        .thread_messages
+                        .as_slice()
+                        .last()
+                        .map(|row| row.local_id),
+                },
+            );
+        }
+        snapshot.threads.entries = page(entries);
+    }
+
     pub(super) fn outbox_available(&self, context: ConversationRef) -> bool {
         self.cache.persistable(context)
             || self.current(context.account).is_ok()
@@ -390,89 +624,245 @@ impl Accounts {
                 .find(|r| r.context == context)
                 .and_then(|r| r.navigation_key.clone())
         })?;
-        let converted = self.outbox_intent(context, action)?;
-        Some((|| {
-            if self.snapshot.selected != Some(context) {
-                return Err(SubmitError::StaleScope);
+        let intent = match self.outbox_intent(context, action)? {
+            Ok(intent) => intent,
+            Err(error) => return Some(Err(error)),
+        };
+        let unselected = matches!(
+            action,
+            view::MessageAction::MarkUnread
+                | view::MessageAction::SetFavorite(_)
+                | view::MessageAction::SetArchived(_)
+                | view::MessageAction::SetNotificationLevel(_)
+        );
+        Some(self.queue_intent(request, context, stable, intent, unselected))
+    }
+    pub(super) fn queue_intent(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+        stable: NavigationRoomKey,
+        intent: Intent,
+        unselected: bool,
+    ) -> Result<(), SubmitError> {
+        if self.snapshot.selected != Some(context)
+            && (!unselected
+                || self.snapshot.active_account != Some(context.account)
+                || !self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .any(|r| r.context == context))
+        {
+            return Err(SubmitError::StaleScope);
+        }
+        if let Intent::RenameThread { root, .. } | Intent::ThreadNotifications { root, .. } =
+            &intent
+        {
+            let panel = self
+                .snapshot
+                .message_panel
+                .as_ref()
+                .filter(|panel| {
+                    panel.context == context && panel.thread_root == Some(u128::from(*root))
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            let details = panel
+                .thread_details
+                .as_ref()
+                .filter(|details| details.root == u128::from(*root))
+                .ok_or(SubmitError::StaleScope)?;
+            let availability = panel.availability(view::MessageFeature::Threads);
+            // A live thread observation proves this room exposed threads.
+            // Local admission can outlive that observation's permission
+            // TTL; the protocol owner revalidates before dispatch.
+            if availability.server == talk_core::ui::presentation::FeatureSupport::Unsupported
+                || availability.allowed == Decision::Denied
+                || matches!(&intent, Intent::RenameThread { .. })
+                    && details.rename == Decision::Denied
+                || matches!(&intent, Intent::ThreadNotifications { .. })
+                    && details.notification_level.is_none()
+            {
+                return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
             }
-            let intent = converted?;
-            let room = stable;
-            let durable = self.cache.persistable(context);
-            if !durable {
-                self.current(context.account)?;
-            }
-            let count = self
+        }
+        let room = stable;
+        // Visibility observations may repeat while the durable save is pending.
+        // A covering marker already in the ordered queue needs no second record.
+        if let Intent::MarkRead { message } = intent
+            && self
                 .outbox
                 .entries
                 .iter()
-                .filter(|e| e.account == context.account.account)
-                .count();
-            if count >= CAPACITY {
-                return Err(SubmitError::Busy);
-            }
-            let operation = if durable {
-                self.connection
-                    .as_ref()
-                    .map_err(|e| submit_error(*e))?
-                    .new_local_operation_id(context.account.account)
-            } else {
-                self.connection
-                    .as_ref()
-                    .map_err(|e| submit_error(*e))?
-                    .new_operation_id(context.account)
-            }
-            .map_err(submit_error)?;
-            let record = OutboxRecord::from_intent(operation, room, &intent)
-                .map_err(|_| SubmitError::Busy)?;
-            let bytes = self
-                .outbox
-                .entries
-                .iter()
-                .filter(|e| e.account == context.account.account)
-                .map(|e| e.record.payload.as_str().len())
-                .sum::<usize>();
-            if bytes.saturating_add(record.payload.as_str().len()) > BYTES {
-                return Err(SubmitError::Busy);
-            }
-            if durable {
-                match self.admit(
-                    RuntimeCommand::AccountData {
-                        account: context.account.account,
-                        command: DataCommand::Enqueue(record.clone()),
-                    },
-                    Purpose::Outbox(Work::Save(context.account.account, operation)),
-                ) {
-                    Ok(_) | Err(IdentityError::Request(ErrorKind::Busy)) => (),
-                    Err(error) => return Err(submit_error(error)),
+                .rev()
+                .filter(|e| {
+                    e.account == context.account.account
+                        && e.record.room == room
+                        && !matches!(e.state, State::Failed | State::Removing)
+                })
+                .find(|e| matches!(e.intent, Intent::MarkRead { .. } | Intent::MarkUnread))
+                .is_some_and(
+                    |e| matches!(e.intent, Intent::MarkRead { message: old } if old >= message),
+                )
+        {
+            return Ok(());
+        }
+        if matches!(intent, Intent::MarkRead { .. } | Intent::MarkUnread)
+            && self.outbox.entries.iter().any(|entry| {
+                entry.account == context.account.account
+                    && entry.record.room == room
+                    && entry.replaces.is_some()
+                    && !matches!(entry.state, State::Failed | State::Removing)
+            })
+        {
+            return Err(SubmitError::Busy);
+        }
+        // A repeated deliberate activation may replace an uncertain mark,
+        // but must not create overlapping read-marker writes. Reapplying
+        // after uncertainty is a new user intent, never an automatic retry.
+        let replaced_unread = if matches!(intent, Intent::MarkUnread | Intent::MarkRead { .. }) {
+            match self.outbox.entries.iter().position(|entry| {
+                entry.account == context.account.account
+                    && entry.record.room == room
+                    && matches!(entry.intent, Intent::MarkUnread)
+                    && !matches!(entry.state, State::Failed | State::Removing)
+            }) {
+                Some(index)
+                    if matches!(
+                        self.outbox.entries[index].state,
+                        State::Uncertain | State::ParkedUncertain
+                    ) =>
+                {
+                    Some(index)
                 }
+                Some(_) if matches!(intent, Intent::MarkUnread) => return Err(SubmitError::Busy),
+                _ => None,
             }
-            let created = history::now_unix();
-            self.outbox.entries.push(Entry {
-                account: context.account.account,
-                record,
-                intent,
-                state: if durable {
-                    State::Saving
-                } else {
-                    State::Queued
+        } else {
+            None
+        };
+        let durable = self.cache.persistable(context)
+            && match &intent {
+                Intent::Send { options, .. } => options.private_reply.as_ref().is_none_or(|p| {
+                    self.outbox_context(context.account.account, &p.source)
+                        .is_some_and(|source| self.cache.persistable(source))
+                }),
+                _ => true,
+            };
+        if !durable {
+            self.current(context.account)?;
+        }
+        let count = self
+            .outbox
+            .entries
+            .iter()
+            .filter(|e| e.account == context.account.account)
+            .count();
+        if count >= CAPACITY {
+            return Err(SubmitError::Busy);
+        }
+        let operation = if durable {
+            self.connection
+                .as_ref()
+                .map_err(|e| submit_error(*e))?
+                .new_local_operation_id(context.account.account)
+        } else {
+            self.connection
+                .as_ref()
+                .map_err(|e| submit_error(*e))?
+                .new_operation_id(context.account)
+        }
+        .map_err(submit_error)?;
+        let record =
+            OutboxRecord::from_intent(operation, room, &intent).map_err(|_| SubmitError::Busy)?;
+        let bytes = self
+            .outbox
+            .entries
+            .iter()
+            .filter(|e| e.account == context.account.account)
+            .map(|e| e.record.payload.as_str().len())
+            .sum::<usize>();
+        if bytes.saturating_add(record.payload.as_str().len()) > BYTES {
+            return Err(SubmitError::Busy);
+        }
+        if durable {
+            let command = if let Some(index) = replaced_unread {
+                DataCommand::Replace {
+                    previous: self.outbox.entries[index].record.operation,
+                    record: record.clone(),
+                }
+            } else {
+                DataCommand::Enqueue(record.clone())
+            };
+            match self.admit(
+                RuntimeCommand::AccountData {
+                    account: context.account.account,
+                    command,
                 },
-                durable,
-                request: Some((request, context)),
-                context: Some(context),
-                created,
-                uncertain_notified: false,
-                failed_saved: false,
-                replaces: None,
-                retry: Instant::now(),
-                ordinal: created,
-            });
-            if !durable {
-                self.outbox_admitted(operation);
+                Purpose::Outbox(Work::Save(context.account.account, operation)),
+            ) {
+                Ok(_) | Err(IdentityError::Request(ErrorKind::Busy)) => (),
+                Err(error) => return Err(submit_error(error)),
             }
-            self.project_history(context);
-            self.touch();
-            Ok(())
-        })())
+        }
+        let created = history::now_unix();
+        let replaces = replaced_unread.map(|index| self.outbox.entries[index].record.operation);
+        if !durable && let Some(index) = replaced_unread {
+            self.outbox.entries.remove(index);
+        }
+        self.outbox.entries.push(Entry {
+            account: context.account.account,
+            record,
+            intent,
+            state: if durable {
+                State::Saving
+            } else {
+                State::Queued
+            },
+            durable,
+            request: Some((request, context)),
+            context: Some(context),
+            created,
+            uncertain_notified: false,
+            failed_saved: false,
+            replaces: if durable { replaces } else { None },
+            retry: Instant::now(),
+            ordinal: created,
+        });
+        if !durable {
+            self.outbox_admitted(operation);
+        }
+        if matches!(
+            self.outbox.entries.last().map(|entry| &entry.intent),
+            Some(Intent::RenameThread { .. } | Intent::ThreadNotifications { .. })
+        ) && let Some(panel) = self
+            .snapshot
+            .message_panel
+            .as_mut()
+            .filter(|panel| panel.context == context)
+        {
+            panel.thread_details_request = None;
+        }
+        self.project_history(context);
+        self.touch();
+        Ok(())
+    }
+    pub(super) fn file_share_operation(
+        &self,
+        context: ConversationRef,
+        request: RequestId,
+    ) -> Option<OperationId> {
+        self.outbox
+            .entries
+            .iter()
+            .rev()
+            .find(|e| {
+                e.context == Some(context)
+                    && e.request == Some((request, context))
+                    && matches!(e.intent, Intent::ShareFile { .. })
+            })
+            .map(|e| e.record.operation)
     }
     fn outbox_intent(
         &self,
@@ -486,18 +876,56 @@ impl Accounts {
                 .filter(|n| *n > 0)
                 .ok_or(SubmitError::StaleScope)
         };
-        let options = |o: &view::ComposeTarget| {
+        let options = |o: &view::ComposeTarget, body: &str| {
+            if o.new_thread
+                && (o.reply_to.is_some() || o.private_reply.is_some() || o.thread.is_some())
+            {
+                return Err(SubmitError::StaleScope);
+            }
             Ok(OutboxOptions {
                 reply_to: o.reply_to.map(id).transpose()?,
+                private_reply: o
+                    .private_reply
+                    .as_ref()
+                    .map(|private| {
+                        let source = self
+                            .outbox_context(context.account.account, &private.source)
+                            .ok_or(SubmitError::StaleScope)?;
+                        if source.account != context.account || source == context {
+                            return Err(SubmitError::StaleScope);
+                        }
+                        Ok(OutboxPrivateReply {
+                            source: private.source.clone(),
+                            message: id(private.message)?,
+                            author: private.author.clone(),
+                            body: private.body.clone(),
+                        })
+                    })
+                    .transpose()?,
                 thread: o.thread.map(id).transpose()?,
+                thread_title: o
+                    .new_thread
+                    .then(|| messaging::thread_title(body))
+                    .transpose()?,
                 silent: o.silent,
             })
         };
         Some(match action {
-            A::Send { body, target } => options(target).map(|options| Intent::Send {
-                body: body.clone(),
-                options,
+            A::SetFavorite(value) => Ok(Intent::Favorite { value: *value }),
+            A::SetArchived(value) => Ok(Intent::Archived { value: *value }),
+            A::SetNotificationLevel(level) if *level <= 3 => {
+                Ok(Intent::Notifications { level: *level })
+            }
+            A::VotePoll { poll, options } if *poll > 0 => Ok(Intent::PollVote {
+                poll: *poll,
+                options: options.clone(),
             }),
+            A::Send { body, target } => {
+                options(target, body.as_str()).map(|options| Intent::Send {
+                    body: body.clone(),
+                    options,
+                })
+            }
             A::Edit { message, body } => id(*message).map(|message| Intent::Edit {
                 message,
                 body: body.clone(),
@@ -524,13 +952,62 @@ impl Accounts {
                 body,
                 timestamp,
                 target,
-            } => options(target).map(|options| Intent::Schedule {
-                body: body.clone(),
-                timestamp: *timestamp,
-                options,
-            }),
+            } => {
+                if target.new_thread {
+                    Err(SubmitError::Unavailable(UnavailableReason::Unsupported))
+                } else {
+                    options(target, body.as_str()).map(|options| Intent::Schedule {
+                        body: body.clone(),
+                        timestamp: *timestamp,
+                        options,
+                    })
+                }
+            }
+            A::EditScheduled {
+                id: scheduled,
+                body,
+                timestamp,
+                silent,
+            } => {
+                let valid = self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .filter(|panel| panel.context == context)
+                    .is_some_and(|panel| {
+                        panel.scheduled.as_slice().iter().any(|item| {
+                            item.id == *scheduled && item.editable && item.silent == *silent
+                        })
+                    });
+                if !valid {
+                    Err(SubmitError::StaleScope)
+                } else {
+                    id(*scheduled).map(|id| Intent::EditScheduled {
+                        id,
+                        body: body.clone(),
+                        timestamp: *timestamp,
+                        silent: *silent,
+                    })
+                }
+            }
             A::CancelScheduled(message) => {
                 id(*message).map(|message| Intent::CancelScheduled { message })
+            }
+            A::MarkRead(message) => id(self
+                .history
+                .get(context)
+                .map_or(*message, |h| h.read_through_pin_notices(*message)))
+            .map(|message| Intent::MarkRead { message }),
+            A::MarkUnread => Ok(Intent::MarkUnread),
+            A::RenameThread { root, title } => id(*root).map(|root| Intent::RenameThread {
+                root,
+                title: title.clone(),
+            }),
+            A::ThreadNotifications { root, level } => {
+                id(*root).map(|root| Intent::ThreadNotifications {
+                    root,
+                    level: *level,
+                })
             }
             A::Forward {
                 message,
@@ -584,9 +1061,15 @@ impl Accounts {
         else {
             return;
         };
-        let Some((request, context)) = entry.request.take() else {
+        let Some((request, context)) = entry.request else {
             return;
         };
+        if matches!(entry.intent, Intent::PollVote { .. })
+            && self.snapshot.selected == Some(context)
+        {
+            self.snapshot.content_panel.result = Some((request, Completion::Queued));
+            self.snapshot.content_panel.vote_failure = None;
+        }
         if matches!(entry.intent, Intent::Send { .. }) {
             // This acknowledgement releases the editor only after the durable
             // transaction (or explicit session-memory admission) has completed.
@@ -602,6 +1085,9 @@ impl Accounts {
         }) {
             panel.result = Some((request, Completion::Queued));
             panel.state = talk_core::ui::conversation::RemoteState::Idle;
+        }
+        if matches!(entry.intent, Intent::ShareFile { .. }) {
+            self.finish_file_handoff(operation, true);
         }
         self.touch();
     }
@@ -631,9 +1117,14 @@ impl Accounts {
             {
                 self.outbox.entries[index].state = State::Queued;
                 self.outbox.entries[index].ordinal = saved.ordinal;
-                self.outbox.entries[index].replaces = None;
+                let replaced = self.outbox.entries[index].replaces.take();
                 self.outbox.entries[index].failed_saved = false;
                 self.outbox_admitted(operation);
+                if let Some(previous) = replaced {
+                    self.outbox
+                        .entries
+                        .retain(|e| e.record.operation != previous);
+                }
             }
             (Work::Save(..), Err(talk_adapters::identity::DataError::InvalidInput))
                 if history::now_unix().saturating_sub(self.outbox.entries[index].created) < 8
@@ -657,6 +1148,21 @@ impl Accounts {
             }
             (Work::Save(..), _) => {
                 if let Some(previous) = self.outbox.entries[index].replaces.take() {
+                    if self
+                        .outbox
+                        .entries
+                        .iter()
+                        .any(|e| e.record.operation == previous)
+                    {
+                        let rejected = self.outbox.entries.remove(index);
+                        self.outbox
+                            .error(account, rejected.record.room, UnavailableReason::Busy);
+                        if let Some(context) = self.snapshot.selected {
+                            self.project_history(context);
+                        }
+                        self.touch();
+                        return;
+                    }
                     self.outbox.entries[index].record.operation = previous;
                     self.outbox.entries[index].record.phase = OutboxPhase::Failed;
                     self.outbox.entries[index].state = State::Failed;
@@ -670,6 +1176,9 @@ impl Accounts {
                     return;
                 }
                 let entry = self.outbox.entries.remove(index);
+                if matches!(entry.intent, Intent::ShareFile { .. }) {
+                    self.finish_file_handoff(operation, false);
+                }
                 if let Some((request, context)) = entry.request {
                     if matches!(entry.intent, Intent::Send { .. }) {
                         self.snapshot.submission = Some(SubmissionResult {
@@ -906,6 +1415,36 @@ impl Accounts {
                 };
                 context = destination;
             }
+            if setting_intent(&entry.intent) {
+                let intent = entry.intent.clone();
+                let built = setting_command(context, operation, &intent, uncertain);
+                if let Some(request) = built {
+                    match self.request(
+                        context.account,
+                        request,
+                        Purpose::QueuedSetting(context, operation),
+                    ) {
+                        Ok(()) => {
+                            let e = &mut self.outbox.entries[index];
+                            e.state = State::Running;
+                            e.context = Some(context);
+                            e.record.phase = if uncertain {
+                                OutboxPhase::Uncertain
+                            } else {
+                                OutboxPhase::Dispatched
+                            };
+                        }
+                        Err(SubmitError::Busy) => {
+                            self.outbox.entries[index].retry = now + Duration::from_millis(100)
+                        }
+                        Err(SubmitError::Unavailable(reason)) => {
+                            self.fail_outbox(operation, reason)
+                        }
+                        Err(_) => self.outbox.entries[index].retry = now + Duration::from_secs(2),
+                    }
+                }
+                continue;
+            }
             let built = if uncertain {
                 reconcile_command(context, &entry.intent)
             } else {
@@ -993,6 +1532,24 @@ impl Accounts {
         }
         let account = entry.account;
         let room = entry.record.room.clone();
+        if entry.context == self.snapshot.selected {
+            if let Intent::PollVote { poll, .. } = entry.intent {
+                self.snapshot.content_panel.vote_failure = Some((poll, reason));
+            }
+            if matches!(entry.intent, Intent::Notifications { .. })
+                && let Some((request, context)) = entry.request
+                && let Some(panel) = self
+                    .snapshot
+                    .conversation_panel
+                    .as_mut()
+                    .filter(|p| p.context == context)
+            {
+                panel.result = Some(talk_core::ui::conversation::RoomResult {
+                    request,
+                    completion: Completion::Failed(reason),
+                });
+            }
+        }
         self.outbox.error(account, room, reason);
         self.touch();
     }
@@ -1011,6 +1568,27 @@ impl Accounts {
         };
         let result = reply.as_ref().ok();
         let is_reconcile = self.outbox.entries[index].record.phase == OutboxPhase::Uncertain;
+        let confirmed_thread = match (
+            &self.outbox.entries[index].intent,
+            result,
+            self.outbox.entries[index].context,
+        ) {
+            (
+                intent @ (Intent::RenameThread { .. } | Intent::ThreadNotifications { .. }),
+                Some(wire::MessagingResult::Thread(thread)),
+                Some(context),
+            ) if reconciled(intent, &wire::MessagingResult::Thread(thread.clone())) => {
+                Some((context, intent.clone(), thread.as_ref().clone()))
+            }
+            _ => None,
+        };
+        if !is_reconcile
+            && matches!(self.outbox.entries[index].intent, Intent::MarkUnread)
+            && matches!(result, Some(wire::MessagingResult::Changed))
+            && let Some(context) = self.outbox.entries[index].context
+        {
+            self.remember_room_unread(context);
+        }
         match result {
             Some(wire::MessagingResult::Send(receipt)) if receipt.state == SendState::Rejected => {
                 self.fail_outbox(operation, UnavailableReason::PermissionDenied)
@@ -1018,7 +1596,10 @@ impl Accounts {
             Some(wire::MessagingResult::Send(receipt))
                 if matches!(receipt.state, SendState::ServerAccepted(_))
                     && !is_reconcile
-                    && matches!(self.outbox.entries[index].intent, Intent::Forward { .. }) =>
+                    && matches!(
+                        self.outbox.entries[index].intent,
+                        Intent::Forward { .. } | Intent::ShareFile { .. }
+                    ) =>
             {
                 self.outbox.entries[index].state = State::Confirming;
                 self.outbox.entries[index].record.phase = OutboxPhase::Uncertain;
@@ -1034,7 +1615,10 @@ impl Accounts {
                     self.outbox.entries[index].state = State::Removing;
                 } else if matches!(
                     intent,
-                    Intent::Send { .. } | Intent::Forward { .. } | Intent::Schedule { .. }
+                    Intent::Send { .. }
+                        | Intent::ShareFile { .. }
+                        | Intent::Forward { .. }
+                        | Intent::Schedule { .. }
                 ) {
                     self.outbox.entries[index].state = State::Uncertain;
                     self.outbox.entries[index].retry = Instant::now() + Duration::from_secs(30);
@@ -1042,6 +1626,23 @@ impl Accounts {
                     self.outbox.entries[index].state = State::ParkedUncertain;
                     self.outbox.entries[index].retry = Instant::now() + Duration::from_secs(30);
                 }
+            }
+            Some(result)
+                if matches!(
+                    self.outbox.entries[index].intent,
+                    Intent::RenameThread { .. } | Intent::ThreadNotifications { .. }
+                ) && !reconciled(&self.outbox.entries[index].intent, result) =>
+            {
+                self.outbox.entries[index].state = State::Uncertain;
+                self.outbox.entries[index].record.phase = OutboxPhase::Uncertain;
+                self.outbox.entries[index].retry = Instant::now() + Duration::from_secs(3);
+            }
+            Some(_)
+                if !is_reconcile
+                    && matches!(self.outbox.entries[index].intent, Intent::ShareFile { .. }) =>
+            {
+                self.outbox.entries[index].state = State::Confirming;
+                self.outbox.entries[index].record.phase = OutboxPhase::Uncertain;
             }
             Some(_) => self.outbox.entries[index].state = State::Removing,
             None => match reply {
@@ -1078,10 +1679,18 @@ impl Accounts {
                 }
             },
         }
+        if self.outbox.entries[index].state == State::Removing
+            && let Some((context, intent, thread)) = confirmed_thread
+        {
+            self.confirm_thread_list(context, &intent, &thread);
+        }
         if matches!(
             self.outbox.entries[index].state,
             State::Uncertain | State::ParkedUncertain
         ) && !self.outbox.entries[index].uncertain_notified
+            && (self.outbox.entries[index].state == State::ParkedUncertain
+                || matches!(self.outbox.entries[index].intent, Intent::MarkUnread)
+                || history::now_unix().saturating_sub(self.outbox.entries[index].created) >= 30)
         {
             self.outbox.entries[index].uncertain_notified = true;
             let entry = &self.outbox.entries[index];
@@ -1092,6 +1701,50 @@ impl Accounts {
             );
         }
         true
+    }
+
+    fn confirm_thread_list(
+        &mut self,
+        context: ConversationRef,
+        intent: &Intent,
+        thread: &wire::Thread,
+    ) {
+        use talk_core::ui::presentation::{FeatureSupport, ThreadView};
+        if self.snapshot.threads.account != Some(context.account)
+            || self.snapshot.threads.support != FeatureSupport::Supported
+        {
+            return;
+        }
+        let root = u128::from(thread.root.sequence);
+        let mut rows = self.snapshot.threads.entries.as_slice().to_vec();
+        let index = rows
+            .iter()
+            .position(|row| row.context == context && row.root == root);
+        if matches!(intent, Intent::ThreadNotifications { level: 3, .. }) {
+            if let Some(index) = index {
+                rows.remove(index);
+            }
+        } else {
+            let observed = ThreadView {
+                context,
+                root,
+                title: thread.title.clone(),
+                replies: thread.replies,
+                last_message: thread.last_message.map(|id| u128::from(id.sequence)),
+            };
+            if let Some(index) = index {
+                rows[index] = observed;
+            } else if matches!(intent, Intent::ThreadNotifications { .. })
+                && self.snapshot.threads.offset == 0
+            {
+                if rows.len() == 50 {
+                    rows.pop();
+                    self.snapshot.threads.has_next = true;
+                }
+                rows.insert(0, observed);
+            }
+        }
+        self.snapshot.threads.entries = page(rows);
     }
     pub(super) fn project_outbox(&mut self, context: ConversationRef) {
         let Some(key) = self.cache.stable_room(context).or_else(|| {
@@ -1122,19 +1775,333 @@ impl Accounts {
         }
     }
 }
+fn setting_intent(intent: &Intent) -> bool {
+    matches!(
+        intent,
+        Intent::MarkRead { .. }
+            | Intent::Favorite { .. }
+            | Intent::Archived { .. }
+            | Intent::Notifications { .. }
+            | Intent::PollVote { .. }
+    )
+}
+fn notification(level: u8) -> protocol::conversation::NotificationLevel {
+    use protocol::conversation::NotificationLevel as N;
+    match level {
+        1 => N::Always,
+        2 => N::Mention,
+        3 => N::Never,
+        _ => N::Default,
+    }
+}
+fn setting_command(
+    context: ConversationRef,
+    operation: OperationId,
+    intent: &Intent,
+    reconcile: bool,
+) -> Option<ProtocolRequest> {
+    Some(match intent {
+        Intent::MarkRead { message } if !reconcile => ProtocolRequest::Messaging {
+            conversation: context.conversation,
+            operation,
+            command: wire::MessagingCommand::MarkRead(protocol::MessageId {
+                conversation: context.conversation,
+                sequence: *message,
+            }),
+        },
+        Intent::MarkRead { .. } => ProtocolRequest::ReconcileConversation(context.conversation),
+        Intent::Favorite { value } if !reconcile => ProtocolRequest::SetFavorite {
+            conversation: context.conversation,
+            favorite: *value,
+        },
+        Intent::Archived { value } if !reconcile => ProtocolRequest::SetArchived {
+            conversation: context.conversation,
+            archived: *value,
+        },
+        Intent::Favorite { .. } | Intent::Archived { .. } => {
+            ProtocolRequest::ReconcileConversation(context.conversation)
+        }
+        Intent::Notifications { level } => ProtocolRequest::ConversationSettings {
+            conversation: context.conversation,
+            operation,
+            command: if reconcile {
+                protocol::conversation::ConversationCommand::Read
+            } else {
+                protocol::conversation::ConversationCommand::SetNotifications(notification(*level))
+            },
+        },
+        Intent::PollVote { poll, options } => ProtocolRequest::Content {
+            operation,
+            command: protocol::content::ContentCommand::Poll {
+                conversation: context.conversation,
+                command: if reconcile {
+                    protocol::content::PollCommand::Read(*poll)
+                } else {
+                    protocol::content::PollCommand::Vote {
+                        poll: *poll,
+                        options: options.clone(),
+                    }
+                },
+            },
+        },
+        _ => return None,
+    })
+}
+impl Accounts {
+    pub(super) fn complete_queued_setting(
+        &mut self,
+        context: ConversationRef,
+        operation: OperationId,
+        result: Result<RuntimeReply, IdentityError>,
+    ) {
+        let Some(index) = self
+            .outbox
+            .entries
+            .iter()
+            .position(|e| e.record.operation == operation && e.context == Some(context))
+        else {
+            return;
+        };
+        let intent = self.outbox.entries[index].intent.clone();
+        let reconcile = self.outbox.entries[index].record.phase == OutboxPhase::Uncertain;
+        let confirmed = match &result {
+            Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(room)))
+                if room.id == context.conversation =>
+            {
+                match intent {
+                    Intent::MarkRead { message } => {
+                        room.last_read_message.is_some_and(|read| read >= message)
+                    }
+                    Intent::Favorite { value } => room.favorite == Some(value),
+                    Intent::Archived { value } => room.archived == Some(value),
+                    _ => false,
+                }
+            }
+            Ok(RuntimeReply::Protocol(ProtocolReply::ConversationSettings {
+                conversation,
+                operation: returned,
+                result: protocol::conversation::ConversationResult::Details(details),
+            })) if *conversation == context.conversation && *returned == operation => {
+                matches!(intent,Intent::Notifications {level} if details.notifications==Some(notification(level)))
+            }
+            Ok(RuntimeReply::Protocol(ProtocolReply::Content {
+                operation: returned,
+                result: protocol::content::ContentResult::Poll(poll),
+            })) if *returned == operation => {
+                matches!(&intent,Intent::PollVote {poll:id,options} if poll.id==*id && poll.options.as_slice().iter().all(|option| option.own==options.as_slice().contains(&option.id)))
+            }
+            _ => false,
+        };
+        if confirmed {
+            match result {
+                Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(room))) => {
+                    if let Some(account) = self.background.account_mut(context.account) {
+                        account.rooms = page(account.rooms.as_slice().iter().map(|r| {
+                            if r.context == context {
+                                conversation_with_existing(&room, context.account, r)
+                            } else {
+                                r.clone()
+                            }
+                        }));
+                    }
+                    self.snapshot.conversations =
+                        page(self.snapshot.conversations.as_slice().iter().map(|r| {
+                            if r.context == context {
+                                conversation_with_existing(&room, context.account, r)
+                            } else {
+                                r.clone()
+                            }
+                        }));
+                }
+                Ok(RuntimeReply::Protocol(ProtocolReply::Content {
+                    result: protocol::content::ContentResult::Poll(poll),
+                    ..
+                })) => {
+                    self.snapshot.content_panel.polls = page(
+                        self.snapshot
+                            .content_panel
+                            .polls
+                            .as_slice()
+                            .iter()
+                            .map(|old| {
+                                if old.id == poll.id {
+                                    super::content::poll_view((*poll).clone())
+                                } else {
+                                    old.clone()
+                                }
+                            }),
+                    );
+                }
+                Ok(RuntimeReply::Protocol(ProtocolReply::ConversationSettings {
+                    result: protocol::conversation::ConversationResult::Details(details),
+                    ..
+                })) => {
+                    if let Some(panel) = self
+                        .snapshot
+                        .conversation_panel
+                        .as_mut()
+                        .filter(|p| p.context == context)
+                    {
+                        panel.details = Some(super::conversations::details_view(*details));
+                    }
+                }
+                _ => (),
+            }
+            self.outbox.entries[index].state = State::Removing;
+        } else if let Err(error) = result {
+            if matches!(
+                error,
+                IdentityError::Request(
+                    ErrorKind::PermissionDenied
+                        | ErrorKind::Unsupported
+                        | ErrorKind::NotFound
+                        | ErrorKind::TooLarge
+                        | ErrorKind::Malformed
+                )
+            ) {
+                let reason = match completion_error(error) {
+                    Completion::Failed(reason) => reason,
+                    _ => UnavailableReason::PolicyStale,
+                };
+                self.fail_outbox(operation, reason);
+            } else {
+                // The adapter distinguishes pre-dispatch transport failure from
+                // an uncertain write. Only the former can safely retry POST.
+                let uncertain =
+                    reconcile || matches!(error, IdentityError::Request(ErrorKind::Uncertain));
+                self.outbox.entries[index].state = if uncertain {
+                    State::Uncertain
+                } else {
+                    State::Ready
+                };
+                self.outbox.entries[index].record.phase = if uncertain {
+                    OutboxPhase::Uncertain
+                } else {
+                    OutboxPhase::Dispatched
+                };
+                self.outbox.entries[index].retry = Instant::now() + Duration::from_secs(3);
+            }
+        } else if reconcile {
+            self.fail_outbox(operation, UnavailableReason::PolicyStale);
+        } else {
+            self.outbox.entries[index].state = State::Uncertain;
+            self.outbox.entries[index].record.phase = OutboxPhase::Uncertain;
+            self.outbox.entries[index].retry = Instant::now() + Duration::from_secs(2);
+        }
+        self.touch();
+    }
+    pub(super) fn project_queued_settings(&self, snapshot: &mut PresentationSnapshot) {
+        for entry in self.outbox.entries.iter().filter(|e| {
+            setting_intent(&e.intent)
+                && !matches!(
+                    e.state,
+                    State::Failed | State::Removing | State::ParkedUncertain
+                )
+        }) {
+            let matches_room = |row: &ConversationView| {
+                row.context.account.account == entry.account
+                    && row.navigation_key.as_ref() == Some(&entry.record.room)
+            };
+            snapshot.conversations = page(snapshot.conversations.as_slice().iter().cloned().map(
+                |mut row| {
+                    if matches_room(&row) {
+                        match entry.intent {
+                            Intent::Favorite { value } => row.favorite = Some(value),
+                            Intent::Archived { value } => row.archived = Some(value),
+                            _ => (),
+                        }
+                    }
+                    row
+                },
+            ));
+            let selected = snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .find(|r| matches_room(r))
+                .map(|r| r.context);
+            if selected != snapshot.selected {
+                continue;
+            }
+            match &entry.intent {
+                Intent::Notifications { level } => {
+                    if let Some(details) = snapshot
+                        .conversation_panel
+                        .as_mut()
+                        .and_then(|p| p.details.as_mut())
+                    {
+                        details.notifications = Some(match *level {
+                            1 => talk_core::ui::conversation::NotificationLevel::Always,
+                            2 => talk_core::ui::conversation::NotificationLevel::Mention,
+                            3 => talk_core::ui::conversation::NotificationLevel::Never,
+                            _ => talk_core::ui::conversation::NotificationLevel::Default,
+                        });
+                    }
+                }
+                Intent::PollVote { poll, options } => {
+                    snapshot.content_panel.polls =
+                        page(snapshot.content_panel.polls.as_slice().iter().cloned().map(
+                            |mut row| {
+                                if row.id == *poll {
+                                    row.options = page(row.options.as_slice().iter().cloned().map(
+                                        |mut option| {
+                                            let selected = options.as_slice().contains(&option.id);
+                                            if selected != option.own {
+                                                option.votes = option.votes.map(|v| {
+                                                    if selected {
+                                                        v.saturating_add(1)
+                                                    } else {
+                                                        v.saturating_sub(1)
+                                                    }
+                                                });
+                                            }
+                                            option.own = selected;
+                                            option
+                                        },
+                                    ));
+                                }
+                                row
+                            },
+                        ))
+                }
+                _ => (),
+            }
+        }
+    }
+}
+
 fn retain_failure(intent: &Intent) -> bool {
     matches!(
         intent,
-        Intent::Send { .. } | Intent::Edit { .. } | Intent::Schedule { .. }
+        Intent::Send { .. }
+            | Intent::ShareFile { .. }
+            | Intent::Edit { .. }
+            | Intent::Schedule { .. }
+            | Intent::EditScheduled { .. }
     )
 }
 fn failed_draft(entry: &Entry) -> Option<view::FailedDraft> {
     let target = |o: &OutboxOptions| view::ComposeTarget {
         reply_to: o.reply_to.map(u128::from),
+        private_reply: o
+            .private_reply
+            .as_ref()
+            .map(|private| view::PrivateReplyTarget {
+                source: private.source.clone(),
+                message: u128::from(private.message),
+                author: private.author.clone(),
+                body: private.body.clone(),
+            }),
         thread: o.thread.map(u128::from),
+        new_thread: o.thread_title.is_some(),
         silent: o.silent,
     };
     let (body, target, kind) = match &entry.intent {
+        Intent::ShareFile { name, caption, .. } => (
+            text(&format!("{}\n{}", name.as_str(), caption.as_str())),
+            Default::default(),
+            view::FailedDraftKind::File,
+        ),
         Intent::Send { body, options } => {
             (body.clone(), target(options), view::FailedDraftKind::Send)
         }
@@ -1151,6 +2118,11 @@ fn failed_draft(entry: &Entry) -> Option<view::FailedDraft> {
             body.clone(),
             target(options),
             view::FailedDraftKind::Schedule(*timestamp),
+        ),
+        Intent::EditScheduled { id, body, .. } => (
+            body.clone(),
+            Default::default(),
+            view::FailedDraftKind::EditScheduled(u128::from(*id)),
         ),
         _ => return None,
     };
@@ -1195,13 +2167,20 @@ fn append_pending(
 fn conflicts(earlier: &Entry, later: &Entry) -> bool {
     fn outgoing(e: &Entry) -> Option<&NavigationRoomKey> {
         match &e.intent {
-            Intent::Send { .. } => Some(&e.record.room),
+            Intent::Send { .. } | Intent::ShareFile { .. } => Some(&e.record.room),
             Intent::Forward { destination, .. } => Some(destination),
             _ => None,
         }
     }
     if let (Some(a), Some(b)) = (outgoing(earlier), outgoing(later)) {
-        return a == b;
+        // Delivery uncertainty does not make a later deliberate, independently
+        // referenced send a retry. Retain and reconcile the older operation,
+        // while allowing new outgoing work to proceed without a room freeze.
+        return a == b
+            && !matches!(
+                earlier.state,
+                State::Uncertain | State::ParkedUncertain | State::Confirming
+            );
     }
     if earlier.record.room != later.record.room {
         return false;
@@ -1212,14 +2191,26 @@ fn conflicts(earlier: &Entry, later: &Entry) -> bool {
         | Intent::Reaction { message, .. }
         | Intent::Pin { message, .. }
         | Intent::Reminder { message, .. } => Some(*message),
+        Intent::RenameThread { root, .. } | Intent::ThreadNotifications { root, .. } => Some(*root),
         _ => None,
     };
     if let (Some(a), Some(b)) = (message(&earlier.intent), message(&later.intent)) {
         return a == b;
     }
     match (&earlier.intent, &later.intent) {
+        (
+            Intent::MarkRead { .. } | Intent::MarkUnread,
+            Intent::MarkRead { .. } | Intent::MarkUnread,
+        ) => true,
+        (Intent::Favorite { .. }, Intent::Favorite { .. })
+        | (Intent::Archived { .. }, Intent::Archived { .. })
+        | (Intent::Notifications { .. }, Intent::Notifications { .. }) => true,
+        (Intent::PollVote { poll: a, .. }, Intent::PollVote { poll: b, .. }) => a == b,
         (Intent::Schedule { timestamp: a, .. }, Intent::Schedule { timestamp: b, .. }) => a == b,
-        (Intent::CancelScheduled { message: a }, Intent::CancelScheduled { message: b }) => a == b,
+        (Intent::CancelScheduled { message: a }, Intent::CancelScheduled { message: b })
+        | (Intent::CancelScheduled { message: a }, Intent::EditScheduled { id: b, .. })
+        | (Intent::EditScheduled { id: a, .. }, Intent::CancelScheduled { message: b })
+        | (Intent::EditScheduled { id: a, .. }, Intent::EditScheduled { id: b, .. }) => a == b,
         _ => false,
     }
 }
@@ -1234,17 +2225,52 @@ fn command(
         conversation: context.conversation,
         sequence,
     };
-    let opts = |o: &OutboxOptions| wire::ComposeOptions {
-        reply_to: o.reply_to.map(mid),
-        thread: o.thread.map(mid),
-        thread_title: None,
-        silent: o.silent,
+    let opts = |o: &OutboxOptions| {
+        Some(wire::ComposeOptions {
+            reply_to: o.reply_to.map(mid),
+            private_reply: match &o.private_reply {
+                Some(private) => {
+                    let source = resolve(&private.source)?;
+                    if source.account != context.account || source == context {
+                        return None;
+                    }
+                    Some(Box::new(protocol::MessageId {
+                        conversation: source.conversation,
+                        sequence: private.message,
+                    }))
+                }
+                None => None,
+            },
+            thread: o.thread.map(mid),
+            thread_title: o.thread_title.clone(),
+            silent: o.silent,
+        })
     };
     Some(match intent {
+        Intent::MarkRead { .. }
+        | Intent::Favorite { .. }
+        | Intent::Archived { .. }
+        | Intent::Notifications { .. }
+        | Intent::PollVote { .. } => return None,
+        Intent::ShareFile {
+            path,
+            caption,
+            options,
+            voice,
+            ..
+        } => (
+            C::ShareExistingFile {
+                path: text(path.as_str()),
+                caption: caption.clone(),
+                options: opts(options)?,
+                voice_message: *voice,
+            },
+            W::Send,
+        ),
         Intent::Send { body, options } => (
             C::Send {
                 text: text(body.as_str()),
-                options: opts(options),
+                options: opts(options)?,
             },
             W::Send,
         ),
@@ -1297,13 +2323,42 @@ fn command(
             C::Schedule {
                 text: text(body.as_str()),
                 send_at: *timestamp,
-                options: opts(options),
+                options: opts(options)?,
             },
             W::Action,
         ),
         Intent::CancelScheduled { message } => (
             C::CancelScheduled(mid(*message)),
             W::CancelScheduled(u128::from(*message)),
+        ),
+        Intent::MarkUnread => (C::MarkUnread, W::Unread),
+        Intent::RenameThread { root, title } => (
+            C::RenameThread {
+                root: mid(*root),
+                title: title.clone(),
+            },
+            W::ThreadQueued(u128::from(*root)),
+        ),
+        Intent::ThreadNotifications { root, level } => (
+            C::ThreadNotifications {
+                root: mid(*root),
+                level: *level,
+            },
+            W::ThreadQueued(u128::from(*root)),
+        ),
+        Intent::EditScheduled {
+            id,
+            body,
+            timestamp,
+            silent,
+        } => (
+            C::EditScheduled {
+                id: mid(*id),
+                text: text(body.as_str()),
+                send_at: *timestamp,
+                silent: *silent,
+            },
+            W::EditScheduled(u128::from(*id)),
         ),
         Intent::Forward {
             message,
@@ -1335,7 +2390,18 @@ fn reconcile_command(
         sequence,
     };
     Some(match intent {
-        Intent::Send { .. } => (C::ReconcileSend, W::Send),
+        // Repeating DELETE can move the read marker past messages that arrived
+        // since the first attempt. An uncertain mutation needs user attention.
+        Intent::MarkRead { .. }
+        | Intent::Favorite { .. }
+        | Intent::Archived { .. }
+        | Intent::Notifications { .. }
+        | Intent::PollVote { .. }
+        | Intent::MarkUnread => return None,
+        Intent::RenameThread { root, .. } | Intent::ThreadNotifications { root, .. } => {
+            (C::Thread(mid(*root)), W::ThreadQueued(u128::from(*root)))
+        }
+        Intent::Send { .. } | Intent::ShareFile { .. } => (C::ReconcileSend, W::Send),
         Intent::Forward { .. } => (C::ReconcileSend, W::Send),
         Intent::Edit { message, .. }
         | Intent::Delete { message }
@@ -1345,7 +2411,9 @@ fn reconcile_command(
             C::ReadReminder(mid(*message)),
             W::Reminder(u128::from(*message)),
         ),
-        Intent::Schedule { .. } | Intent::CancelScheduled { .. } => (C::Scheduled, W::Action),
+        Intent::Schedule { .. } | Intent::CancelScheduled { .. } | Intent::EditScheduled { .. } => {
+            (C::Scheduled, W::ScheduledPoll)
+        }
     })
 }
 fn reconciled(intent: &Intent, result: &wire::MessagingResult) -> bool {
@@ -1355,7 +2423,12 @@ fn reconciled(intent: &Intent, result: &wire::MessagingResult) -> bool {
         _ => Vec::new(),
     };
     match intent {
-        Intent::Send { .. } => matches!(
+        Intent::MarkRead { .. }
+        | Intent::Favorite { .. }
+        | Intent::Archived { .. }
+        | Intent::Notifications { .. }
+        | Intent::PollVote { .. } => false,
+        Intent::Send { .. } | Intent::ShareFile { .. } => matches!(
             result,
             wire::MessagingResult::Message(_)
                 | wire::MessagingResult::Send(protocol::SendReceipt {
@@ -1393,6 +2466,14 @@ fn reconciled(intent: &Intent, result: &wire::MessagingResult) -> bool {
         Intent::CancelScheduled { message } => {
             matches!(result,wire::MessagingResult::Scheduled(values)if !values.as_slice().iter().any(|v|v.id.sequence==*message))
         }
+        Intent::EditScheduled {
+            id,
+            body,
+            timestamp,
+            silent,
+        } => {
+            matches!(result, wire::MessagingResult::Scheduled(values) if values.as_slice().iter().any(|value| value.id.sequence == *id && value.text.as_str() == body.as_str() && value.send_at == *timestamp && value.options.silent == *silent))
+        }
         Intent::Forward { .. } => matches!(
             result,
             wire::MessagingResult::Message(_)
@@ -1402,6 +2483,15 @@ fn reconciled(intent: &Intent, result: &wire::MessagingResult) -> bool {
                 })
         ),
         Intent::Schedule { .. } => false,
+        Intent::MarkUnread => false,
+        Intent::RenameThread { root, title } => {
+            matches!(result, wire::MessagingResult::Thread(thread)
+            if thread.root.sequence == *root && thread.title == *title)
+        }
+        Intent::ThreadNotifications { root, level } => {
+            matches!(result, wire::MessagingResult::Thread(thread)
+            if thread.root.sequence == *root && thread.notification_level == Some(*level))
+        }
     }
 }
 fn overlay(
@@ -1466,7 +2556,7 @@ fn overlay(
                 .metadata
                 .parent
                 .as_mut()
-                .filter(|p| p.id == u128::from(*message))
+                .filter(|p| !p.external && p.id == u128::from(*message))
         {
             parent.unavailable = true;
             parent.author = text("");
@@ -1477,6 +2567,9 @@ fn overlay(
         mutate(&mut row);
         row
     }));
+    if let Some(row) = panel.thread_root_message.as_mut() {
+        mutate(row);
+    }
     panel.thread_messages = page(panel.thread_messages.as_slice().iter().cloned().map(
         |mut row| {
             mutate(&mut row);
@@ -1512,7 +2605,73 @@ fn overlay(
         );
     }
     match &entry.intent {
+        Intent::RenameThread { root, title } if panel.thread_root == Some(u128::from(*root)) => {
+            if let Some(details) = panel
+                .thread_details
+                .as_mut()
+                .filter(|details| details.root == u128::from(*root))
+            {
+                details.title = title.clone();
+            }
+        }
+        Intent::ThreadNotifications { root, level }
+            if panel.thread_root == Some(u128::from(*root)) =>
+        {
+            if let Some(details) = panel
+                .thread_details
+                .as_mut()
+                .filter(|details| details.root == u128::from(*root))
+            {
+                details.notification_level = Some(*level);
+                panel.thread_following_intent = Some(*level != 3);
+            }
+        }
+        Intent::ShareFile { name, caption, .. } => {
+            if messages.as_slice().iter().any(|m| {
+                m.own
+                    && m.local_id <= u128::from(u64::MAX)
+                    && m.metadata.local_operation == Some(entry.record.operation.as_local())
+            }) {
+                return;
+            }
+            append_pending(
+                entry,
+                author,
+                text(&format!("{}\n{}", name.as_str(), caption.as_str())),
+                messages,
+            );
+        }
         Intent::Send { body, options } => {
+            if options.thread.is_some()
+                && messages
+                    .as_slice()
+                    .iter()
+                    .chain(panel.thread_messages.as_slice())
+                    .any(|message| {
+                        message.own
+                            && message.local_id <= u128::from(u64::MAX)
+                            && message.metadata.local_operation
+                                == Some(entry.record.operation.as_local())
+                    })
+            {
+                // A live poll may observe the correlated server row before the
+                // send receipt. Keep the confirmed row and do not project a duplicate.
+                return;
+            }
+            if let Some(root) = options.thread.map(u128::from) {
+                *messages = page(messages.as_slice().iter().cloned().map(|mut message| {
+                    if message.local_id == root && !message.metadata.deleted {
+                        message.reply_count = message.reply_count.saturating_add(1);
+                    }
+                    message
+                }));
+                if let Some(message) = panel.thread_root_message.as_mut()
+                    && message.local_id == root
+                    && !message.metadata.deleted
+                {
+                    message.reply_count = message.reply_count.saturating_add(1);
+                }
+            }
             let mut row = MessageView {
                 local_id: pending_id,
                 author: text(author),
@@ -1529,21 +2688,42 @@ fn overlay(
             row.metadata.local_operation = Some(entry.record.operation.as_local());
             row.metadata.thread = options.thread.map(u128::from);
             row.metadata.parent = options
-                .reply_to
-                .and_then(|id| {
-                    messages
-                        .as_slice()
-                        .iter()
-                        .find(|m| m.local_id == u128::from(id))
+                .private_reply
+                .as_ref()
+                .map(|private| view::Reply {
+                    id: u128::from(private.message),
+                    external: true,
+                    author: text(private.author.as_str()),
+                    text: text(private.body.as_str()),
+                    unavailable: false,
                 })
-                .map(|m| view::Reply {
-                    id: m.local_id,
-                    author: text(m.author.as_str()),
-                    text: m.body.clone(),
-                    unavailable: m.metadata.deleted,
+                .or_else(|| {
+                    options
+                        .reply_to
+                        .and_then(|id| {
+                            messages
+                                .as_slice()
+                                .iter()
+                                .chain(panel.thread_root_message.iter())
+                                .chain(panel.thread_messages.as_slice())
+                                .find(|m| m.local_id == u128::from(id))
+                        })
+                        .map(|m| view::Reply {
+                            id: m.local_id,
+                            external: false,
+                            author: text(m.author.as_str()),
+                            text: m.body.clone(),
+                            unavailable: m.metadata.deleted,
+                        })
                 });
-            if options.thread.is_some() && panel.thread_root == options.thread.map(u128::from) {
-                let _ = panel.thread_messages.try_push(row);
+            if let Some(root) = options.thread.map(u128::from) {
+                if panel.thread_root == Some(root) {
+                    if panel.thread_messages.as_slice().len() == 50 {
+                        panel.thread_messages =
+                            page(panel.thread_messages.as_slice().iter().skip(1).cloned());
+                    }
+                    let _ = panel.thread_messages.try_push(row);
+                }
             } else {
                 if messages.as_slice().len() == 100 {
                     *messages = page(messages.as_slice().iter().skip(1).cloned());
@@ -1586,7 +2766,9 @@ fn overlay(
             }
         }
         Intent::Schedule {
-            body, timestamp, ..
+            body,
+            timestamp,
+            options,
         } => {
             panel.scheduled = page(
                 panel
@@ -1600,7 +2782,26 @@ fn overlay(
                 id: pending_id,
                 body: body.clone(),
                 timestamp: *timestamp,
+                failed_original_timestamp: None,
+                editable: false,
+                silent: options.silent,
             });
+        }
+        Intent::EditScheduled {
+            id,
+            body,
+            timestamp,
+            silent,
+        } => {
+            panel.scheduled = page(panel.scheduled.as_slice().iter().cloned().map(|mut item| {
+                if item.id == u128::from(*id) {
+                    item.body = body.clone();
+                    item.timestamp = *timestamp;
+                    item.failed_original_timestamp = None;
+                    item.silent = *silent;
+                }
+                item
+            }));
         }
         Intent::CancelScheduled { message } => {
             panel.scheduled = page(

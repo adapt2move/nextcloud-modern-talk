@@ -92,7 +92,13 @@ impl Account {
 }
 #[derive(Clone, Debug)]
 pub struct Room {
+    /// The room exists, but at least one requested invitation was rejected.
+    pub incomplete_invitations: bool,
     pub avatar_version: Option<String>,
+    /// User status returned for one-to-one conversations when available.
+    pub status: Option<String>,
+    pub status_icon: Option<String>,
+    pub status_message: Option<String>,
     pub custom_avatar: Option<bool>,
     pub token: String,
     pub server_id: Option<u64>,
@@ -108,7 +114,11 @@ pub struct Room {
     pub favorite: Option<bool>,
     pub archived: Option<bool>,
     pub unread: Option<u64>,
+    pub unread_mention: Option<bool>,
+    /// Zero represents Talk's explicit first-message unread sentinel (-2).
     pub last_read: Option<u64>,
+    /// Summary accepts zero for Talk's negative "first unread" sentinels.
+    pub summary_offset: Option<u64>,
     pub common_read: Option<u64>,
     pub last_activity: Option<u64>,
     pub has_call: Option<bool>,
@@ -135,6 +145,8 @@ pub struct Room {
     pub recording_status: Option<u64>,
     pub last_pinned: Option<u64>,
     pub hidden_pinned: Option<u64>,
+    pub breakout_mode: Option<u64>,
+    pub breakout_status: Option<u64>,
 }
 impl Room {
     pub(crate) fn decode(v: &Value) -> Result<Self, ErrorKind> {
@@ -147,7 +159,13 @@ impl Room {
         }
         let v = &v;
         let result = Self {
+            incomplete_invitations: v.get("invalidParticipants").is_some(),
             avatar_version: string(v.get("avatarVersion"), 128)?,
+            // Optional status is display-only: an oversized field must not hide
+            // the room list. NC34/35 allow 80 Unicode characters (320 UTF-8 bytes).
+            status: string(v.get("status"), 32).unwrap_or_default(),
+            status_icon: string(v.get("statusIcon"), 64).unwrap_or_default(),
+            status_message: string(v.get("statusMessage"), 320).unwrap_or_default(),
             custom_avatar: v.get("isCustomAvatar").and_then(Value::as_bool),
             token: string(v.get("token"), 30)?.ok_or(ErrorKind::Malformed)?,
             server_id: v.get("id").and_then(Value::as_u64).filter(|n| *n > 0),
@@ -163,7 +181,22 @@ impl Room {
             favorite: v.get("isFavorite").and_then(Value::as_bool),
             archived: v.get("isArchived").and_then(Value::as_bool),
             unread: integer(v.get("unreadMessages")),
-            last_read: integer(v.get("lastReadMessage")),
+            unread_mention: v.get("unreadMention").and_then(Value::as_bool),
+            last_read: if v
+                .get("lastReadMessage")
+                .is_some_and(|value| value.as_i64() == Some(-2) || value.as_str() == Some("-2"))
+            {
+                Some(0)
+            } else {
+                integer(v.get("lastReadMessage"))
+            },
+            summary_offset: integer(v.get("lastReadMessage")).or_else(|| {
+                match v.get("lastReadMessage") {
+                    Some(Value::Number(n)) if matches!(n.as_i64(), Some(-2 | -1)) => Some(0),
+                    Some(Value::String(s)) if matches!(s.as_str(), "-2" | "-1") => Some(0),
+                    _ => None,
+                }
+            }),
             common_read: integer(v.get("lastCommonReadMessage")),
             last_activity: integer(v.get("lastActivity")),
             has_call: v.get("hasCall").and_then(Value::as_bool),
@@ -192,6 +225,8 @@ impl Room {
             recording_status: integer(v.get("callRecording")),
             last_pinned: integer(v.get("lastPinnedId")),
             hidden_pinned: integer(v.get("hiddenPinnedId")),
+            breakout_mode: integer(v.get("breakoutRoomMode")),
+            breakout_status: integer(v.get("breakoutRoomStatus")),
         };
         RoomToken::parse(&result.token)?;
         Ok(result)
@@ -208,6 +243,9 @@ pub struct Participant {
     pub attendee_id: Option<u64>,
     pub permissions: Option<u64>,
     pub room_token: Option<String>,
+    pub status: Option<String>,
+    pub status_icon: Option<String>,
+    pub status_message: Option<String>,
 }
 impl Participant {
     pub(crate) fn decode(v: &Value) -> Result<Self, ErrorKind> {
@@ -224,6 +262,9 @@ impl Participant {
             attendee_id: integer(v.get("attendeeId")),
             permissions: integer(v.get("permissions")),
             room_token: string(v.get("roomToken"), 30)?,
+            status: string(v.get("status"), 32)?,
+            status_icon: string(v.get("statusIcon"), 64)?,
+            status_message: string(v.get("statusMessage"), 320)?,
         };
         Ok(result)
     }
@@ -258,7 +299,7 @@ impl Message {
         if !v.is_object() {
             return Err(ErrorKind::Malformed);
         }
-        let result = Self {
+        let mut result = Self {
             token: string(v.get("token"), 30)?.ok_or(ErrorKind::Malformed)?,
             id: integer(v.get("id")).ok_or(ErrorKind::Malformed)?,
             kind: string(v.get("messageType"), 128)?,
@@ -320,12 +361,23 @@ impl Message {
             },
         };
         RoomToken::parse(&result.token)?;
-        if result
-            .parent
-            .as_ref()
-            .is_some_and(|p| p.token.as_deref().is_some_and(|t| t != result.token))
+        if let Some(parent) = result.parent.as_mut()
+            && let Some(token) = parent
+                .token
+                .as_deref()
+                .filter(|token| *token != result.token)
         {
-            return Err(ErrorKind::WrongScope);
+            // Talk 24/25 expands a private-reply parent to the original room.
+            // Only accept the explicit matching private-reply metadata; the
+            // foreign token remains protocol-private and conveys no navigation authority.
+            RoomToken::parse(token)?;
+            let metadata = &v["parent"]["metaData"];
+            let source_id = integer(metadata.get("replyToMessageId")).filter(|id| *id > 0);
+            if metadata["replyToConversationToken"].as_str() != Some(token) || source_id.is_none() {
+                return Err(ErrorKind::WrongScope);
+            }
+            parent.external = true;
+            parent.source_id = source_id;
         }
         if result.id == 0 {
             return Err(ErrorKind::Malformed);
@@ -398,11 +450,17 @@ fn strings(v: Option<&Value>, max: usize, numbers: bool) -> Result<Option<Vec<St
 }
 #[derive(Clone, Debug)]
 pub struct Capabilities {
+    pub user_status_enabled: Option<bool>,
+    pub user_status_emoji: Option<bool>,
     pub notification_endpoints: Vec<String>,
     pub server_major: Option<u64>,
     pub features: Vec<String>,
     pub read_privacy: Option<u64>,
     pub typing_privacy: Option<u64>,
+    pub translation_providers: Option<bool>,
+    pub summary_threshold: Option<u64>,
+    pub federation_enabled: Option<bool>,
+    pub federation_incoming: Option<bool>,
     pub attachment_folder: Option<String>,
     pub attachments_allowed: Option<bool>,
     pub conversation_subfolders: Option<bool>,
@@ -411,6 +469,8 @@ pub struct Capabilities {
     pub server_default_permissions: Option<u16>,
     pub call_enabled: Option<bool>,
     pub recording_enabled: Option<bool>,
+    /// Bounded advertised in-call reactions; missing or malformed is unavailable.
+    pub call_reactions: Option<Vec<String>>,
     pub breakouts_enabled: Option<bool>,
     pub grid_limit: Option<u64>,
     pub grid_limit_enforced: Option<bool>,
@@ -437,6 +497,8 @@ impl Capabilities {
             None => return Err(ErrorKind::Malformed),
         };
         Ok(Self {
+            user_status_enabled: data["capabilities"]["user_status"]["enabled"].as_bool(),
+            user_status_emoji: data["capabilities"]["user_status"]["supports_emoji"].as_bool(),
             notification_endpoints: strings(
                 data["capabilities"]["notifications"].get("ocs-endpoints"),
                 32,
@@ -447,6 +509,10 @@ impl Capabilities {
             features,
             read_privacy: integer(s["config"]["chat"].get("read-privacy")),
             typing_privacy: integer(s["config"]["chat"].get("typing-privacy")),
+            translation_providers: s["config"]["chat"]["has-translation-providers"].as_bool(),
+            summary_threshold: integer(s["config"]["chat"].get("summary-threshold")),
+            federation_enabled: s["config"]["federation"]["enabled"].as_bool(),
+            federation_incoming: s["config"]["federation"]["incoming-enabled"].as_bool(),
             attachment_folder: string(s["config"]["attachments"].get("folder"), 16384)?,
             attachments_allowed: s["config"]["attachments"]["allowed"].as_bool(),
             conversation_subfolders: s["config"]["attachments"]["conversation-subfolders"]
@@ -458,6 +524,16 @@ impl Capabilities {
                 .and_then(|mask| u16::try_from(mask).ok()),
             call_enabled: s["config"]["call"]["enabled"].as_bool(),
             recording_enabled: s["config"]["call"]["recording"].as_bool(),
+            call_reactions: strings(s["config"]["call"].get("supported-reactions"), 32, false)
+                .ok()
+                .flatten()
+                .filter(|values| {
+                    values.iter().all(|value| {
+                        !value.is_empty()
+                            && value.len() <= 64
+                            && !value.chars().any(char::is_control)
+                    })
+                }),
             breakouts_enabled: s["config"]["call"]["breakout-rooms"].as_bool(),
             grid_limit: integer(s["config"]["call"].get("grid-limit")),
             grid_limit_enforced: s["config"]["call"]["grid-limit-enforced"].as_bool(),
@@ -576,6 +652,29 @@ mod message_tests {
     use serde_json::json;
 
     #[test]
+    fn room_status_preserves_optional_fields_and_drops_oversized_input() {
+        let mut room = json!({"token":"testroom", "displayName":"Fixture"});
+        let absent = Room::decode(&room).unwrap();
+        assert!(absent.status.is_none());
+        assert!(absent.status_icon.is_none());
+        assert!(absent.status_message.is_none());
+        room["status"] = json!("away");
+        room["statusIcon"] = json!("☕");
+        room["statusMessage"] = json!("On a break");
+        let present = Room::decode(&room).unwrap();
+        assert_eq!(present.status.as_deref(), Some("away"));
+        assert_eq!(present.status_icon.as_deref(), Some("☕"));
+        assert_eq!(present.status_message.as_deref(), Some("On a break"));
+        room["statusMessage"] = json!("🦀".repeat(80));
+        assert_eq!(
+            Room::decode(&room).unwrap().status_message.unwrap().len(),
+            320
+        );
+        room["statusMessage"] = json!("x".repeat(321));
+        assert!(Room::decode(&room).unwrap().status_message.is_none());
+    }
+
+    #[test]
     fn room_read_markers_preserve_missing_zero_and_bounded_numeric_values() {
         let mut room = json!({"token":"testroom", "displayName":"Fixture"});
         for (value, expected) in [
@@ -590,6 +689,28 @@ mod message_tests {
             let decoded = Room::decode(&room).unwrap();
             assert_eq!(decoded.last_read, expected);
             assert_eq!(decoded.common_read, expected);
+        }
+        room["lastReadMessage"] = json!(-2);
+        let decoded = Room::decode(&room).unwrap();
+        // Talk's explicit first-unread sentinel is a known boundary, unlike
+        // arbitrary negative input. Keep this consistent with the thread path.
+        assert_eq!(decoded.last_read, Some(0));
+        assert_eq!(decoded.summary_offset, Some(0));
+        room["lastReadMessage"] = json!(-9);
+        let decoded = Room::decode(&room).unwrap();
+        assert_eq!(decoded.last_read, None);
+        assert_eq!(decoded.summary_offset, None);
+    }
+
+    #[test]
+    fn first_unread_sentinel_survives_typed_room_decoding() {
+        let mut room = json!({"token":"testroom", "displayName":"Fixture"});
+        for value in [json!(-2), json!("-2")] {
+            room["lastReadMessage"] = value.clone();
+            room["lastCommonReadMessage"] = value;
+            let decoded = Room::decode(&room).unwrap();
+            assert_eq!(decoded.last_read, Some(0));
+            assert_eq!(decoded.common_read, None);
         }
     }
 

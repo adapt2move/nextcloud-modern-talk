@@ -752,6 +752,7 @@ impl Accounts {
             cloud: false,
             attachment: None,
             preview_generation: None,
+            voice: None,
             avatar_actor: self.avatar_actor(&binding.target),
         };
         if self
@@ -929,6 +930,10 @@ mod tests {
         panel.members = page([Member {
             id: PersonRef { context, local: 9 },
             name: text("Synthetic member"),
+            author_key: None,
+            presence: talk_core::ui::presentation::Presence::Unknown,
+            status_icon: None,
+            status_message: None,
             role: MemberRole::Member,
             source: DirectorySource::User,
             permissions: Some(511),
@@ -973,6 +978,8 @@ mod tests {
                 local: 9,
             },
             avatar_identity: identity,
+            user_status: None,
+            author_key: None,
             name: text("Synthetic member"),
             role: talk_core::protocol::Role::Member,
             source: talk_core::protocol::conversation::RecipientSource::User,

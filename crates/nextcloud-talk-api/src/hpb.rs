@@ -13,12 +13,15 @@ use crate::{
     events::{LiveEvent, LiveEventBatch, LiveState, Mailbox},
     models::{RoomToken, SignalingMode, SignalingSettings},
     scope::{Cancellation, Moment, OperationContext, SessionScope},
-    signaling::{Event, Negotiation, PeerSession, Signal, SignalBatch},
+    signaling::{Event, Negotiation, PeerSession, Signal, SignalBatch, StreamKind},
 };
 use std::{
     collections::VecDeque,
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tokio::sync::{mpsc, oneshot};
@@ -38,6 +41,7 @@ struct Shared {
     account: AccountBinding,
     stop: Cancellation,
     settings: Mutex<ExternalSettings>,
+    retirement_resume: Mutex<Option<session::Resume>>,
     state: Mutex<State>,
 }
 struct State {
@@ -49,25 +53,78 @@ struct State {
     generation: u64,
     room: Option<Room>,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RoomPurpose {
+    Call,
+    Chat,
+}
 struct Room {
+    purpose: RoomPurpose,
+    replaced: Arc<AtomicBool>,
     token: RoomToken,
     own: PeerSession,
     generation: u64,
     cancellation: Cancellation,
     joined: bool,
     members: Vec<wire::Member>,
+    in_call: Vec<PeerSession>,
+    subscription_requests: Vec<String>,
     selected: Vec<Selection>,
-    retired: Vec<PeerSession>,
+    retired_screens: Vec<(PeerSession, Negotiation)>,
+    retired_subscriptions: Vec<(PeerSession, StreamKind, Negotiation)>,
     signals: VecDeque<(usize, Event)>,
     signal_bytes: usize,
+    typing: Vec<(PeerSession, std::time::Instant)>,
 }
 struct Selection {
+    request_id: Option<String>,
+    stream: StreamKind,
     talk: PeerSession,
     sfu: PeerSession,
     sid: Option<Negotiation>,
     publisher: bool,
 }
 impl Room {
+    fn retire_subscription(
+        &mut self,
+        peer: &PeerSession,
+        stream: StreamKind,
+    ) -> Result<(), ErrorKind> {
+        for old in self
+            .selected
+            .iter()
+            .filter(|p| &p.talk == peer && p.stream == stream && !p.publisher)
+        {
+            if let Some(sid) = &old.sid {
+                if self.retired_subscriptions.len() >= 64 {
+                    return Err(ErrorKind::Busy);
+                }
+                self.retired_subscriptions
+                    .push((old.sfu.clone(), stream, sid.clone()));
+            }
+        }
+        self.selected
+            .retain(|p| &p.talk != peer || p.stream != stream || p.publisher);
+        Ok(())
+    }
+    fn membership(&mut self, own_sfu: &PeerSession) -> Result<(), ErrorKind> {
+        if self.purpose != RoomPurpose::Call {
+            return Ok(());
+        }
+        // A room join is only routing information. HPB rejects requestoffer
+        // until both SFU sessions are in its call (hub.go isInSameCall).
+        // This gate narrows the REST admission; it never grants media itself.
+        let members = if self.in_call.contains(own_sfu) {
+            self.members
+                .iter()
+                .filter(|m| self.in_call.contains(&m.sfu))
+                .map(|m| m.talk.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.push(Event::SfuMembership(members))
+    }
     fn push(&mut self, event: Event) -> Result<(), ErrorKind> {
         let bytes = match &event {
             Event::Signal {
@@ -80,13 +137,53 @@ impl Room {
             } => c.candidate().len() + c.mid().len(),
             _ => 1024,
         };
-        if self.signals.len() == 84 || self.signal_bytes + bytes > 192 * 1024 {
+        // Ephemeral activity never displaces a required media or policy event.
+        while self.signals.len() >= 84 || self.signal_bytes + bytes > 192 * 1024 {
+            let Some(index) = self
+                .signals
+                .iter()
+                .position(|(_, event)| matches!(event, Event::Activity { .. }))
+            else {
+                break;
+            };
+            if let Some((size, _)) = self.signals.remove(index) {
+                self.signal_bytes -= size;
+            }
+        }
+        if self.signals.len() >= 84 || self.signal_bytes + bytes > 192 * 1024 {
             self.cancellation.cancel();
             return Err(ErrorKind::Busy);
         }
         self.signal_bytes += bytes;
         self.signals.push_back((bytes, event));
         Ok(())
+    }
+    fn push_activity(&mut self, from: PeerSession, activity: crate::signaling::activity::Activity) {
+        use crate::signaling::activity::Activity;
+        // Coalesce each hand so a delayed raise cannot replace a later lower.
+        if let Activity::RaisedHand { timestamp, .. } = &activity
+            && let Some((_, event)) = self.signals.iter_mut().find(|(_, event)| {
+                matches!(event, Event::Activity { from: sender, activity: Activity::RaisedHand { .. } } if sender == &from)
+            })
+        {
+            if let Event::Activity { activity: Activity::RaisedHand { timestamp: previous, .. }, .. } = event
+                && *timestamp > *previous
+            {
+                *event = Event::Activity { from, activity };
+            }
+            return;
+        }
+        let count = self
+            .signals
+            .iter()
+            .filter(|(_, event)| matches!(event, Event::Activity { .. }))
+            .count();
+        if count >= 16 || self.signals.len() >= 84 || self.signal_bytes + 1024 > 192 * 1024 {
+            return;
+        }
+        self.signal_bytes += 1024;
+        self.signals
+            .push_back((1024, Event::Activity { from, activity }));
     }
 }
 pub(crate) struct Owner {
@@ -104,8 +201,32 @@ enum Command {
         cancel: Cancellation,
         reply: oneshot::Sender<Result<(), ErrorKind>>,
     },
+    Typing {
+        generation: u64,
+        started: bool,
+        deadline: Moment,
+        cancel: Cancellation,
+        reply: oneshot::Sender<Result<(), ErrorKind>>,
+    },
+    ForceMute {
+        generation: u64,
+        peer: PeerSession,
+        target: PeerSession,
+        deadline: Moment,
+        cancel: Cancellation,
+        reply: oneshot::Sender<Result<(), ErrorKind>>,
+    },
+    Activity {
+        generation: u64,
+        peer: PeerSession,
+        activity: crate::signaling::activity::Activity,
+        deadline: Moment,
+        cancel: Cancellation,
+        reply: oneshot::Sender<Result<(), ErrorKind>>,
+    },
     Send {
         generation: u64,
+        stream: StreamKind,
         peer: PeerSession,
         sid: Option<Negotiation>,
         signal: Option<Signal>,
@@ -117,7 +238,11 @@ enum Command {
 impl Command {
     fn reject(self, error: ErrorKind) {
         match self {
-            Self::Join { reply, .. } | Self::Send { reply, .. } => {
+            Self::Join { reply, .. }
+            | Self::Typing { reply, .. }
+            | Self::Send { reply, .. }
+            | Self::Activity { reply, .. }
+            | Self::ForceMute { reply, .. } => {
                 let _ = reply.send(Err(error));
             }
         }
@@ -170,6 +295,7 @@ impl Owner {
             account,
             stop: Cancellation::default(),
             settings: Mutex::new(settings),
+            retirement_resume: Mutex::new(None),
             state: Mutex::new(State {
                 status: LiveState::Connecting,
                 first_transport_failure: None,
@@ -196,6 +322,14 @@ impl Owner {
             .lock()
             .map_or(true, |s| s.room.is_some())
     }
+    fn transport_stopped(&self) -> bool {
+        self.handle.shared.state.lock().is_ok_and(|state| {
+            matches!(
+                state.status,
+                LiveState::Stopped(ErrorKind::Transport | ErrorKind::Deadline)
+            )
+        })
+    }
     fn poll(&self, context: &OperationContext) -> Result<LiveEventBatch, Error> {
         let shared = &self.handle.shared;
         shared.validate(context).map_err(|e| shared.error(e))?;
@@ -220,6 +354,7 @@ impl Drop for Owner {
 /// room/call generation. Only a successful HTTP room activation can create it.
 #[derive(Clone)]
 pub(crate) struct Route {
+    replaced: Arc<AtomicBool>,
     handle: Handle,
     generation: u64,
     cancellation: Cancellation,
@@ -244,8 +379,26 @@ impl Handle {
         token: RoomToken,
         own: PeerSession,
     ) -> Result<Route, ErrorKind> {
+        self.join_for(context, token, own, RoomPurpose::Call).await
+    }
+    pub(crate) async fn join_chat(
+        &self,
+        context: &OperationContext,
+        token: RoomToken,
+        own: PeerSession,
+    ) -> Result<Route, ErrorKind> {
+        self.join_for(context, token, own, RoomPurpose::Chat).await
+    }
+    async fn join_for(
+        &self,
+        context: &OperationContext,
+        token: RoomToken,
+        own: PeerSession,
+        purpose: RoomPurpose,
+    ) -> Result<Route, ErrorKind> {
         self.shared.validate(context)?;
         let cancellation = Cancellation::default();
+        let replaced = Arc::new(AtomicBool::new(false));
         let generation = {
             let mut state = self.shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
             if let Some(room) = &state.room {
@@ -258,20 +411,27 @@ impl Handle {
             state.generation = state.generation.checked_add(1).ok_or(ErrorKind::Busy)?;
             let generation = state.generation;
             state.room = Some(Room {
+                purpose,
+                replaced: replaced.clone(),
                 token,
                 own,
                 generation,
                 cancellation: cancellation.clone(),
                 joined: false,
                 members: Vec::with_capacity(100),
+                in_call: Vec::with_capacity(100),
+                subscription_requests: Vec::with_capacity(64),
                 selected: Vec::with_capacity(17),
-                retired: Vec::with_capacity(100),
+                retired_screens: Vec::with_capacity(32),
+                retired_subscriptions: Vec::with_capacity(64),
                 signals: VecDeque::new(),
                 signal_bytes: 0,
+                typing: Vec::with_capacity(100),
             });
             generation
         };
         let route = Route {
+            replaced,
             handle: self.clone(),
             generation,
             cancellation,
@@ -313,6 +473,9 @@ impl Drop for Abort {
     }
 }
 impl Route {
+    pub(crate) fn session_replaced(&self) -> bool {
+        self.replaced.load(Ordering::Acquire)
+    }
     pub(crate) fn update(&self, settings: &ExternalSettings) -> Result<(), ErrorKind> {
         self.handle.update(settings)
     }
@@ -346,12 +509,22 @@ impl Route {
         }
         f(room, &session)
     }
+    #[cfg(test)]
     pub(crate) fn select(&self, peer: PeerSession, sid: Negotiation) -> Result<(), ErrorKind> {
+        self.select_stream(peer, sid, StreamKind::Camera)
+    }
+    pub(crate) fn select_stream(
+        &self,
+        peer: PeerSession,
+        sid: Negotiation,
+        stream: StreamKind,
+    ) -> Result<(), ErrorKind> {
         self.with_room(|room, own_sfu| {
-            if room.retired.contains(&peer) {
-                return Err(ErrorKind::WrongScope);
-            }
-            if let Some(selection) = room.selected.iter_mut().find(|p| p.talk == peer) {
+            if let Some(selection) = room
+                .selected
+                .iter_mut()
+                .find(|p| p.talk == peer && p.stream == stream)
+            {
                 return if selection.sid.as_ref() == Some(&sid) {
                     Ok(())
                 } else {
@@ -363,44 +536,132 @@ impl Route {
             if peer != room.own {
                 return Err(ErrorKind::WrongScope);
             }
-            if room.selected.len() == 17 {
+            if room.selected.len() >= 20 {
                 return Err(ErrorKind::Busy);
             }
             room.selected.push(Selection {
+                stream,
                 talk: peer,
                 sfu: own_sfu.clone(),
                 sid: Some(sid),
                 publisher: true,
+                request_id: None,
             });
             Ok(())
         })
     }
-    pub(crate) fn remove(&self, peer: &PeerSession) {
+    pub(crate) fn remove_stream(&self, peer: &PeerSession, stream: StreamKind) {
         let _ = self.with_room(|room, _| {
-            room.selected.retain(|p| &p.talk != peer);
-            if room.retired.len() == 100 {
+            if stream == StreamKind::Screen {
+                for selected in room
+                    .selected
+                    .iter()
+                    .filter(|p| &p.talk == peer && p.stream == stream)
+                {
+                    if let Some(sid) = &selected.sid
+                        && room.retired_screens.len() < 32
+                    {
+                        room.retired_screens
+                            .push((selected.sfu.clone(), sid.clone()));
+                    }
+                }
+            }
+            // Retire the negotiation, not the participant's routing identity.
+            // A fresh REST observation and current HPB call membership can
+            // admit a new subscription after that participant unmutes/rejoins.
+            if let Err(error) = room.retire_subscription(peer, stream) {
                 room.cancellation.cancel();
-                return Err(ErrorKind::Busy);
+                return Err(error);
             }
-            if !room.retired.contains(peer) {
-                room.retired.push(peer.clone());
-            }
+            room.selected
+                .retain(|p| &p.talk != peer || p.stream != stream);
             Ok(())
         });
     }
+    /// Snapshot of remote Talk sessions that typed recently in this chat route.
+    pub(crate) fn typing_sessions(&self) -> Result<Vec<PeerSession>, ErrorKind> {
+        self.with_room(|room, _| {
+            if room.purpose != RoomPurpose::Chat {
+                return Err(ErrorKind::WrongScope);
+            }
+            let now = std::time::Instant::now();
+            room.typing
+                .retain(|(_, at)| now.saturating_duration_since(*at) < Duration::from_secs(8));
+            Ok(room
+                .typing
+                .iter()
+                .map(|(session, _)| session.clone())
+                .collect())
+        })
+    }
+    /// Send only to currently observed room sessions. A late command cannot
+    /// act after the route has been retired or replaced.
+    pub(crate) async fn send_typing(
+        &self,
+        context: &OperationContext,
+        started: bool,
+    ) -> Result<(), ErrorKind> {
+        self.handle.shared.validate(context)?;
+        self.with_room(|room, _| {
+            if room.purpose == RoomPurpose::Chat {
+                Ok(())
+            } else {
+                Err(ErrorKind::WrongScope)
+            }
+        })?;
+        let (reply, receive) = oneshot::channel();
+        self.handle
+            .commands
+            .try_send(Command::Typing {
+                generation: self.generation,
+                started,
+                deadline: context.deadline,
+                cancel: context.cancellation.clone(),
+                reply,
+            })
+            .map_err(|_| ErrorKind::Busy)?;
+        until(
+            &self.handle.shared,
+            context.deadline,
+            &context.cancellation,
+            async { receive.await.map_err(|_| ErrorKind::Transport)? },
+        )
+        .await
+    }
+    #[cfg(test)]
     pub(crate) async fn request_offer(
         &self,
         context: &OperationContext,
         peer: &PeerSession,
     ) -> Result<(), ErrorKind> {
+        self.request_stream_offer(context, peer, StreamKind::Camera)
+            .await
+    }
+    pub(crate) fn reset_subscription(
+        &self,
+        peer: &PeerSession,
+        stream: StreamKind,
+    ) -> Result<(), ErrorKind> {
+        self.with_room(|room, _| room.retire_subscription(peer, stream))
+    }
+    pub(crate) async fn request_stream_offer(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        stream: StreamKind,
+    ) -> Result<(), ErrorKind> {
         self.with_room(|room, _| {
-            if peer == &room.own || room.retired.contains(peer) {
+            if peer == &room.own {
                 return Err(ErrorKind::WrongScope);
             }
-            if room.selected.iter().any(|p| &p.talk == peer) {
+            if room
+                .selected
+                .iter()
+                .any(|p| &p.talk == peer && p.stream == stream)
+            {
                 return Err(ErrorKind::Conflict);
             }
-            if room.selected.len() == 17 {
+            if room.selected.len() >= 20 {
                 return Err(ErrorKind::Busy);
             }
             let member = room
@@ -409,21 +670,35 @@ impl Route {
                 .find(|m| &m.talk == peer)
                 .ok_or(ErrorKind::NotFound)?;
             room.selected.push(Selection {
+                stream,
                 talk: peer.clone(),
                 sfu: member.sfu.clone(),
                 sid: None,
                 publisher: false,
+                request_id: None,
             });
             Ok(())
         })?;
-        self.send(context, peer, None, None).await
+        self.send_stream(context, peer, None, None, stream).await
     }
+    #[cfg(test)]
     pub(crate) async fn send(
         &self,
         context: &OperationContext,
         peer: &PeerSession,
         sid: Option<&Negotiation>,
         signal: Option<Signal>,
+    ) -> Result<(), ErrorKind> {
+        self.send_stream(context, peer, sid, signal, StreamKind::Camera)
+            .await
+    }
+    pub(crate) async fn send_stream(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        sid: Option<&Negotiation>,
+        signal: Option<Signal>,
+        stream: StreamKind,
     ) -> Result<(), ErrorKind> {
         self.handle.shared.validate(context)?;
         if self.is_closed() {
@@ -437,6 +712,7 @@ impl Route {
             .commands
             .try_send(Command::Send {
                 generation: self.generation,
+                stream,
                 peer: peer.clone(),
                 sid: sid.cloned(),
                 signal,
@@ -456,6 +732,88 @@ impl Route {
             return Err(ErrorKind::Cancelled);
         }
         drop(guard.disarm());
+        Ok(())
+    }
+    pub(crate) async fn send_force_mute(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        target: &PeerSession,
+    ) -> Result<(), ErrorKind> {
+        self.handle.shared.validate(context)?;
+        self.with_room(|room, _| {
+            if peer == &room.own
+                || target == &room.own
+                || !room.members.iter().any(|member| &member.talk == peer)
+                || !room.members.iter().any(|member| &member.talk == target)
+            {
+                return Err(ErrorKind::WrongScope);
+            }
+            Ok(())
+        })?;
+        let (reply, receive) = oneshot::channel();
+        self.handle
+            .commands
+            .try_send(Command::ForceMute {
+                generation: self.generation,
+                peer: peer.clone(),
+                target: target.clone(),
+                deadline: context.deadline,
+                cancel: context.cancellation.clone(),
+                reply,
+            })
+            .map_err(|_| ErrorKind::Busy)?;
+        until(
+            &self.handle.shared,
+            context.deadline,
+            &context.cancellation,
+            async { receive.await.map_err(|_| ErrorKind::Transport)? },
+        )
+        .await?;
+        if self.is_closed() {
+            return Err(ErrorKind::Cancelled);
+        }
+        Ok(())
+    }
+
+    /// Activity is ephemeral and never grants media authority. An abandoned
+    /// command is dropped by the socket owner instead of retiring the call.
+    pub(crate) async fn send_activity(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        activity: crate::signaling::activity::Activity,
+    ) -> Result<(), ErrorKind> {
+        self.handle.shared.validate(context)?;
+        activity.encode()?;
+        self.with_room(|room, _| {
+            if peer == &room.own || !room.members.iter().any(|member| &member.talk == peer) {
+                return Err(ErrorKind::WrongScope);
+            }
+            Ok(())
+        })?;
+        let (reply, receive) = oneshot::channel();
+        self.handle
+            .commands
+            .try_send(Command::Activity {
+                generation: self.generation,
+                peer: peer.clone(),
+                activity,
+                deadline: context.deadline,
+                cancel: context.cancellation.clone(),
+                reply,
+            })
+            .map_err(|_| ErrorKind::Busy)?;
+        until(
+            &self.handle.shared,
+            context.deadline,
+            &context.cancellation,
+            async { receive.await.map_err(|_| ErrorKind::Transport)? },
+        )
+        .await?;
+        if self.is_closed() {
+            return Err(ErrorKind::Cancelled);
+        }
         Ok(())
     }
     pub(crate) async fn poll(&self, context: &OperationContext) -> Result<SignalBatch, ErrorKind> {
@@ -511,6 +869,55 @@ async fn until<T>(
 }
 
 impl Client {
+    /// An explicit call retry may reconcile a stopped HPB session. This resumes
+    /// only to obtain definitive retirement; it never rejoins a room or media.
+    pub async fn retire_stopped_external_meeting(
+        &mut self,
+        context: &OperationContext,
+        room: &RoomToken,
+    ) -> Result<(), Error> {
+        self.validate(context)?;
+        let Some(owner) = &self.hpb else {
+            return Ok(());
+        };
+        let shared = &owner.handle.shared;
+        let pending = {
+            let state = shared
+                .state
+                .lock()
+                .map_err(|_| self.error(ErrorKind::Uncertain))?;
+            state
+                .room
+                .as_ref()
+                .is_some_and(|old| old.purpose == RoomPurpose::Call && old.token == *room)
+                && matches!(
+                    state.status,
+                    LiveState::Stopped(
+                        ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::Uncertain
+                    )
+                )
+        };
+        if pending {
+            let own = self.own_room_session(context, room)?;
+            if !shared
+                .state
+                .lock()
+                .map_err(|_| self.error(ErrorKind::Uncertain))?
+                .room
+                .as_ref()
+                .is_some_and(|old| old.own == own)
+            {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
+            session::retire_stopped(shared, context)
+                .await
+                .map_err(|kind| self.error(kind))?;
+            self.cancel_prepared_external_meeting();
+            self.hpb = None;
+        }
+        Ok(())
+    }
+
     pub fn cancel_prepared_external_meeting(&mut self) {
         if let Some(route) = self.hpb_route.take() {
             route.close();
@@ -596,8 +1003,18 @@ impl Client {
         if settings.mode != SignalingMode::External {
             return Err(self.error(ErrorKind::Unsupported));
         }
-        self.configure_hpb(context, settings)?;
         let own = self.own_room_session(context, room)?;
+        if self.hpb.as_ref().is_some_and(Owner::transport_stopped) {
+            // Only fresh, validated room/call admission renews an exhausted
+            // transport owner. Routine event polling cannot restore a stopped
+            // session, and old route handles remain irreversibly closed.
+            if self.hpb.as_ref().is_some_and(Owner::retirement_pending) {
+                return Err(self.error(ErrorKind::Uncertain));
+            }
+            self.cancel_prepared_external_meeting();
+            self.hpb = None;
+        }
+        self.configure_hpb(context, settings)?;
         let handle = self
             .hpb
             .as_ref()

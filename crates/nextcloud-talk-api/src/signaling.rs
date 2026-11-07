@@ -1,4 +1,5 @@
 //! Engine-neutral, bounded SDP/ICE values. No devices, codecs, IPC or peer connection.
+pub mod activity;
 use std::{fmt, io};
 pub const SDP_MAX: usize = 65536;
 pub const CANDIDATE_MAX: usize = 2048;
@@ -156,24 +157,69 @@ pub struct CallHandle {
     pub(crate) scope: SessionScope,
     pub(crate) generation: u64,
 }
+/// Independent WebRTC connections; a screen never replaces the camera route.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum StreamKind {
+    #[default]
+    Camera,
+    Screen,
+}
+impl StreamKind {
+    pub fn room_type(self) -> &'static str {
+        match self {
+            Self::Camera => "video",
+            Self::Screen => "screen",
+        }
+    }
+    pub(crate) fn parse(value: &Value) -> Result<Self, ErrorKind> {
+        match value.as_str() {
+            Some("video") => Ok(Self::Camera),
+            Some("screen") => Ok(Self::Screen),
+            _ => Err(ErrorKind::Unsupported),
+        }
+    }
+}
 pub enum Signal {
+    StopScreen,
+    SendOffer,
     Description(SessionDescription),
     Candidate(IceCandidate),
 }
 pub enum Event {
-    /// Talk room-session identities mapped by the current HPB room. These are
-    /// routing observations only; REST membership remains authoritative.
+    /// Talk identities mapped by the current HPB room, narrowed to sessions
+    /// marked in-call while our own SFU session is in-call. These are routing
+    /// observations only; REST membership remains authoritative.
     SfuMembership(Vec<PeerSession>),
     TransportInterrupted,
     TransportResumed,
+    /// A correlated requestoffer was denied. No subscription was admitted;
+    /// any retry needs renewed policy and a bounded media recovery budget.
+    SubscriptionRejected {
+        from: PeerSession,
+        stream: StreamKind,
+    },
     PolicyChanged,
     ForceMute,
+    ScreenStopped {
+        from: PeerSession,
+        negotiation: Option<Negotiation>,
+    },
+    /// A peer asks this call session to stop microphone publication.
+    ForceMuteBy {
+        from: PeerSession,
+    },
     Signal {
+        stream: StreamKind,
         from: PeerSession,
         negotiation: Negotiation,
         signal: Signal,
     },
     Membership(Vec<Member>),
+    /// Transient peer activity, scoped to this signaling session.
+    Activity {
+        from: PeerSession,
+        activity: activity::Activity,
+    },
     /// Scoped hints are represented explicitly and never become media commands.
     Hint {
         from: PeerSession,
@@ -249,6 +295,9 @@ impl Client {
         }
         *counter += 1;
         let (kind, payload) = match signal {
+            Signal::StopScreen | Signal::SendOffer => {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
             Signal::Description(s) => {
                 let kind = if s.kind() == DescriptionKind::Offer {
                     "offer"
@@ -340,8 +389,8 @@ pub(crate) fn parse_batch(
         return Err(ErrorKind::TooLarge);
     }
     let mut events = Vec::with_capacity(rows.len());
-    let (mut descriptions, mut candidates, mut snapshots, mut hints, mut retained) =
-        (0, 0, 0, 0, 0usize);
+    let (mut descriptions, mut candidates, mut snapshots, mut hints, mut activities, mut retained) =
+        (0, 0, 0, 0, 0, 0usize);
     for row in rows {
         match row["type"].as_str() {
             Some("usersInRoom") => {
@@ -397,16 +446,40 @@ pub(crate) fn parse_batch(
             Some("message") => {
                 let raw = text(row.get("data"), 131072)?;
                 let data = crate::json::json(raw.as_bytes())?;
-                if data["roomType"].as_str() != Some("video") {
-                    return Err(ErrorKind::Unsupported);
-                }
+                let stream = StreamKind::parse(&data["roomType"])?;
                 if data["to"].as_str() != Some(local) {
                     return Err(ErrorKind::WrongScope);
                 }
                 let from = PeerSession::parse(text(data.get("from"), 512)?)?;
                 retained += from.0.len();
                 let kind = text(data.get("type"), 32)?;
-                if matches!(kind, "mute" | "unmute" | "endOfCandidates") {
+                if stream == StreamKind::Screen && kind == "unshareScreen" {
+                    hints += 1;
+                    if hints > 16 {
+                        return Err(ErrorKind::TooLarge);
+                    }
+                    let negotiation = data
+                        .get("sid")
+                        .map(|sid| Negotiation::parse(text(Some(sid), 64)?))
+                        .transpose()?;
+                    events.push(Event::ScreenStopped { from, negotiation });
+                    continue;
+                }
+                if kind == "control" {
+                    // Unknown controls cannot grant authority or terminate the call.
+                    if data["payload"]["action"].as_str() == Some("forceMute")
+                        && data["payload"]["peerId"].as_str() == Some(local)
+                    {
+                        events.push(Event::ForceMuteBy { from });
+                    }
+                } else if matches!(kind, "raiseHand" | "reaction") {
+                    activities += 1;
+                    if activities <= 16
+                        && let Ok(activity) = activity::Activity::decode(kind, &data["payload"])
+                    {
+                        events.push(Event::Activity { from, activity });
+                    }
+                } else if matches!(kind, "mute" | "unmute" | "endOfCandidates") {
                     hints += 1;
                     if hints > 16 {
                         return Err(ErrorKind::TooLarge);
@@ -477,6 +550,7 @@ pub(crate) fn parse_batch(
                         _ => return Err(ErrorKind::Unsupported),
                     };
                     events.push(Event::Signal {
+                        stream,
                         from,
                         negotiation,
                         signal,

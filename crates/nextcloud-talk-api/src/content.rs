@@ -31,6 +31,27 @@ pub enum ImageRequest {
     FileImage(crate::files::FilePath),
 }
 impl Client {
+    /// Bounded DAV bytes for a freshly authorized voice-message attachment.
+    pub async fn voice_audio(
+        &mut self,
+        c: &OperationContext,
+        path: crate::files::FilePath,
+    ) -> Result<Vec<u8>, Error> {
+        let mut bytes = Vec::new();
+        self.download_file(c, path, &mut bytes).await?;
+        if bytes.is_empty() {
+            return Err(self.error(crate::ErrorKind::Malformed));
+        }
+        Ok(bytes)
+    }
+    /// Only an installation-owned `/core/references/preview/` route is accepted.
+    pub async fn reference_thumbnail(
+        &mut self,
+        c: &OperationContext,
+        url: &str,
+    ) -> Result<Vec<u8>, Error> {
+        self.transport.reference_thumbnail(c, url).await
+    }
     /// Only known server routes are accepted; no arbitrary authenticated URL entry point.
     pub async fn image(
         &mut self,

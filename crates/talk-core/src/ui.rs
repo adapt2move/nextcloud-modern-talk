@@ -3,13 +3,16 @@
 
 pub mod content;
 pub mod conversation;
+pub mod discover;
 pub mod messaging;
 /// Additive native presentation contract; the bootstrap consumer remains source-compatible.
 pub mod presentation;
+pub mod reference;
+pub mod search;
 
 // Explicit data-only exports are the complete renderer vocabulary. Adding an export
 // requires review of its transitive fields and the matching checker allowlist.
-pub use crate::bounded::{LimitExceeded, Page, Text};
+pub use crate::bounded::{ClipboardImage, LimitExceeded, Page, Text};
 pub use crate::identity::PersistenceState;
 pub use crate::ids::{
     AccountId, AccountScope, CallGeneration, CallScope, ConversationId, HostId, RuntimeGeneration,

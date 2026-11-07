@@ -7,6 +7,8 @@ mod files;
 mod fixtures;
 mod lifecycle;
 mod preferences;
+#[cfg(feature = "dev-probes")]
+mod probe;
 mod updates;
 
 use crate::presentation::{
@@ -22,6 +24,10 @@ use std::time::Duration;
 
 struct Options {
     scenario: Option<String>,
+    #[cfg(feature = "dev-probes")]
+    dev_profile: Option<std::path::PathBuf>,
+    #[cfg(feature = "dev-probes")]
+    dev_latency: bool,
     palette: Palette,
     appearance: Appearance,
     scale: u16,
@@ -33,6 +39,10 @@ struct Options {
 fn options() -> Result<Option<Options>, &'static str> {
     let mut result = Options {
         scenario: None,
+        #[cfg(feature = "dev-probes")]
+        dev_profile: None,
+        #[cfg(feature = "dev-probes")]
+        dev_latency: false,
         palette: Palette::Blue,
         appearance: Appearance::System,
         scale: 100,
@@ -44,6 +54,32 @@ fn options() -> Result<Option<Options>, &'static str> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            #[cfg(feature = "dev-probes")]
+            "--dev-seed" => {
+                if !cfg!(debug_assertions) {
+                    return Err("Development probes require a debug build");
+                }
+                let profile =
+                    std::path::PathBuf::from(args.next().ok_or("Missing private lab profile")?);
+                let fixture =
+                    std::path::PathBuf::from(args.next().ok_or("Missing private lab fixture")?);
+                talk_adapters::identity::lab::seed_private_lab(&profile, &fixture)
+                    .map_err(|_| "Private lab seed failed")?;
+                return Ok(None);
+            }
+            #[cfg(feature = "dev-probes")]
+            "--dev-latency" => {
+                result.dev_latency = true;
+            }
+            #[cfg(feature = "dev-probes")]
+            "--dev-profile" => {
+                if !cfg!(debug_assertions) {
+                    return Err("Development probes require a debug build");
+                }
+                result.dev_profile = Some(std::path::PathBuf::from(
+                    args.next().ok_or("Missing private lab profile")?,
+                ));
+            }
             "--licenses" => {
                 println!(
                     "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
@@ -125,13 +161,35 @@ pub fn run() {
             std::process::exit(2);
         }
     };
-    let services = match preferences::Services::start(options.scenario.is_none()) {
+    #[cfg(feature = "dev-probes")]
+    if options.dev_latency {
+        println!("DEV_STAGE options");
+    }
+    #[cfg(feature = "dev-probes")]
+    let config = options
+        .dev_profile
+        .clone()
+        .map(talk_adapters::identity::RuntimeConfig::isolated_fixture);
+    #[cfg(not(feature = "dev-probes"))]
+    let config = None;
+    let services = match if config.is_some() {
+        preferences::Services::start_with_config(true, config)
+    } else {
+        preferences::Services::start(options.scenario.is_none())
+    } {
         Ok(services) => services,
         Err(error) => {
             eprintln!("Settings worker could not start: {error:?}");
             return;
         }
     };
+    #[cfg(feature = "dev-probes")]
+    if options.dev_latency {
+        println!("DEV_STAGE services");
+    }
+    if let Some(accounts) = &services.accounts {
+        accounts.borrow_mut().prepare_startup();
+    }
     let application = Application::new().with_assets(assets::Assets);
     application.on_reopen(|cx| {
         for window in cx.windows() {
@@ -188,6 +246,10 @@ pub fn run() {
                             values,
                         });
             }
+            #[cfg(feature = "dev-probes")]
+            if options.dev_latency {
+                println!("DEV_STAGE preferences");
+            }
             let _ = cx.update(|cx| open_desktop(options, services, cx));
         })
         .detach();
@@ -195,6 +257,15 @@ pub fn run() {
 }
 
 fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, cx: &mut App) {
+    #[cfg(feature = "dev-probes")]
+    if options.dev_latency {
+        println!("DEV_STAGE window");
+    }
+    // Admit local cache reads before font registration occupies the UI thread.
+    // The identity/data workers can hydrate while native fonts are prepared.
+    if let Some(accounts) = &services.accounts {
+        accounts.borrow_mut().prepare_startup();
+    }
     if let Err(error) = cx.text_system().add_fonts(vec![
         Cow::Borrowed(include_bytes!("../assets/fonts/GoogleSans-Regular.ttf")),
         Cow::Borrowed(include_bytes!("../assets/fonts/GoogleSans-Medium.ttf")),
@@ -216,14 +287,37 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
     let hidden = talk_core::preferences::starts_hidden(&saved.active, options.autostart);
     let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
     let development = options.scenario.is_some();
+    // Deliberate UI-scenario-only visual evidence; a normal run always uses
+    // the system preference, including the unknown-platform fallback.
+    let material_preview = development
+        && std::env::var_os("TALK_UI_MATERIAL_PREVIEW").is_some_and(|value| value == "1");
+    let material_images = assets::materials();
     let overlay = match options.scenario.as_deref() {
         Some("settings") => Some(Overlay::Settings),
-        Some("details") => Some(Overlay::RoomInfo),
+        Some(
+            "details" | "poll-settings" | "room-avatar" | "lobby-settings" | "breakout-configure"
+            | "breakout-create" | "breakout-free" | "breakout-assigned" | "breakout-help",
+        ) => Some(Overlay::RoomInfo),
         Some("participants") => Some(Overlay::Participants),
+        Some("call-participants-raised") => Some(Overlay::CallParticipants),
+        Some("call-end-confirm") => Some(Overlay::ConfirmEndCall),
+        Some("call-recording-confirm") => Some(Overlay::ConfirmRecording),
         Some("files") => Some(Overlay::Files),
-        Some("thread") => Some(Overlay::Thread),
-        Some("search") => Some(Overlay::Search),
+        Some("chat-cloud-files" | "chat-cloud-files-offline") => Some(Overlay::CloudFiles),
+        Some(
+            "thread"
+            | "thread-options"
+            | "thread-offline"
+            | "thread-paged"
+            | "thread-reference"
+            | "thread-message-tools",
+        ) => Some(Overlay::Thread),
+        Some("search" | "search-navigation" | "account-search") => Some(Overlay::Search),
+        Some("account-reminders" | "account-reminders-partial") => Some(Overlay::Reminders),
+        Some("federation-invitations" | "federation-pending") => Some(Overlay::Federation),
         Some("create34" | "create35") => Some(Overlay::Create),
+        Some("poll-dialog" | "poll-drafts") => Some(Overlay::CreatePoll),
+        Some("poll-details") => Some(Overlay::PollDetails),
         Some("discover") => Some(Overlay::Discover),
         Some("accounts" | "focus-accounts" | "accounts-server-denied") => Some(Overlay::Accounts),
         _ => None,
@@ -237,6 +331,9 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("focus-accounts") => Probe::Accounts,
         Some("focus-rooms" | "focus-files") => Probe::Focus,
         Some("chat-motion") => Probe::Messages,
+        Some("status-picker") => Probe::Status,
+        Some("status-message") => Probe::StatusMessage,
+        Some("people-card") => Probe::PeopleCard,
         _ => Probe::None,
     };
     let fixture_images = if services.accounts.is_none() {
@@ -256,17 +353,45 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         services: services.clone(),
         cursor: 0,
         device_cursor: 0,
+        fixture_voice: std::cell::RefCell::new(
+            matches!(
+                options.scenario.as_deref(),
+                Some("voice-recording" | "voice-review")
+            )
+            .then(|| fixtures::snapshot(Some("voice-recording")).selected)
+            .flatten()
+            .map(|context| talk_core::ui::content::VoiceSnapshot {
+                context,
+                phase: if options.scenario.as_deref() == Some("voice-review") {
+                    talk_core::ui::content::VoicePhase::Review
+                } else {
+                    talk_core::ui::content::VoicePhase::Recording
+                },
+                elapsed_ms: 13_000,
+                level: 600,
+            }),
+        ),
+        fixture_voice_playback: std::cell::RefCell::new(None),
+        fixture_call_devices: options.scenario.as_deref() == Some("call-devices"),
         permission_cursor: 0,
         notification_request: None,
         notification_result: talk_core::preferences::notifications::NotificationState::Idle,
     });
+    let disconnected_fixture = services.accounts.is_none();
+    #[cfg(feature = "dev-probes")]
+    if options.dev_latency {
+        println!("DEV_STAGE prewindow");
+    }
+    if let Some(accounts) = &services.accounts {
+        accounts.borrow_mut().prepare_startup();
+    }
     let window=cx.open_window(WindowOptions{
             window_bounds:Some(WindowBounds::Windowed(bounds)),
             // A minimized native window remains recoverable from the taskbar.
             show:true,focus:!hidden,
             window_min_size:Some(size(px(720.),px(580.))),
             titlebar:Some(TitlebarOptions{
-                title:Some(if development{"Talk — FICTITIOUS DATA · UI development"}else{"Talk"}.into()),
+                title:Some("NextCloud Talk".into()),
                 appears_transparent:true,
                 traffic_light_position:Some(gpui::point(px(12.),px(8.))),
             }),
@@ -290,10 +415,33 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                 println!("NATIVE_MONOSPACE_FONT family=GoogleSansCode digit={sample} id={id:?} ascent={:?} descent={:?} width={:?}",cx.text_system().ascent(id,px(12.)),cx.text_system().descent(id,px(12.)),line.width);
             }
         }
-            cx.new(|cx|Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx))
+            cx.new(|cx|{
+                #[cfg(feature = "dev-probes")]
+                if options.dev_latency { println!("DEV_STAGE desktop"); }
+                let mut desktop=Desktop::new(port,InitialView{probe,development,material_preview,material_images,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),threads_fixture:options.scenario.as_deref()==Some("thread-list"),thread_options_fixture:matches!(options.scenario.as_deref(),Some("thread-options"|"thread-offline")),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),sidebar_menu_fixture:options.scenario.as_deref()==Some("sidebar-room-menu"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
+                #[cfg(feature = "dev-probes")]
+                if options.dev_latency { println!("DEV_STAGE constructed"); }
+                #[cfg(feature = "dev-probes")]
+                if options.dev_latency { desktop.enable_latency_probe(); }
+                if disconnected_fixture { desktop.configure_content_scenario(options.scenario.as_deref(), cx); }
+                match options.scenario.as_deref() {
+                    Some(name @ ("chat-message-tools" | "chat-reminder-time" | "chat-reminder-menu" | "chat-schedule-time" | "chat-schedule-edit")) => desktop.fixture_message_tools(name, window, cx),
+                    Some("room-avatar") => desktop.fixture_room_avatar(cx),
+                    Some("lobby-settings") => desktop.fixture_lobby_settings(cx),
+                    Some("breakout-configure" | "breakout-create" | "breakout-free" | "breakout-assigned" | "breakout-help") => desktop.fixture_breakouts(cx),
+                    _ => (),
+                }
+                desktop
+            })
         });
     match window {
         Ok(window) => {
+            #[cfg(feature = "dev-probes")]
+            if options.dev_latency
+                && let Some(profile) = options.dev_profile.clone()
+            {
+                probe::attach(window, profile, cx);
+            }
             let _ = window.update(cx, |_, window, cx| {
                 lifecycle::retain_on_close(services.clone(), window, cx)
             });
@@ -322,7 +470,8 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                 let mut dialogs = files::Dialogs::new();
                 let mut surface = None;
                 let mut sequence = 0;
-                let mut interval = Duration::from_millis(100);
+                let warming = std::time::Instant::now();
+                let mut interval = Duration::from_millis(16);
                 let mut was_background = true;
                 loop {
                     gpui::Timer::after(interval).await;
@@ -330,6 +479,12 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                         let _ = cx.update(|cx| dialogs.poll(accounts, cx));
                     }
                     if let Some(accounts) = &preview_services.accounts {
+                        let job = accounts.borrow_mut().take_markup();
+                        if let Some(job) = job {
+                            let context = job.context;
+                            let prepared = cx.background_executor().spawn(async move { accounts::markup::prepare(job) }).await;
+                            accounts.borrow_mut().finish_markup(context, prepared);
+                        }
                         let job=accounts.borrow_mut().take_content_image();
                         if let Some(job)=job {
                             let copy=job.clone();
@@ -380,7 +535,13 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                             Ok(surface) => surface,
                             Err(_) => break,
                         };
-                    preview_services.poll_notifications(background);
+                    if let Some(activation) = preview_services.poll_notifications(background) {
+                        let _ = window.update(cx, |view, window, cx| {
+                            view.activate_notification(activation, window, cx);
+                            window.activate_window();
+                        });
+                        let _ = cx.update(|cx| cx.activate(true));
+                    }
                     let _ = cx.update(|cx| {
                         lifecycle::refresh_menus(&preview_services, &mut menu_locale, cx);
                     });
@@ -441,7 +602,8 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                             preview_services.install.borrow_mut().relaunch_failed();
                         }
                     }
-                    interval = Duration::from_millis(if devices_open || preview_services.accounts.as_ref().is_some_and(|a|a.borrow().video_active()) { 33 } else { 100 });
+                    let restoring_cache = warming.elapsed() < Duration::from_secs(3) && preview_services.accounts.as_ref().is_some_and(|a|a.borrow().awaiting_cached_content());
+                    interval = Duration::from_millis(if restoring_cache { 16 } else if devices_open || preview_services.accounts.as_ref().is_some_and(|a|a.borrow().video_active()) { 33 } else { 100 });
                     if requested != surface {
                         surface = requested;
                         sequence = 0;

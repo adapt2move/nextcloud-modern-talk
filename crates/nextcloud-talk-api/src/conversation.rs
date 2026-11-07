@@ -88,8 +88,13 @@ pub enum Command {
     BreakoutRooms,
     ConfigureBreakouts {
         amount: u8,
-        automatic: bool,
+        mode: u8,
+        assignments: Vec<(u64, u8)>,
     },
+    AssignBreakouts(Vec<(u64, u8)>),
+    BroadcastBreakouts(String),
+    SwitchBreakout(RoomToken),
+    RequestBreakoutAssistance,
     StartBreakouts,
     StopBreakouts,
     RemoveBreakouts,
@@ -184,6 +189,18 @@ fn text(s: &str, max: usize) -> Result<(), ErrorKind> {
     } else {
         Ok(())
     }
+}
+fn attendee_map(assignments: &[(u64, u8)], amount: u8) -> Result<String, ErrorKind> {
+    if assignments.len() > 100 || !(1..=20).contains(&amount) {
+        return Err(ErrorKind::TooLarge);
+    }
+    let mut map = std::collections::BTreeMap::new();
+    for &(attendee, room) in assignments {
+        if attendee == 0 || room >= amount || map.insert(attendee.to_string(), room).is_some() {
+            return Err(ErrorKind::Malformed);
+        }
+    }
+    serde_json::to_string(&map).map_err(|_| ErrorKind::Malformed)
 }
 pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
     use Command as C;
@@ -440,10 +457,17 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
         C::BreakoutRooms => {
             method = Method::GET;
             route.push_str("/breakout-rooms");
-            kind = Kind::Rooms
+            kind = Kind::BreakoutRooms
         }
-        C::ConfigureBreakouts { amount, automatic } => {
-            if !(1..=20).contains(amount) {
+        C::ConfigureBreakouts {
+            amount,
+            mode,
+            assignments,
+        } => {
+            if !(1..=20).contains(amount)
+                || !(1..=3).contains(mode)
+                || *mode != 2 && !assignments.is_empty()
+            {
                 return Err(ErrorKind::Malformed);
             }
             method = Method::POST;
@@ -452,10 +476,47 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
                 room.as_str()
             );
             f.extend([
-                ("mode", if *automatic { "1" } else { "2" }.into()),
+                ("mode", mode.to_string()),
                 ("amount", amount.to_string()),
+                ("attendeeMap", attendee_map(assignments, *amount)?),
             ]);
-            kind = Kind::Rooms
+            kind = Kind::BreakoutRooms
+        }
+        C::AssignBreakouts(assignments) => {
+            method = Method::POST;
+            route = format!(
+                "ocs/v2.php/apps/spreed/api/v1/breakout-rooms/{}/attendees",
+                room.as_str()
+            );
+            f.push(("attendeeMap", attendee_map(assignments, 20)?));
+            kind = Kind::BreakoutRooms;
+        }
+        C::BroadcastBreakouts(message) => {
+            text(message, 4096)?;
+            method = Method::POST;
+            route = format!(
+                "ocs/v2.php/apps/spreed/api/v1/breakout-rooms/{}/broadcast",
+                room.as_str()
+            );
+            f.push(("message", message.clone()));
+            kind = Kind::BreakoutRooms;
+        }
+        C::SwitchBreakout(target) => {
+            method = Method::POST;
+            route = format!(
+                "ocs/v2.php/apps/spreed/api/v1/breakout-rooms/{}/switch",
+                room.as_str()
+            );
+            f.push(("target", target.as_str().into()));
+            kind = Kind::Room;
+        }
+        C::RequestBreakoutAssistance => {
+            method = Method::POST;
+            route = format!(
+                "ocs/v2.php/apps/spreed/api/v1/breakout-rooms/{}/request-assistance",
+                room.as_str()
+            );
+            kind = Kind::Room;
         }
         C::StartBreakouts | C::StopBreakouts | C::RemoveBreakouts => {
             method = if matches!(c, C::StartBreakouts) {
@@ -475,7 +536,7 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
             kind = if matches!(c, C::RemoveBreakouts) {
                 Kind::Room
             } else {
-                Kind::Rooms
+                Kind::BreakoutRooms
             }
         }
         C::Directory { search, source } => {

@@ -1,9 +1,9 @@
-//! One transient action failure above the chat, without changing its layout.
+//! One bounded, room-scoped inline action failure in the composer.
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
     controls::{Availability, scoped_id},
 };
-use gpui::{Context, Div, Focusable, KeyDownEvent, Window, div, prelude::*, px};
+use gpui::{Context, Div, Focusable, KeyDownEvent, Window, prelude::*, px};
 use std::time::{Duration, Instant};
 use talk_core::ui::{
     AccountScope, UnavailableReason, messaging::MessageActionError, presentation::ConversationRef,
@@ -88,15 +88,19 @@ impl Toasts {
     }
 }
 
-fn copy(error: MessageActionError) -> &'static str {
+pub(super) fn copy(error: MessageActionError) -> &'static str {
     let MessageActionError::Failed(reason) = error else {
         return "Ergebnis unklar. Vor erneutem Ändern neu laden.";
     };
     match reason {
+        UnavailableReason::Connection(
+            talk_core::ui::presentation::ConnectionFailure::AccessDenied,
+        ) => "Server verweigert den Zugriff.",
         UnavailableReason::Connection(failure) => super::state::connection_failure_copy(failure).1,
         UnavailableReason::PermissionDenied => "Keine Berechtigung für diese Aktion.",
         UnavailableReason::ReauthenticationRequired => "Bitte erneut anmelden.",
-        UnavailableReason::Unsupported | UnavailableReason::Unconfigured => {
+        UnavailableReason::Unsupported => "Auf diesem Server nicht verfügbar.",
+        UnavailableReason::Unconfigured => {
             "Diese Aktion ist in diesem Client noch nicht verfügbar."
         }
         UnavailableReason::Busy => {
@@ -201,7 +205,7 @@ impl Desktop {
         true
     }
 
-    pub(super) fn action_toast_view(&self, window: &Window, cx: &Context<Self>) -> Option<Div> {
+    pub(super) fn action_hint_view(&self, cx: &Context<Self>) -> Option<Div> {
         let toast = self.action_toasts.current.filter(|toast| {
             Some(toast.key.context) == self.snapshot.selected
                 && !self.update_restart_pending
@@ -211,62 +215,40 @@ impl Desktop {
                 && !self.navigation_open
                 && !self.account_removal.confirming()
                 && !self.incoming_visible()
-                && matches!(self.overlay, None | Some(Overlay::CallChat))
+                && matches!(
+                    self.overlay,
+                    None | Some(Overlay::CallChat | Overlay::Thread)
+                )
                 && Instant::now() < toast.expires
         })?;
         Some(
-            div()
-                .absolute()
-                .right_4()
-                .bottom_4()
-                .occlude()
-                .w(self
-                    .sp(360.)
-                    .min((window.viewport_size().width - px(32.)).max(px(1.))))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(self.theme.border)
-                .bg(self.theme.surface)
-                .shadow_lg()
-                .p_3()
-                .flex()
-                .items_start()
-                .gap_2()
-                .child(self.scaled_icon(
-                    "info",
-                    17.,
-                    if toast.reason == MessageActionError::Uncertain {
-                        self.theme.warning
-                    } else {
-                        self.theme.danger
-                    },
-                ))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(self.sp(13.))
-                        .line_height(self.sp(19.))
-                        .text_color(self.theme.text)
-                        .child(self.l(copy(toast.reason))),
+            self.banner(
+                if toast.reason == MessageActionError::Uncertain {
+                    super::controls::BannerRole::Warning
+                } else {
+                    super::controls::BannerRole::Error
+                },
+                self.l(copy(toast.reason)),
+            )
+            .w_full()
+            .flex_none()
+            .child(
+                self.icon_button(
+                    scoped_id(
+                        "dismiss-action-toast",
+                        toast.key.context,
+                        u128::from(toast.key.id),
+                        0,
+                    ),
+                    ("x", "Meldung schließen"),
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::DismissActionToast(toast.key.context, toast.key.id),
+                    cx,
                 )
-                .child(
-                    self.icon_button(
-                        scoped_id(
-                            "dismiss-action-toast",
-                            toast.key.context,
-                            u128::from(toast.key.id),
-                            0,
-                        ),
-                        ("x", "Meldung schließen"),
-                        ButtonStyle::Quiet,
-                        Availability::available(),
-                        LocalAction::DismissActionToast(toast.key.context, toast.key.id),
-                        cx,
-                    )
-                    .size(px(28.))
-                    .min_h(px(28.)),
-                ),
+                .size(px(28.))
+                .min_h(px(28.)),
+            ),
         )
     }
 }
@@ -286,6 +268,12 @@ mod tests {
                 UnavailableReason::PermissionDenied
             )),
             "Keine Berechtigung für diese Aktion."
+        );
+        assert_eq!(
+            copy(MessageActionError::Failed(UnavailableReason::Connection(
+                talk_core::ui::presentation::ConnectionFailure::AccessDenied,
+            ))),
+            "Server verweigert den Zugriff."
         );
     }
     fn context(room: u128, runtime: u128) -> ConversationRef {

@@ -17,6 +17,9 @@ struct MemberCount {
     count: Option<u16>,
     observed: Option<Instant>,
     requested: Option<Instant>,
+    names: Page<Text<256>, 16>,
+    names_observed: Option<Instant>,
+    names_requested: Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,9 +76,13 @@ pub(super) struct Account {
     prefetch_deadline: Option<Instant>,
     live: Option<Result<protocol::AccountLiveState, IdentityError>>,
     first_transport_failure: Option<ErrorKind>,
+    transport_failures: u8,
+    transport_version: u64,
+    background_paused_until: Option<Instant>,
     member_counts: Vec<MemberCount>,
+    names_next: Instant,
     pub(super) metadata: conversations::Metadata,
-    pub(super) rooms: Page<ConversationView, 100>,
+    pub(super) rooms: Page<ConversationView, 256>,
     pub(super) state: ConversationListState,
 }
 #[derive(Default)]
@@ -83,6 +90,21 @@ pub(super) struct Background {
     accounts: Vec<Account>,
 }
 impl Background {
+    pub(super) fn resume(&mut self, now: Instant) {
+        for a in &mut self.accounts {
+            a.background_paused_until = None;
+            for kind in Observation::ALL {
+                let i = kind.index();
+                a.due[i] = a
+                    .retry_not_before
+                    .get(i)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(now)
+                    .max(now);
+            }
+        }
+    }
     pub(super) fn sync(&mut self, scopes: &[AccountScope], now: Instant) {
         self.accounts.retain(|a| scopes.contains(&a.scope));
         for &scope in scopes.iter().take(ACCOUNTS) {
@@ -99,7 +121,11 @@ impl Background {
                     prefetch_deadline: None,
                     live: None,
                     first_transport_failure: None,
+                    transport_failures: 0,
+                    transport_version: 0,
+                    background_paused_until: None,
                     member_counts: Vec::new(),
+                    names_next: now,
                     metadata: conversations::Metadata::default(),
                     rooms: Page::empty(),
                     state: ConversationListState {
@@ -115,6 +141,46 @@ impl Background {
     }
     pub(super) fn account_mut(&mut self, scope: AccountScope) -> Option<&mut Account> {
         self.accounts.iter_mut().find(|a| a.scope == scope)
+    }
+    pub(super) fn background_ready(&self, scope: AccountScope, now: Instant) -> bool {
+        self.account(scope)
+            .is_none_or(|a| a.background_paused_until.is_none_or(|at| now >= at))
+    }
+    pub(super) fn transport_result(
+        &mut self,
+        scope: AccountScope,
+        version: u64,
+        success: bool,
+        now: Instant,
+    ) {
+        let Some(account) = self.account_mut(scope) else {
+            return;
+        };
+        if version < account.transport_version {
+            return;
+        }
+        account.transport_version = version;
+        self.transport_observed(scope, success, now);
+    }
+    pub(super) fn transport_observed(&mut self, scope: AccountScope, success: bool, now: Instant) {
+        if let Some(a) = self.account_mut(scope) {
+            if success {
+                a.transport_failures = 0;
+                a.background_paused_until = None;
+            } else {
+                a.transport_failures = a.transport_failures.saturating_add(1).min(6);
+                if a.transport_failures >= 2 {
+                    // Stable per-runtime jitter needs neither a new random owner
+                    // nor a task. A failed probe cannot reset another account.
+                    let jitter = ((scope.account.as_local() ^ scope.runtime.as_local()) as u64)
+                        .wrapping_mul(u64::from(a.transport_failures) * 7919)
+                        % 1000;
+                    let delay = Duration::from_secs((5u64 << (a.transport_failures - 2)).min(120))
+                        + Duration::from_millis(jitter);
+                    a.background_paused_until = Some(now + delay);
+                }
+            }
+        }
     }
     pub(super) fn member_count(&self, context: ConversationRef) -> Option<u16> {
         self.account(context.account)?
@@ -140,6 +206,56 @@ impl Background {
     pub(super) fn member_count_requested(&mut self, context: ConversationRef, now: Instant) {
         if let Some(slot) = self.member_slot(context) {
             slot.requested = Some(now);
+        }
+    }
+    fn names_need_refresh(&self, context: ConversationRef, now: Instant) -> bool {
+        self.account(context.account)
+            .and_then(|a| a.member_counts.iter().find(|m| m.context == context))
+            .is_none_or(|m| {
+                !m.names_observed
+                    .is_some_and(|at| now.saturating_duration_since(at) < MEMBER_COUNT_LIFETIME)
+                    && !m
+                        .names_requested
+                        .is_some_and(|at| now.saturating_duration_since(at) < MEMBER_COUNT_RETRY)
+            })
+    }
+    pub(super) fn remember_member_names(
+        &mut self,
+        context: ConversationRef,
+        names: Page<Text<256>, 16>,
+        now: Instant,
+    ) {
+        if let Some(slot) = self.member_slot(context) {
+            slot.names = names.clone();
+            slot.names_observed = Some(now);
+        }
+        if let Some(account) = self.account_mut(context.account) {
+            account.rooms = page(account.rooms.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participant_names = names.clone();
+                }
+                row
+            }));
+        }
+    }
+    pub(super) fn forget_member_names(&mut self, context: ConversationRef) {
+        if let Some(account) = self.account_mut(context.account) {
+            if let Some(slot) = account
+                .member_counts
+                .iter_mut()
+                .find(|m| m.context == context)
+            {
+                slot.names = Page::empty();
+                slot.names_observed = None;
+            }
+            account.rooms = page(account.rooms.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participant_names = Page::empty();
+                }
+                row
+            }));
         }
     }
     pub(super) fn remember_member_count(
@@ -180,6 +296,7 @@ impl Background {
                 let mut row = row.clone();
                 if row.context == context {
                     row.participants = None;
+                    row.participant_names = Page::empty();
                 }
                 row
             }));
@@ -208,6 +325,9 @@ impl Background {
                 count: None,
                 observed: None,
                 requested: None,
+                names: Page::empty(),
+                names_observed: None,
+                names_requested: None,
             });
             account.member_counts.len() - 1
         };
@@ -301,7 +421,11 @@ impl Background {
                     .filter(move |kind| calls || *kind != Observation::Calls)
                     .map(move |kind| (a, kind))
             })
-            .filter(|(a, kind)| a.due[kind.index()] <= now)
+            .filter(|(a, kind)| {
+                a.due[kind.index()] <= now
+                    && (matches!(kind, Observation::Calls | Observation::LiveEvents)
+                        || a.background_paused_until.is_none_or(|at| now >= at))
+            })
             .min_by_key(|(a, kind)| (a.due[kind.index()], Some(a.scope) != active, kind.index()))
             .map(|(a, kind)| (a.scope, kind))
     }
@@ -336,7 +460,13 @@ fn recent_rooms(scope: AccountScope, list: &protocol::ConversationList) -> Vec<C
                 && r.last_activity.is_some_and(|at| at > 0)
         })
         .collect();
-    rooms.sort_by_key(|r| std::cmp::Reverse(r.last_activity));
+    rooms.sort_by_key(|r| {
+        std::cmp::Reverse((
+            r.unread_messages.unwrap_or(0) > 0,
+            r.favorite == Some(true),
+            r.last_activity,
+        ))
+    });
     rooms
         .into_iter()
         .take(4)
@@ -358,6 +488,49 @@ fn live_interval(state: Option<Result<protocol::AccountLiveState, IdentityError>
 }
 
 impl Purpose {
+    pub(super) fn priority(self) -> u8 {
+        match self {
+            Self::Message(
+                _,
+                _,
+                _,
+                messaging::Work::Prefetch
+                | messaging::Work::Metadata
+                | messaging::Work::ThreadActivity
+                | messaging::Work::ScheduledPoll
+                | messaging::Work::TranslationOptions
+                | messaging::Work::SummaryStatus
+                | messaging::Work::Typing,
+            )
+            | Self::Rooms(_)
+            | Self::Reference(..)
+            | Self::ParticipantIndex(..)
+            | Self::MessageNotifications(_)
+            | Self::AccountReminders(..)
+            | Self::FederationInvitations(..)
+            | Self::DiscoverProbe(..)
+            | Self::Typing(..) => 2,
+            Self::IncomingCalls(_) | Self::LiveEvents(_) | Self::Threads(..) | Self::Tags(_) => 1,
+            Self::Message(
+                _,
+                _,
+                _,
+                messaging::Work::History
+                | messaging::Work::Poll
+                | messaging::Work::Latest
+                | messaging::Work::Older
+                | messaging::Work::Thread
+                | messaging::Work::ThreadOlder(_)
+                | messaging::Work::ThreadRoot(_)
+                | messaging::Work::ThreadInfo(_)
+                | messaging::Work::Pins
+                | messaging::Work::Recovery
+                | messaging::Work::Context(_)
+                | messaging::Work::UnreadContext(_),
+            ) => 1,
+            _ => 0,
+        }
+    }
     fn observation(self) -> Option<(AccountScope, Observation)> {
         match self {
             Self::IncomingCalls(s) => Some((s, Observation::Calls)),
@@ -369,10 +542,14 @@ impl Purpose {
     }
     pub(super) fn room(self) -> Option<ConversationRef> {
         match self {
-            Self::Room(_, c, _, _)
+            Self::QueuedSetting(c, _)
+            | Self::ParticipantIndex(c, _)
+            | Self::Reference(c, _, _, _)
+            | Self::Room(_, c, _, _)
             | Self::Message(_, c, _, _)
             | Self::Mutation(_, c)
-            | Self::Send(_, c, _) => Some(c),
+            | Self::Send(_, c, _)
+            | Self::Typing(c, _) => Some(c),
             Self::Call(c) => Some(ConversationRef {
                 account: c.account,
                 conversation: c.conversation,
@@ -380,13 +557,20 @@ impl Purpose {
             _ => None,
         }
     }
-    fn account(self) -> Option<AccountScope> {
+    pub(super) fn account(self) -> Option<AccountScope> {
         self.room().map(|c| c.account).or(match self {
             Self::Create(_, s, _)
+            | Self::Search(_, s, _)
+            | Self::Discover(_, s, _)
+            | Self::DiscoverProbe(s, _)
             | Self::IncomingCalls(s)
             | Self::MessageNotifications(s)
+            | Self::AccountReminders(s, _)
+            | Self::FederationInvitations(s, _)
+            | Self::FederationChange(s, _, _)
             | Self::LiveEvents(s)
             | Self::Rooms(s)
+            | Self::Threads(s, _)
             | Self::Tags(s)
             | Self::TagMutation(_, s)
             | Self::Preferences(s, _) => Some(s),
@@ -395,6 +579,33 @@ impl Purpose {
     }
 }
 impl Accounts {
+    pub(super) fn remember_room_unread(&mut self, context: ConversationRef) {
+        if let Some(account) = self.background.account_mut(context.account) {
+            account.rooms = page(account.rooms.as_slice().iter().cloned().map(|mut row| {
+                if row.context == context {
+                    row.unread = row.unread.max(1);
+                }
+                row
+            }));
+        }
+        if self.snapshot.active_account == Some(context.account) {
+            self.snapshot.conversations = page(
+                self.snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .cloned()
+                    .map(|mut row| {
+                        if row.context == context {
+                            row.unread = row.unread.max(1);
+                        }
+                        row
+                    }),
+            );
+            self.load_rooms = Some(context.account);
+        }
+        self.touch();
+    }
     /// Entry point for account transport hints. It deliberately accepts no wire
     /// JSON, content, media state or authority. Repeated hints occupy the same slot.
     pub fn invalidate_account(&mut self, scope: AccountScope, change: protocol::AccountChange) {
@@ -473,7 +684,11 @@ impl Accounts {
             .background
             .accounts
             .iter()
-            .filter(|a| !a.prefetch.is_empty())
+            .filter(|a| {
+                !a.prefetch.is_empty()
+                    && Some(a.scope) == active
+                    && self.background.background_ready(a.scope, now)
+            })
             .filter(|a| {
                 !self
                     .pending
@@ -510,6 +725,117 @@ impl Accounts {
             account.prefetch.remove(0);
         }
     }
+    /// Populate the session-only switcher index opportunistically. One read at
+    /// a time, one attempt per second, and a bounded retry interval keep this
+    /// subordinate to explicit navigation and message work.
+    pub(super) fn tick_participant_index(&mut self) {
+        let now = Instant::now();
+        if self.pending.len() >= 8
+            || self
+                .pending
+                .iter()
+                .any(|p| matches!(p.purpose, Purpose::ParticipantIndex(..)))
+        {
+            return;
+        }
+        let Some(scope) = self.snapshot.active_account else {
+            return;
+        };
+        if !self
+            .snapshot
+            .accounts
+            .as_slice()
+            .iter()
+            .any(|a| a.scope == scope && a.connection == AccountConnectionState::Connected)
+            || self.pending.iter().any(|p| {
+                p.purpose.account() == Some(scope) && !matches!(p.purpose, Purpose::LiveEvents(_))
+            })
+        {
+            return;
+        }
+        let Some(account) = self
+            .background
+            .account(scope)
+            .filter(|a| now >= a.names_next)
+        else {
+            return;
+        };
+        let next = account
+            .rooms
+            .as_slice()
+            .iter()
+            .filter(|room| {
+                matches!(
+                    room.kind,
+                    ConversationKind::Group | ConversationKind::GuestAccessible
+                )
+            })
+            .filter_map(|room| {
+                account
+                    .metadata
+                    .participant_index_ticket(room.context)
+                    .map(|ticket| (room.context, ticket))
+            })
+            .find(|(context, _)| self.background.names_need_refresh(*context, now));
+        let Some((context, ticket)) = next else {
+            return;
+        };
+        if let Some(slot) = self.background.member_slot(context) {
+            slot.names_requested = Some(now);
+        }
+        if let Some(account) = self.background.account_mut(scope) {
+            account.names_next = now + Duration::from_secs(1);
+        }
+        let _ = self.request(
+            scope,
+            ProtocolRequest::Participants(context.conversation),
+            Purpose::ParticipantIndex(context, ticket),
+        );
+    }
+
+    pub(super) fn complete_participant_index(
+        &mut self,
+        context: ConversationRef,
+        ticket: u64,
+        result: Result<RuntimeReply, IdentityError>,
+    ) {
+        if self.current(context.account).is_err()
+            || self.snapshot.active_account != Some(context.account)
+            || self
+                .background
+                .account(context.account)
+                .and_then(|a| a.metadata.participant_index_ticket(context))
+                != Some(ticket)
+        {
+            return;
+        }
+        let Ok(RuntimeReply::Protocol(ProtocolReply::Participants(people))) = result else {
+            return;
+        };
+        if people.conversation != context.conversation {
+            return;
+        }
+        let names = page(
+            people
+                .people
+                .as_slice()
+                .iter()
+                .filter(|p| !p.is_self && !p.display_name.as_str().trim().is_empty())
+                .take(16)
+                .map(|p| p.display_name.clone()),
+        );
+        self.background
+            .remember_member_names(context, names.clone(), Instant::now());
+        self.snapshot.conversations =
+            page(self.snapshot.conversations.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participant_names = names.clone();
+                }
+                row
+            }));
+        self.touch();
+    }
     pub(super) fn sync_background(&mut self) {
         let scopes: Vec<_> = self
             .snapshot
@@ -518,9 +844,21 @@ impl Accounts {
             .iter()
             .map(|a| a.scope)
             .collect();
+        if let Ok(connection) = &mut self.connection {
+            for pending in &self.pending {
+                if matches!(pending.purpose, Purpose::Message(_, c, _, messaging::Work::Prefetch) if Some(c.account) != self.snapshot.active_account)
+                {
+                    let _ = connection.cancel_request(pending.id);
+                }
+            }
+        }
         self.background.sync(&scopes, Instant::now());
         self.history.retain_accounts(&scopes);
         self.notices.retain_accounts(&scopes);
+        self.reminders.retain_accounts(&scopes);
+        self.federation.retain_accounts(&scopes);
+        self.translation.retain_accounts(&scopes);
+        self.summary.retain_accounts(&scopes);
         if let Ok(connection) = &mut self.connection {
             for pending in &self.pending {
                 if pending
@@ -542,6 +880,12 @@ impl Accounts {
             return;
         }
         self.apply_room_refresh(scope, result);
+        if self.snapshot.active_account == Some(scope)
+            && self.snapshot.conversation_list.content == ContentState::Ready
+            && self.snapshot.threads.support == FeatureSupport::Unknown
+        {
+            let _ = self.refresh_threads(scope);
+        }
     }
     pub(super) fn complete_live_events(
         &mut self,
@@ -613,6 +957,10 @@ impl Accounts {
                 .or(batch.first_transport_failure);
             // Invalidations share the HTTP slots and their minimum interval. A
             // reconnect cannot enqueue room polls, replay alerts or change authority.
+            let messages_changed = batch
+                .changes
+                .as_slice()
+                .contains(&protocol::AccountChange::Messages);
             for &change in batch.changes.as_slice() {
                 if change == protocol::AccountChange::Conversations
                     && let Some(account) = self.background.account_mut(scope)
@@ -624,6 +972,9 @@ impl Accounts {
                 }
                 self.background
                     .invalidate(scope, Observation::change(change), now);
+            }
+            if messages_changed {
+                self.hint_thread_refresh(scope, now);
             }
         }
     }
@@ -643,6 +994,11 @@ impl Accounts {
             Err(error) => Err(content_error(error)),
             _ => Err(ContentState::Failed),
         };
+        let cached_rooms = self
+            .cache
+            .loaded(scope.account)
+            .map(|snapshot| snapshot.rooms.clone())
+            .unwrap_or_else(Page::empty);
         let Some(cache) = self.background.account_mut(scope) else {
             return;
         };
@@ -651,6 +1007,31 @@ impl Accounts {
                 let retired = cache.metadata.reconcile(scope, &list);
                 let rows = page(list.rooms.as_slice().iter().map(|r| {
                     let mut row = conversation(r, scope);
+                    if r.actions.read_messages == Decision::Allowed
+                        && !r.sensitive
+                        && !r.classified
+                        && !r.unknown_restrictions
+                    {
+                        let live = cache
+                            .rooms
+                            .as_slice()
+                            .iter()
+                            .find(|old| old.context == row.context && old.unread_mention.is_some())
+                            .map(|old| (old.unread_mention, old.unread, old.last_activity));
+                        let disk = r
+                            .navigation_key
+                            .as_ref()
+                            .and_then(|key| {
+                                cached_rooms.as_slice().iter().find(|old| &old.key == key)
+                            })
+                            .map(|old| (old.unread_mention, old.unread, old.last_activity));
+                        row.unread_mention = super::cache::mentions::merge(
+                            r.unread_mention,
+                            r.unread_messages,
+                            r.last_activity,
+                            live.or(disk),
+                        );
+                    }
                     if r.actions.read_messages == Decision::Allowed {
                         row.participants = cache
                             .member_counts
@@ -659,12 +1040,27 @@ impl Accounts {
                             .and_then(|m| m.count)
                             .or(row.participants);
                     }
+                    if cache
+                        .metadata
+                        .participant_index_ticket(row.context)
+                        .is_some()
+                        && let Some(observed) = cache
+                            .member_counts
+                            .iter()
+                            .find(|m| m.context == row.context)
+                    {
+                        row.participant_names = observed.names.clone();
+                    }
                     row
                 }));
                 cache.member_counts.retain(|m| {
                     list.rooms.as_slice().iter().any(|r| {
                         r.id == m.context.conversation
                             && r.actions.read_messages == Decision::Allowed
+                            && r.actions.list_participants == Decision::Allowed
+                            && !r.classified
+                            && !r.sensitive
+                            && !r.unknown_restrictions
                     })
                 });
                 let removed: Vec<_> = cache
@@ -725,8 +1121,54 @@ impl Accounts {
                     );
                 }
                 if self.snapshot.active_account == Some(scope) {
+                    if let Some(panel) = self
+                        .snapshot
+                        .discover_panel
+                        .as_mut()
+                        .filter(|panel| panel.account == scope && panel.uncertain)
+                        && let Some(context) = panel.joining
+                        && list
+                            .rooms
+                            .as_slice()
+                            .iter()
+                            .any(|room| room.id == context.conversation)
+                    {
+                        panel.uncertain = false;
+                        panel.joining = None;
+                        panel.state = talk_core::ui::conversation::RemoteState::Idle;
+                        panel.rooms = page(
+                            panel
+                                .rooms
+                                .as_slice()
+                                .iter()
+                                .filter(|room| room.context != context)
+                                .cloned(),
+                        );
+                    }
+                    if let Some(panel) = self
+                        .snapshot
+                        .search_panel
+                        .as_mut()
+                        .filter(|p| p.account == scope)
+                    {
+                        panel.hits = page(
+                            panel
+                                .hits
+                                .as_slice()
+                                .iter()
+                                .filter(|hit| {
+                                    list.rooms.as_slice().iter().any(|room| {
+                                        room.id == hit.context.conversation
+                                            && room.actions.read_messages == Decision::Allowed
+                                    })
+                                })
+                                .cloned(),
+                        );
+                    }
                     self.snapshot.conversations = rows;
                     self.snapshot.conversation_list = state;
+                    self.restore_optimistic_join(scope);
+                    self.restore_pending_notifications(scope);
                     self.restore_cache_selection();
                     if list
                         .rooms
@@ -1247,6 +1689,7 @@ mod tests {
     }
     fn room(n: u128) -> protocol::Conversation {
         protocol::Conversation {
+            user_status: None,
             id: talk_core::ids::ConversationId {
                 account: scope(1).account,
                 host: HostId::from_local(1),
@@ -1284,6 +1727,10 @@ mod tests {
                 join_call: Decision::Unknown,
             },
             unread_messages: Some(4),
+            unread_direct_mention: Some(false),
+            last_read_message: Some(3),
+            unread_mention: None,
+            notification_muted: None,
             last_activity: Some(1),
             call_active: Some(false),
             sensitive: false,
@@ -1447,5 +1894,102 @@ mod tests {
         );
         model.background.sync(&[], Instant::now());
         assert!(model.background.accounts.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod cooldown_tests {
+    use super::*;
+    #[test]
+    fn automatic_observation_cannot_take_the_mutation_lane() {
+        let context = ConversationRef {
+            account: scope(1),
+            conversation: talk_core::ids::ConversationId {
+                account: scope(1).account,
+                host: talk_core::ids::HostId::from_local(1),
+                local: 1,
+            },
+        };
+        let message =
+            |work| Purpose::Message(RequestId(0), context, OperationId::from_local(1), work);
+        let mutation = message(messaging::Work::Send).priority();
+        for automatic in [
+            Purpose::Rooms(scope(1)),
+            Purpose::IncomingCalls(scope(1)),
+            Purpose::AccountReminders(scope(1), 1),
+            Purpose::FederationInvitations(scope(1), 1),
+            message(messaging::Work::ScheduledPoll),
+            message(messaging::Work::ThreadActivity),
+            message(messaging::Work::Pins),
+            message(messaging::Work::TranslationOptions),
+            message(messaging::Work::SummaryStatus),
+            message(messaging::Work::Typing),
+        ] {
+            assert!(automatic.priority() > mutation);
+        }
+        assert!(
+            message(messaging::Work::Latest).priority()
+                < message(messaging::Work::Prefetch).priority()
+        );
+    }
+    fn scope(id: u128) -> AccountScope {
+        AccountScope {
+            account: AccountId::from_local(id),
+            runtime: talk_core::ids::RuntimeGeneration::from_local(1),
+        }
+    }
+    #[test]
+    fn repeated_transport_failures_pause_only_the_affected_accounts_background_work() {
+        let now = Instant::now();
+        let a = AccountScope {
+            account: AccountId::from_local(1),
+            runtime: talk_core::ids::RuntimeGeneration::from_local(11),
+        };
+        let b = AccountScope {
+            account: AccountId::from_local(2),
+            ..a
+        };
+        let mut owner = Background::default();
+        owner.sync(&[a, b], now);
+        owner.transport_observed(a, false, now);
+        assert!(owner.background_ready(a, now));
+        owner.transport_observed(a, false, now);
+        assert!(!owner.background_ready(a, now + Duration::from_secs(4)));
+        assert!(owner.background_ready(b, now));
+        assert!(owner.background_ready(a, now + Duration::from_secs(6)));
+        owner.transport_observed(a, false, now + Duration::from_secs(6));
+        assert!(!owner.background_ready(a, now + Duration::from_secs(15)));
+        owner.transport_observed(a, true, now + Duration::from_secs(15));
+        assert!(owner.background_ready(a, now + Duration::from_secs(15)));
+        assert_eq!(owner.account(a).unwrap().transport_failures, 0);
+        owner.transport_observed(a, false, now);
+        owner.transport_observed(a, false, now);
+        let replacement = AccountScope {
+            runtime: talk_core::ids::RuntimeGeneration::from_local(12),
+            ..a
+        };
+        owner.sync(&[replacement, b], now);
+        assert!(owner.background_ready(replacement, now));
+    }
+    #[test]
+    fn circuit_ignores_stale_completions_and_resume_reopens_background_without_losing_server_cooldown()
+     {
+        let now = Instant::now();
+        let mut owner = Background::default();
+        owner.sync(&[scope(1), scope(2)], now);
+        owner.transport_result(scope(1), 1, false, now);
+        owner.transport_result(scope(1), 2, false, now);
+        assert!(!owner.background_ready(scope(1), now));
+        assert!(owner.background_ready(scope(2), now));
+        owner.transport_result(scope(1), 1, true, now);
+        assert!(!owner.background_ready(scope(1), now));
+        let retry = now + Duration::from_secs(45);
+        owner.account_mut(scope(1)).unwrap().retry_not_before[0] = Some(retry);
+        owner.resume(now);
+        assert!(owner.background_ready(scope(1), now));
+        assert_eq!(owner.account(scope(1)).unwrap().due[0], retry);
+        owner.transport_result(scope(1), 3, true, now);
+        owner.transport_result(scope(1), 2, false, now);
+        assert!(owner.background_ready(scope(1), now));
     }
 }

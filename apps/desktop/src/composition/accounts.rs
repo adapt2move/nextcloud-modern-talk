@@ -5,15 +5,29 @@ mod calls;
 pub(super) mod content;
 mod conversations;
 mod creation;
+mod discover;
+mod federation;
 pub(super) mod files;
 mod history;
+#[cfg(debug_assertions)]
+mod latency;
+pub(super) mod markup;
 mod messaging;
 mod notifications;
 mod outbox;
 mod preview;
 mod reads;
+mod references;
+mod reminders;
 mod removal;
+mod search;
 mod startup;
+mod status;
+mod summary;
+mod thread_change;
+mod threads;
+mod translation;
+mod typing;
 mod update;
 use crate::diagnostics::{
     self, Event as Diagnostic, Operation as DiagnosticOperation, Outcome as DiagnosticOutcome,
@@ -53,16 +67,33 @@ use talk_core::ui::{Decision, Page, SubmitError, Text, UnavailableReason, UserIn
 #[derive(Clone, Copy)]
 enum Purpose {
     Outbox(outbox::Work),
+    QueuedSetting(ConversationRef, OperationId),
     Data(cache::Work),
     Content(OperationId),
     Files(files::Work),
     Create(RequestId, AccountScope, creation::Work),
+    Search(RequestId, AccountScope, bool),
+    Discover(RequestId, AccountScope, Option<ConversationRef>),
+    DiscoverProbe(AccountScope, u64),
+    ParticipantIndex(ConversationRef, u64),
+    Reference(ConversationRef, u128, u16, u64),
     Room(RequestId, ConversationRef, OperationId, conversations::Work),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
     IncomingCalls(AccountScope),
     MessageNotifications(AccountScope),
+    AccountReminders(AccountScope, u64),
+    FederationInvitations(AccountScope, u64),
+    FederationChange(AccountScope, OperationId, u128),
     LiveEvents(AccountScope),
+    Typing(ConversationRef, typing::Work),
     Call(talk_core::ids::CallScope),
+    BreakoutLeave(
+        talk_core::ids::CallScope,
+        RequestId,
+        ConversationRef,
+        ConversationRef,
+        bool,
+    ),
     Tags(AccountScope),
     TagMutation(RequestId, AccountScope),
     Login(RequestId, LoginWork),
@@ -70,6 +101,7 @@ enum Purpose {
     RestoreAutomatic(AccountId),
     Removal(RequestId, AccountId, removal::Step),
     Rooms(AccountScope),
+    Threads(AccountScope, u32),
     Mutation(RequestId, ConversationRef),
     Send(RequestId, ConversationRef, OperationId),
     Preferences(AccountScope, PreferenceRequest),
@@ -113,10 +145,38 @@ struct Unresolved {
     operation: OperationId,
 }
 
+#[derive(Clone, Copy)]
+struct OptimisticRoom {
+    request: RequestId,
+    context: ConversationRef,
+    favorite: Option<bool>,
+    archived: Option<bool>,
+}
+
+impl OptimisticRoom {
+    fn project(self, snapshot: &mut PresentationSnapshot) {
+        snapshot.conversations = page(snapshot.conversations.as_slice().iter().cloned().map(
+            |mut row| {
+                if row.context == self.context {
+                    if let Some(value) = self.favorite {
+                        row.favorite = Some(value);
+                    }
+                    if let Some(value) = self.archived {
+                        row.archived = Some(value);
+                    }
+                }
+                row
+            },
+        ));
+    }
+}
+
 pub struct Accounts {
     content_owner: content::ContentOwner,
     media: std::sync::Arc<talk_adapters::media::MediaService>,
     call_ui: Option<calls::CallUi>,
+    breakout_leave: Option<calls::BreakoutLeave>,
+    breakout_observation: Option<(ConversationRef, Page<protocol::Conversation, 20>)>,
     call_poll_at: Instant,
     call_events: calls::CallEvents,
     call_actions: std::sync::Arc<calls::CallActions>,
@@ -135,35 +195,73 @@ pub struct Accounts {
     load_rooms: Option<AccountScope>,
     load_tags: Option<AccountScope>,
     preferences: Vec<AccountPreferenceSnapshot>,
+    status_retry: Vec<status::Retry>,
+    // Keep a DND intent until a scoped server observation resolves an uncertain write.
+    message_pending: Vec<(AccountScope, PreferenceRequest)>,
+    status_pending: Vec<(
+        AccountScope,
+        PreferenceRequest,
+        talk_core::preferences::account::StatusChoice,
+    )>,
     failures: Vec<(AccountId, LoginFailure)>,
     unresolved: Vec<Unresolved>,
     queued_send: Option<messaging::QueuedSend>,
+    optimistic_room: Option<OptimisticRoom>,
     queued_read: reads::Reads,
     outbox: outbox::Outbox,
     room_invite: Option<(RequestId, talk_core::ui::conversation::PersonRef)>,
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
+    account_search: Option<protocol::search::Query>,
+    account_search_retry: Option<search::Retry>,
+    discover_probe: Option<discover::Probe>,
+    discover_probe_generation: u64,
+    discovery_retry: Option<discover::Retry>,
+    discovery_join: Option<discover::OptimisticJoin>,
+    reference_owner: references::Owner,
+    reference_generation: u64,
     notices: notifications::Notices,
+    reminders: reminders::Reminders,
+    federation: federation::Federation,
     background: background::Background,
+    typing: typing::Typing,
     history: history::Cache,
+    markup: markup::Owner,
     cache: cache::Cache,
+    #[cfg(debug_assertions)]
+    latency: latency::Metrics,
     picker: Option<files::Picker>,
     picker_open: bool,
+    avatar_picker: Option<(RequestId, ConversationRef)>,
+    avatar_dialog: Option<(RequestId, ConversationRef)>,
     csv_file_owner: files::CsvOwner,
     attachment_owner: files::Owner,
+    network_revision: u64,
+    last_tick: std::time::SystemTime,
     message_poll_at: Instant,
     message_poll_request: u64,
+    thread_refresh_due: Option<(AccountScope, u32, Instant)>,
+    scheduled_poll: Option<(ConversationRef, Instant)>,
+    translation: translation::Translations,
+    translation_poll: Option<(ConversationRef, Instant)>,
+    summary: summary::Summaries,
 }
 impl Accounts {
     pub fn start(media: std::sync::Arc<talk_adapters::media::MediaService>) -> Rc<RefCell<Self>> {
+        Self::start_with_config(media, RuntimeConfig::platform())
+    }
+    pub(super) fn start_with_config(
+        media: std::sync::Arc<talk_adapters::media::MediaService>,
+        config: RuntimeConfig,
+    ) -> Rc<RefCell<Self>> {
         let mut snapshot = super::fixtures::snapshot(None);
         snapshot.content = ContentState::Loading;
         Rc::new(RefCell::new(Self {
             content_owner: content::ContentOwner::default(),
-            connection: AccountConnection::start(
-                RuntimeConfig::platform().with_media(media.clone()),
-            ),
+            connection: AccountConnection::start(config.with_media(media.clone())),
             media,
             call_ui: None,
+            breakout_leave: None,
+            breakout_observation: None,
             call_poll_at: Instant::now(),
             call_events: calls::CallEvents::new(),
             call_actions: std::sync::Arc::new(calls::CallActions::new()),
@@ -181,28 +279,63 @@ impl Accounts {
             load_rooms: None,
             load_tags: None,
             preferences: Vec::new(),
+            status_retry: Vec::new(),
+            status_pending: Vec::new(),
+            message_pending: Vec::new(),
             failures: Vec::new(),
             unresolved: Vec::new(),
             queued_send: None,
+            optimistic_room: None,
             queued_read: reads::Reads::default(),
             outbox: outbox::Outbox::default(),
             room_invite: None,
             message_search: None,
+            account_search: None,
+            account_search_retry: None,
+            discover_probe: None,
+            discover_probe_generation: 0,
+            discovery_retry: None,
+            discovery_join: None,
+            reference_owner: references::Owner::default(),
+            reference_generation: 0,
             notices: notifications::Notices::default(),
+            reminders: reminders::Reminders::default(),
+            federation: federation::Federation::default(),
             background: background::Background::default(),
+            typing: typing::Typing::default(),
             history: history::Cache::default(),
+            markup: markup::Owner::default(),
             cache: cache::Cache::default(),
+            #[cfg(debug_assertions)]
+            latency: latency::Metrics::default(),
             picker: None,
             picker_open: false,
+            avatar_picker: None,
+            avatar_dialog: None,
             csv_file_owner: files::CsvOwner::default(),
             attachment_owner: files::Owner::default(),
+            network_revision: 0,
+            last_tick: std::time::SystemTime::now(),
             message_poll_at: Instant::now(),
             message_poll_request: 0,
+            thread_refresh_due: None,
+            scheduled_poll: None,
+            translation: translation::Translations::default(),
+            summary: summary::Summaries::default(),
+            translation_poll: None,
         }))
     }
     pub fn shutdown(&mut self) {
         self.clear_attachment_work();
         self.cancel_csv_file();
+        self.avatar_picker = None;
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|picker| matches!(picker.kind, files::Kind::Avatar))
+        {
+            self.picker = None;
+        }
         self.stop_video();
         self.queued_send = None;
         self.queued_read.clear();
@@ -232,11 +365,67 @@ impl Accounts {
         // History. Keep those no-change retries as quiet as ordinary empty polls.
         let idle_history = matches!(purpose, Purpose::Message(_, context, _, messaging::Work::History)
             if self.history.get(context).is_some_and(|h| h.loaded && h.latest.is_none()));
+        let priority = match &command {
+            RuntimeCommand::Request {
+                request:
+                    ProtocolRequest::Content {
+                        command:
+                            protocol::content::ContentCommand::Asset(
+                                protocol::content::AssetRequest::Attachment { large: true, .. },
+                            ),
+                        ..
+                    },
+                ..
+            } => 0,
+            RuntimeCommand::Request {
+                request:
+                    ProtocolRequest::Content {
+                        command:
+                            protocol::content::ContentCommand::Asset(_)
+                            | protocol::content::ContentCommand::RevalidateAvatar(_)
+                            | protocol::content::ContentCommand::SelfProfile
+                            | protocol::content::ContentCommand::RevalidateProfile,
+                        ..
+                    }
+                    | ProtocolRequest::ResolveReference { .. }
+                    | ProtocolRequest::PollTyping(_),
+                ..
+            } => 2,
+            RuntimeCommand::Request {
+                request:
+                    ProtocolRequest::Content {
+                        command:
+                            protocol::content::ContentCommand::Video { .. }
+                            | protocol::content::ContentCommand::VoiceAudio { .. }
+                            | protocol::content::ContentCommand::DownloadCloudFile { .. },
+                        ..
+                    },
+                ..
+            } => 0,
+            RuntimeCommand::Request {
+                request: ProtocolRequest::Content { operation, .. },
+                ..
+            } => self.content_owner.priority(*operation),
+            _ => purpose.priority(),
+        };
+        if priority == 2
+            && let RuntimeCommand::Request { scope, .. } = &command
+            && !self.background.background_ready(*scope, Instant::now())
+        {
+            return Err(ErrorKind::Busy.into());
+        }
         let result = (|| {
             if self.call_actions.update_sealed() {
                 return Err(ErrorKind::Busy.into());
             }
-            if self.pending.len() >= 16 {
+            // Preserve admission for interactive work even when disposable
+            // image/history discovery fills its smaller lane.
+            let capacity = match priority {
+                2 => 10,
+                1 => 14,
+                _ => 16,
+            };
+            if self.pending.len() >= capacity {
                 return Err(ErrorKind::Busy.into());
             }
             let next = self
@@ -247,7 +436,15 @@ impl Accounts {
             self.connection
                 .as_mut()
                 .map_err(|e| *e)?
-                .try_submit(id, command)?;
+                .try_submit_priority(
+                    id,
+                    command,
+                    match priority {
+                        2 => talk_adapters::identity::RequestPriority::Background,
+                        1 => talk_adapters::identity::RequestPriority::Visible,
+                        _ => talk_adapters::identity::RequestPriority::User,
+                    },
+                )?;
             self.next_request = next;
             self.pending.push(Pending { id, purpose });
             Ok(id)
@@ -283,6 +480,44 @@ impl Accounts {
         purpose: Purpose,
     ) -> Result<(), SubmitError> {
         self.current(scope)?;
+        let priority = purpose.priority();
+        if priority == 2 {
+            if !self.background.background_ready(scope, Instant::now())
+                || self
+                    .pending
+                    .iter()
+                    .any(|p| p.purpose.account() == Some(scope) && p.purpose.priority() < priority)
+                || self.pending.len() >= 8
+            {
+                return Err(SubmitError::Busy);
+            }
+        } else if let Ok(connection) = &mut self.connection {
+            for pending in &self.pending {
+                // Cancel only disposable reads. Durable work, call signaling
+                // and mutations retain their owners and uncertainty protocol.
+                if pending.purpose.account() == Some(scope)
+                    && pending.purpose.priority() > priority
+                    && (matches!(
+                        pending.purpose,
+                        Purpose::Message(_, _, _, messaging::Work::Prefetch)
+                    ) || pending.purpose.room() != self.snapshot.selected)
+                    && matches!(
+                        pending.purpose,
+                        Purpose::Message(
+                            _,
+                            _,
+                            _,
+                            messaging::Work::Prefetch
+                                | messaging::Work::Latest
+                                | messaging::Work::Poll
+                                | messaging::Work::Metadata
+                        )
+                    )
+                {
+                    let _ = connection.cancel_request(pending.id);
+                }
+            }
+        }
         self.admit(RuntimeCommand::Request { scope, request }, purpose)
             .map(|_| ())
             .map_err(submit_error)
@@ -299,8 +534,12 @@ impl Accounts {
         self.dirty = true;
     }
     fn clear_content(&mut self) {
+        self.retire_references();
         self.clear_attachment_work();
         self.cancel_csv_file();
+        self.avatar_picker = None;
+        self.breakout_leave = None;
+        self.breakout_observation = None;
         self.queued_read.clear();
         self.clear_content_assets();
         self.picker = None;
@@ -318,7 +557,35 @@ impl Accounts {
         if self.snapshot.active_account == scope {
             return;
         }
+        if let Some(context) = self.snapshot.selected
+            && let Some(key) = self.cache.stable_room(context).or_else(|| {
+                self.snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .find(|r| r.context == context)
+                    .and_then(|r| r.navigation_key.clone())
+            })
+        {
+            self.cache.remember_selection(context.account.account, key);
+        }
         self.snapshot.active_account = scope;
+        self.thread_refresh_due = None;
+        self.snapshot.threads = talk_core::ui::presentation::ThreadList {
+            account: scope,
+            ..Default::default()
+        };
+        self.retire_references();
+        self.reference_owner = references::Owner::default();
+        self.account_search = None;
+        self.account_search_retry = None;
+        self.snapshot.search_panel = None;
+        self.snapshot.discover_panel = scope.map(discover::empty_panel);
+        self.discovery_retry = None;
+        self.discovery_join = None;
+        self.discover_probe_generation = self.discover_probe_generation.saturating_add(1);
+        self.discover_probe =
+            scope.map(|scope| discover::Probe::new(scope, self.discover_probe_generation));
         self.snapshot.create_panel = scope.map(talk_core::ui::conversation::CreatePanel::new);
         self.snapshot.conversations = scope
             .and_then(|s| self.background.account(s))
@@ -338,6 +605,8 @@ impl Accounts {
         self.snapshot.tag_state = ContentState::Unconfigured;
         self.load_tags = None;
         self.clear_content();
+        self.project_account_reminders();
+        self.project_federation();
         self.load_rooms = scope;
         self.touch();
     }
@@ -480,6 +749,10 @@ impl Accounts {
         let admitted = self.snapshot.accounts.as_slice();
         self.preferences
             .retain(|p| admitted.iter().any(|a| a.scope == p.scope));
+        self.status_pending
+            .retain(|(scope, _, _)| admitted.iter().any(|a| a.scope == *scope));
+        self.message_pending
+            .retain(|(scope, _)| admitted.iter().any(|a| a.scope == *scope));
         self.unresolved
             .retain(|u| admitted.iter().any(|a| a.scope == u.context.account));
         if self.snapshot.active_account.is_none()
@@ -492,7 +765,59 @@ impl Accounts {
             self.account_load_failed(error);
         }
     }
+    fn network_resumed(&mut self, notify: bool) {
+        if let Ok(connection) = &mut self.connection {
+            if notify {
+                connection.network_changed();
+            }
+            self.network_revision = connection.network_revision();
+            for pending in &self.pending {
+                if matches!(
+                    pending.purpose,
+                    Purpose::Reference(..)
+                        | Purpose::Message(
+                            _,
+                            _,
+                            _,
+                            messaging::Work::Poll
+                                | messaging::Work::Latest
+                                | messaging::Work::Prefetch
+                                | messaging::Work::Metadata
+                        )
+                ) || matches!(pending.purpose,Purpose::Content(id) if self.content_owner.disposable(id))
+                {
+                    let _ = connection.cancel_request(pending.id);
+                }
+            }
+        }
+        if let Some(context) = self.snapshot.selected {
+            self.history.request_catchup(context);
+        }
+        self.message_poll_at = Instant::now();
+        self.background.resume(Instant::now());
+        self.touch();
+    }
+    // Prime nonblocking account/cache admission before native window/GPU setup.
+    // Workers retain all I/O; the regular presentation tick takes over afterward.
+    pub(in crate::composition) fn prepare_startup(&mut self) {
+        self.tick();
+    }
     fn tick(&mut self) {
+        let wall = std::time::SystemTime::now();
+        if wall
+            .duration_since(self.last_tick)
+            .is_ok_and(|gap| gap > Duration::from_secs(5))
+        {
+            self.network_resumed(true);
+        }
+        self.last_tick = wall;
+        if self
+            .connection
+            .as_ref()
+            .is_ok_and(|connection| connection.network_revision() != self.network_revision)
+        {
+            self.network_resumed(false);
+        }
         self.poll_csv_file();
         let update = match &mut self.connection {
             Ok(c) => c.poll(self.cursor),
@@ -516,6 +841,7 @@ impl Accounts {
                 self.account_load_failed(error);
             }
         }
+        self.expire_cached_presence();
         if let Some((request, deadline, choice)) = self.login.as_ref().and_then(|login| {
             login
                 .automatic_save_pending
@@ -535,16 +861,30 @@ impl Accounts {
         }
         self.tick_removal();
         self.load_outbox();
+        self.tick_status();
         self.tick_outbox();
         // A deliberate send gets the next free admission before asset/poll work.
         self.tick_queued_send(Instant::now());
         self.tick_queued_read(Instant::now());
+        self.poll_messages();
         self.tick_content();
         self.tick_file_work();
+        self.tick_account_search();
+        self.tick_discovery_probe();
+        self.tick_discovery_retry();
         self.tick_background();
+        self.tick_typing();
+        self.tick_thread_refresh(Instant::now());
+        self.tick_account_reminders();
+        self.tick_notification_navigation();
+        self.tick_federation();
+        self.tick_translations();
+        self.tick_summary();
+        self.tick_breakout_leave();
         self.tick_calls();
-        self.poll_messages();
         self.tick_prefetch();
+        self.tick_participant_index();
+        self.tick_references();
         if let Some(scope) = self.load_tags
             && self
                 .request(scope, ProtocolRequest::ReadTags, Purpose::Tags(scope))
@@ -654,41 +994,122 @@ impl Accounts {
             } else {
                 done.result.clone()
             };
+        if let Some(scope) = done
+            .captured_scope
+            .filter(|_| done.scope_is_current && !done.cancel_requested)
+        {
+            let observed = match &result {
+                Err(IdentityError::Request(
+                    ErrorKind::Transport
+                    | ErrorKind::Deadline
+                    | ErrorKind::ServerUnavailable
+                    | ErrorKind::RateLimited,
+                )) => Some(false),
+                Ok(RuntimeReply::Protocol(
+                    ProtocolReply::Conversations(_) | ProtocolReply::Messaging { .. },
+                )) => Some(true),
+                _ => None,
+            };
+            if let Some(success) = observed {
+                self.background
+                    .transport_result(scope, done.request.0, success, Instant::now());
+            }
+        }
         match purpose {
-            Purpose::Outbox(work) => self.complete_outbox_data(work,result),
-            Purpose::Data(work) => self.complete_data(work,result),
+            Purpose::Outbox(work) => self.complete_outbox_data(work, result),
+            Purpose::QueuedSetting(context, operation) => {
+                if done.cancel_requested || !done.scope_is_current {
+                    self.outbox.lost_scope(operation);
+                } else {
+                    self.complete_queued_setting(context, operation, result);
+                }
+            }
+            Purpose::Data(work) => self.complete_data(work, result),
             Purpose::Content(operation) => self.complete_content(operation, result),
             Purpose::Files(work) => self.complete_file_work(work, result),
-            Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
-            Purpose::Room(request, context, operation, work) => self.complete_room(request, context, operation, work, result),
+            Purpose::Create(request, account, work) => {
+                self.complete_creation(request, account, work, result)
+            }
+            Purpose::Search(request, account, append) => {
+                self.complete_account_search(request, account, append, result)
+            }
+            Purpose::Discover(request, account, joining) => {
+                self.complete_discovery(request, account, joining, result)
+            }
+            Purpose::DiscoverProbe(account, generation) => {
+                self.complete_discovery_probe(account, generation, result)
+            }
+            Purpose::ParticipantIndex(context, generation) => {
+                self.complete_participant_index(context, generation, result)
+            }
+            Purpose::Reference(context, message, ordinal, generation) => {
+                self.complete_reference(context, message, ordinal, generation, result)
+            }
+            Purpose::Room(request, context, operation, work) => {
+                self.complete_room(request, context, operation, work, result)
+            }
             Purpose::Message(request, context, operation, work) => {
                 self.complete_message((request, done.request.0), context, operation, work, result);
                 self.cache_history(context);
-            },
+            }
             Purpose::Call(scope) => self.complete_call(scope, result),
+            Purpose::Typing(context, work) => self.complete_typing(context, work, result),
+            Purpose::BreakoutLeave(scope, request, context, target, assigned) => {
+                self.complete_breakout_leave(scope, request, context, target, assigned, result)
+            }
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
-            Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
+            Purpose::MessageNotifications(scope) => {
+                self.complete_message_notifications(scope, result)
+            }
+            Purpose::AccountReminders(scope, version) => {
+                self.complete_account_reminders(scope, version, result)
+            }
+            Purpose::FederationInvitations(scope, version) => {
+                self.complete_federation(scope, version, result)
+            }
+            Purpose::FederationChange(scope, operation, invitation) => {
+                self.complete_federation_change(scope, operation, invitation, result)
+            }
             Purpose::LiveEvents(scope) => {
-                if done.captured_scope != Some(scope) || done.cancel_requested || !done.scope_is_current {
+                if done.captured_scope != Some(scope)
+                    || done.cancel_requested
+                    || !done.scope_is_current
+                {
                     return;
                 }
                 // A mailbox drain changes scheduling only, not the visible snapshot.
                 return self.complete_live_events(scope, result);
             }
             Purpose::Login(request, work) => {
-                let Some(login) = self.login.as_ref().filter(|l| l.request == request) else { return; };
-                let current_work = match work {
-                    LoginWork::Begin => done.request == login.begin && self.snapshot.login.phase == LoginPhase::Validating,
-                    LoginWork::Poll | LoginWork::Browser => self.snapshot.login.phase == LoginPhase::BrowserWaiting && !login.automatic_save_attempted,
-                    LoginWork::Save => login.save_request == Some(done.request) && self.snapshot.login.storage == StorageStatus::Saving,
+                let Some(login) = self.login.as_ref().filter(|l| l.request == request) else {
+                    return;
                 };
-                if !current_work || done.cancel_requested
+                let current_work = match work {
+                    LoginWork::Begin => {
+                        done.request == login.begin
+                            && self.snapshot.login.phase == LoginPhase::Validating
+                    }
+                    LoginWork::Poll | LoginWork::Browser => {
+                        self.snapshot.login.phase == LoginPhase::BrowserWaiting
+                            && !login.automatic_save_attempted
+                    }
+                    LoginWork::Save => {
+                        login.save_request == Some(done.request)
+                            && self.snapshot.login.storage == StorageStatus::Saving
+                    }
+                };
+                if !current_work
+                    || done.cancel_requested
                     || (done.captured_scope.is_some() && !done.scope_is_current)
-                    || login.reservation.is_some_and(|account| done.account != Some(account))
+                    || login
+                        .reservation
+                        .is_some_and(|account| done.account != Some(account))
                     || login.owner.is_some_and(|(account, attempt)| {
                         done.account != Some(account) || done.attempt != Some(attempt)
                     })
-                { return; }
+                {
+                    return;
+                }
                 if work == LoginWork::Begin
                     && let Some(login) = &mut self.login
                 {
@@ -700,33 +1121,64 @@ impl Accounts {
                     diagnostics::record(event);
                 }
                 match result {
-                    Ok(RuntimeReply::Begun { account, attempt } | RuntimeReply::Pending { account, attempt }) => {
-                        if self.login.as_ref().is_some_and(|l| l.automatic_save_attempted) { return; }
+                    Ok(
+                        RuntimeReply::Begun { account, attempt }
+                        | RuntimeReply::Pending { account, attempt },
+                    ) => {
+                        if self
+                            .login
+                            .as_ref()
+                            .is_some_and(|l| l.automatic_save_attempted)
+                        {
+                            return;
+                        }
                         self.failures.retain(|(id, _)| *id != account);
-                        if let Some(login) = &mut self.login { login.owner = Some((account, attempt)); login.poll_at = Instant::now() + Duration::from_secs(1); }
+                        if let Some(login) = &mut self.login {
+                            login.owner = Some((account, attempt));
+                            login.poll_at = Instant::now() + Duration::from_secs(1);
+                        }
                         self.snapshot.login.phase = LoginPhase::BrowserWaiting;
                     }
                     Ok(RuntimeReply::Authorized { account, attempt }) => {
-                        let Some(login) = &mut self.login else { return; };
-                        if login.automatic_save_attempted || login.owner != Some((account, attempt)) { return; }
+                        let Some(login) = &mut self.login else {
+                            return;
+                        };
+                        if login.automatic_save_attempted || login.owner != Some((account, attempt))
+                        {
+                            return;
+                        }
                         // Exactly one automatic storage attempt. The identity owner still
                         // commits intent, reconciles uncertainty and authorizes activation.
                         login.automatic_save_attempted = true;
-                        login.automatic_save_pending = Some(Instant::now() + Duration::from_secs(5));
+                        login.automatic_save_pending =
+                            Some(Instant::now() + Duration::from_secs(5));
                         self.snapshot.login.phase = LoginPhase::ChooseStorage;
                         self.snapshot.login.storage = StorageStatus::Saving;
                     }
                     Ok(RuntimeReply::Active { summary, .. }) => {
-                        if self.login.as_ref().and_then(|l| l.owner).is_none_or(|(account, _)| account != summary.account)
-                            || !done.scope_is_current { return; }
+                        if self
+                            .login
+                            .as_ref()
+                            .and_then(|l| l.owner)
+                            .is_none_or(|(account, _)| account != summary.account)
+                            || !done.scope_is_current
+                        {
+                            return;
+                        }
                         // The accepted activation now belongs to the account, not this
                         // login screen. Starting another login must not cancel it.
-                        if let Some(login) = &mut self.login { login.save_request = None; }
-                        self.snapshot.login.phase = LoginPhase::Ready; self.snapshot.login.storage = storage(&summary);
+                        if let Some(login) = &mut self.login {
+                            login.save_request = None;
+                        }
+                        self.snapshot.login.phase = LoginPhase::Ready;
+                        self.snapshot.login.storage = storage(&summary);
                         self.snapshot.login.storage_failure = None;
-                        self.snapshot.login.account_label = summary.account_label.clone().unwrap_or_else(|| text(""));
+                        self.snapshot.login.account_label =
+                            summary.account_label.clone().unwrap_or_else(|| text(""));
                         // Keep the normalized destination selected before browser handoff.
-                        if let Some(scope) = summary.scope { self.select(Some(scope)); }
+                        if let Some(scope) = summary.scope {
+                            self.select(Some(scope));
+                        }
                     }
                     Ok(RuntimeReply::BrowserOpened { .. }) => (),
                     Err(IdentityError::Request(ErrorKind::Conflict)) if work == LoginWork::Poll => {
@@ -737,86 +1189,228 @@ impl Accounts {
                         self.snapshot.login.storage_failure = None;
                     }
                     Err(error) => {
-                        let expired = work == LoginWork::Poll && error == IdentityError::Request(ErrorKind::Deadline);
-                        let failure = if expired { LoginFailure::Expired } else { login_error(error) };
+                        let expired = work == LoginWork::Poll
+                            && error == IdentityError::Request(ErrorKind::Deadline);
+                        let failure = if expired {
+                            LoginFailure::Expired
+                        } else {
+                            login_error(error)
+                        };
                         if let Some(id) = done.account {
                             self.failures.retain(|(account, _)| *account != id);
-                            if self.failures.len() < 8 { self.failures.push((id, failure)); }
+                            if self.failures.len() < 8 {
+                                self.failures.push((id, failure));
+                            }
                         }
                         self.login_failed(error);
-                        if expired { self.snapshot.login.phase = LoginPhase::Failed(failure); }
-                    },
+                        if expired {
+                            self.snapshot.login.phase = LoginPhase::Failed(failure);
+                        }
+                    }
                     _ => self.login_failed(IdentityError::Request(ErrorKind::Malformed)),
                 }
             }
             Purpose::Restore(id) | Purpose::RestoreAutomatic(id) => {
                 let error = result.as_ref().err().copied();
-                diagnostics::record(Diagnostic { profile: None,
+                diagnostics::record(Diagnostic {
+                    profile: None,
                     request: done.request.0,
                     operation: DiagnosticOperation::AccountRestore,
-                    outcome: if matches!(&result, Ok(RuntimeReply::Active { .. })) { DiagnosticOutcome::Accepted } else { DiagnosticOutcome::Failed },
+                    outcome: if matches!(&result, Ok(RuntimeReply::Active { .. })) {
+                        DiagnosticOutcome::Accepted
+                    } else {
+                        DiagnosticOutcome::Failed
+                    },
                     error: error.map(diagnostic_error),
                     storage: error.and_then(diagnostic_storage),
                     count: 0,
                 });
                 match result {
-                    Ok(RuntimeReply::Active { summary, .. }) => { if let Some(scope) = summary.scope
-                        && done.scope_is_current && self.current(scope).is_ok()
-                        && (matches!(purpose, Purpose::Restore(_)) || self.snapshot.active_account.is_none())
-                        { self.select(Some(scope)); } }
-                    Err(error) => { self.failures.retain(|(a, _)| *a != id); if self.failures.len() < 8 { self.failures.push((id, login_error(error))); } }
+                    Ok(RuntimeReply::Active { summary, .. }) => {
+                        if let Some(scope) = summary.scope
+                            && done.scope_is_current
+                            && self.current(scope).is_ok()
+                            && (matches!(purpose, Purpose::Restore(_))
+                                || self.snapshot.active_account.is_none())
+                        {
+                            self.select(Some(scope));
+                        }
+                    }
+                    Err(error) => {
+                        self.failures.retain(|(a, _)| *a != id);
+                        if self.failures.len() < 8 {
+                            self.failures.push((id, login_error(error)));
+                        }
+                    }
                     _ => (),
                 }
             }
-            Purpose::Removal(request, account, step) => self.complete_removal(request, account, step, result),
+            Purpose::Removal(request, account, step) => {
+                self.complete_removal(request, account, step, result)
+            }
             Purpose::Rooms(scope) => self.complete_rooms(scope, result),
+            Purpose::Threads(scope, offset) => self.complete_threads(scope, offset, result),
             Purpose::Tags(scope) | Purpose::TagMutation(_, scope) => {
                 let completion = match result {
-                    Ok(RuntimeReply::Protocol(ProtocolReply::Tags(tags))) if tags.scope == scope => {
-                        if self.snapshot.active_account == Some(scope) { self.snapshot.tags = page(tags.tags.as_slice().iter().map(tag_view)); self.snapshot.tag_state = ContentState::Ready; }
+                    Ok(RuntimeReply::Protocol(ProtocolReply::Tags(tags)))
+                        if tags.scope == scope =>
+                    {
+                        if self.snapshot.active_account == Some(scope) {
+                            self.snapshot.tags = page(tags.tags.as_slice().iter().map(tag_view));
+                            self.snapshot.tag_state = ContentState::Ready;
+                        }
                         Completion::ServerAccepted
                     }
-                    Ok(RuntimeReply::Protocol(ProtocolReply::TagCreated(tag))) if tag.id.scope == scope => { self.load_tags = Some(scope); Completion::ServerAccepted }
-                    Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(row))) if row.id.account == scope.account => {
-                        if self.snapshot.active_account == Some(scope) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context.conversation == row.id { conversation(&row, scope) } else { r.clone() })); }
+                    Ok(RuntimeReply::Protocol(ProtocolReply::TagCreated(tag)))
+                        if tag.id.scope == scope =>
+                    {
+                        self.load_tags = Some(scope);
                         Completion::ServerAccepted
                     }
-                    Err(error) => { if self.snapshot.active_account == Some(scope) { self.snapshot.tag_state = content_error(error); } completion_error(error) }
+                    Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(row)))
+                        if row.id.account == scope.account =>
+                    {
+                        if self.snapshot.active_account == Some(scope) {
+                            self.snapshot.conversations =
+                                page(self.snapshot.conversations.as_slice().iter().map(|r| {
+                                    if r.context.conversation == row.id {
+                                        conversation_with_existing(&row, scope, r)
+                                    } else {
+                                        r.clone()
+                                    }
+                                }));
+                        }
+                        Completion::ServerAccepted
+                    }
+                    Err(error) => {
+                        if self.snapshot.active_account == Some(scope) {
+                            self.snapshot.tag_state = content_error(error);
+                        }
+                        completion_error(error)
+                    }
                     _ => Completion::Failed(UnavailableReason::Unsupported),
                 };
                 if let Purpose::TagMutation(request, _) = purpose {
-                    self.snapshot.organization_result = Some(OrganizationResult { request, account: scope, result: completion });
+                    self.snapshot.organization_result = Some(OrganizationResult {
+                        request,
+                        account: scope,
+                        result: completion,
+                    });
                     // Catalog changes can change room membership. Reconcile, never infer deletion.
-                    if self.snapshot.active_account == Some(scope) && completion == Completion::ServerAccepted { self.load_rooms = Some(scope); }
+                    if self.snapshot.active_account == Some(scope)
+                        && completion == Completion::ServerAccepted
+                    {
+                        self.load_rooms = Some(scope);
+                    }
                 }
             }
             Purpose::Mutation(request, context) => {
+                if self
+                    .optimistic_room
+                    .is_some_and(|p| p.request == request && p.context == context)
+                {
+                    self.optimistic_room = None;
+                }
                 let completion = match result {
-                    Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(row))) if row.id == context.conversation => {
-                        if self.snapshot.active_account == Some(context.account) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context == context { conversation(&row, context.account) } else { r.clone() })); }
+                    Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(row)))
+                        if row.id == context.conversation =>
+                    {
+                        if self.snapshot.active_account == Some(context.account) {
+                            self.snapshot.conversations =
+                                page(self.snapshot.conversations.as_slice().iter().map(|r| {
+                                    if r.context == context {
+                                        conversation_with_existing(&row, context.account, r)
+                                    } else {
+                                        r.clone()
+                                    }
+                                }));
+                        }
                         Completion::ServerAccepted
                     }
                     Err(error) => completion_error(error),
                     _ => Completion::Failed(UnavailableReason::Unsupported),
                 };
-                self.snapshot.mutation = Some(ConversationMutationResult { request, context, result: completion });
+                self.snapshot.mutation = Some(ConversationMutationResult {
+                    request,
+                    context,
+                    result: completion,
+                });
             }
             Purpose::Send(request, context, operation) => {
                 let error = result.as_ref().err().copied().map(diagnostic_error);
                 let completion = match result {
-                    Ok(RuntimeReply::Protocol(ProtocolReply::Send(receipt))) if receipt.operation == operation => match receipt.state { SendState::ServerAccepted(_) => Completion::ServerAccepted, SendState::Rejected => Completion::Failed(UnavailableReason::PermissionDenied), SendState::Uncertain => Completion::Uncertain },
+                    Ok(RuntimeReply::Protocol(ProtocolReply::Send(receipt)))
+                        if receipt.operation == operation =>
+                    {
+                        match receipt.state {
+                            SendState::ServerAccepted(_) => Completion::ServerAccepted,
+                            SendState::Rejected => {
+                                Completion::Failed(UnavailableReason::PermissionDenied)
+                            }
+                            SendState::Uncertain => Completion::Uncertain,
+                        }
+                    }
                     Err(error) => completion_error(error),
                     _ => Completion::Uncertain,
                 };
-                diagnostics::record(Diagnostic { profile: None, request: done.request.0, operation: DiagnosticOperation::Send, outcome: diagnostic_completion(completion), count: 0, error, storage: None });
-                if completion != Completion::Uncertain { self.unresolved.retain(|u| u.operation != operation); }
-                self.snapshot.submission = Some(SubmissionResult { request, context, result: completion });
+                diagnostics::record(Diagnostic {
+                    profile: None,
+                    request: done.request.0,
+                    operation: DiagnosticOperation::Send,
+                    outcome: diagnostic_completion(completion),
+                    count: 0,
+                    error,
+                    storage: None,
+                });
+                if completion != Completion::Uncertain {
+                    self.unresolved.retain(|u| u.operation != operation);
+                }
+                self.snapshot.submission = Some(SubmissionResult {
+                    request,
+                    context,
+                    result: completion,
+                });
             }
             Purpose::Preferences(scope, request) => {
+                if self.complete_status(scope, request, &result) {
+                    return;
+                }
                 if let Some(cache) = self.preferences.iter_mut().find(|p| p.scope == scope && matches!(p.state, AccountPreferenceState::Loading { request: r } | AccountPreferenceState::Saving { request: r } if r == request)) {
                     match result {
-                        Ok(RuntimeReply::Protocol(ProtocolReply::Preferences(reply))) if reply.request == request && reply.values.scope == scope => { cache.values = Some(reply.values); cache.state = AccountPreferenceState::Ready; }
-                        Err(error) => cache.state = AccountPreferenceState::Failed { request, error: preference_error(error) },
+                        Ok(RuntimeReply::Protocol(ProtocolReply::Preferences(reply))) if reply.request == request && reply.values.scope == scope => {
+                            let status_resolved = reply.values.user_status_observed || reply.values.user_status_enabled != Some(true);
+                            let awaiting_status = self.status_pending.iter().any(|(pending_scope, _, _)| *pending_scope == scope)
+                                || self.message_pending.iter().any(|(pending_scope, _)| *pending_scope == scope);
+                            if status_resolved {
+                                self.status_pending.retain(|(pending_scope, _, _)| *pending_scope != scope);
+                                self.message_pending.retain(|(pending_scope, _)| *pending_scope != scope);
+                            }
+                            let mut values = reply.values;
+                            if values.user_status_enabled == Some(true) && !values.user_status_observed
+                                && let Some(previous) = cache.values.as_ref().filter(|v| v.scope == scope && v.user_status_enabled == Some(true) && v.user_status_observed)
+                            {
+                                values.user_presence = previous.user_presence;
+                                values.status_message = previous.status_message.clone();
+                                values.user_status_observed = true;
+                            }
+                            if values.user_status_enabled == Some(true) && values.predefined_statuses.is_none()
+                                && let Some(previous) = cache.values.as_ref().filter(|v| v.scope == scope && v.user_status_enabled == Some(true))
+                            {
+                                values.predefined_statuses = previous.predefined_statuses.clone();
+                            }
+                            cache.values = Some(values);
+                            cache.state = if awaiting_status && !status_resolved {
+                                AccountPreferenceState::Failed { request, error: AccountPreferenceError::Uncertain }
+                            } else { AccountPreferenceState::Ready };
+                        }
+                        Err(error) => {
+                            let error = preference_error(error);
+                            if !matches!(error, AccountPreferenceError::Network | AccountPreferenceError::Uncertain) {
+                                self.status_pending.retain(|(pending_scope, pending_request, _)| *pending_scope != scope || *pending_request != request);
+                                self.message_pending.retain(|(pending_scope, pending_request)| *pending_scope != scope || *pending_request != request);
+                            }
+                            cache.state = AccountPreferenceState::Failed { request, error };
+                        },
                         _ => cache.state = AccountPreferenceState::Failed { request, error: AccountPreferenceError::Unavailable },
                     }
                 }
@@ -839,6 +1433,30 @@ impl Accounts {
         &mut self,
         command: AccountPreferenceCommand,
     ) -> Result<(), AccountPreferenceError> {
+        let status_change = match &command {
+            AccountPreferenceCommand::Set {
+                change:
+                    change @ (talk_core::preferences::account::AccountPreferenceChange::UserPresence(_)
+                    | talk_core::preferences::account::AccountPreferenceChange::StatusMessage(_)),
+                ..
+            } => Some(change.clone()),
+            _ => None,
+        };
+        let message_change = matches!(
+            &command,
+            AccountPreferenceCommand::Set {
+                change: talk_core::preferences::account::AccountPreferenceChange::StatusMessage(_),
+                ..
+            }
+        );
+        let status_choice = match &command {
+            AccountPreferenceCommand::Set {
+                change:
+                    talk_core::preferences::account::AccountPreferenceChange::UserPresence(choice),
+                ..
+            } => Some(*choice),
+            _ => None,
+        };
         let (scope, request, protocol, state) = match command {
             AccountPreferenceCommand::Load { scope, request } => (
                 scope,
@@ -861,24 +1479,46 @@ impl Accounts {
             .map_err(|_| AccountPreferenceError::Stale)?;
         if self.preferences.iter().any(|p| {
             p.scope == scope
-                && matches!(
-                    p.state,
-                    AccountPreferenceState::Loading { .. } | AccountPreferenceState::Saving { .. }
-                )
+                && (matches!(p.state, AccountPreferenceState::Saving { .. })
+                    || matches!(p.state, AccountPreferenceState::Loading { .. })
+                        && status_choice.is_none()
+                        && !message_change)
         }) {
             return Err(AccountPreferenceError::Busy);
         }
         if self.preferences.len() >= 8 && !self.preferences.iter().any(|p| p.scope == scope) {
             return Err(AccountPreferenceError::Busy);
         }
-        self.admit(
+        let submitted = self.admit(
             RuntimeCommand::Request {
                 scope,
                 request: protocol,
             },
             Purpose::Preferences(scope, request),
-        )
-        .map_err(preference_error)?;
+        );
+        match submitted {
+            Ok(_) => (),
+            Err(IdentityError::Request(ErrorKind::Busy)) if status_change.is_some() => (),
+            Err(error) => return Err(preference_error(error)),
+        }
+        if let Some(change) = status_change {
+            self.status_retry.retain(|r| r.scope != scope);
+            let mut retry = status::Retry::new(scope, request, change);
+            if submitted.is_err() {
+                retry.queued();
+            }
+            self.status_retry.push(retry);
+        }
+        if message_change {
+            self.message_pending
+                .retain(|(pending_scope, _)| *pending_scope != scope);
+            self.message_pending.push((scope, request));
+        }
+        if let Some(choice) = status_choice {
+            self.status_pending
+                .retain(|(pending_scope, _, _)| *pending_scope != scope);
+            self.status_pending.push((scope, request, choice));
+        }
         if let Some(cache) = self.preferences.iter_mut().find(|p| p.scope == scope) {
             cache.state = state;
         } else {
@@ -890,6 +1530,23 @@ impl Accounts {
         }
         Ok(())
     }
+    fn suppress_account_notifications(&self, scope: AccountScope) -> bool {
+        use talk_core::preferences::account::StatusChoice;
+        self.status_pending
+            .iter()
+            .any(|(pending_scope, _, choice)| {
+                *pending_scope == scope && *choice == StatusChoice::DoNotDisturb
+            })
+            || self.preferences.iter().any(|snapshot| {
+                snapshot.scope == scope
+                    && snapshot.values.as_ref().is_some_and(|values| {
+                        values.user_status_enabled == Some(true)
+                            && values.user_status_observed
+                            && values.user_presence == Some(StatusChoice::DoNotDisturb)
+                    })
+            })
+    }
+
     fn cancel_login(&mut self) {
         self.login_retry_server = None;
         if let Some(login) = self.login.take()
@@ -934,6 +1591,19 @@ impl Accounts {
         });
     }
     fn open(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
+        if self
+            .discovery_join
+            .as_ref()
+            .is_some_and(|join| join.context == context)
+        {
+            if self.snapshot.selected != Some(context) {
+                self.clear_content();
+                self.snapshot.selected = Some(context);
+                self.snapshot.content = ContentState::Loading;
+                self.touch();
+            }
+            return Ok(());
+        }
         if self.cache.is_presentation(context) {
             self.select_conversation(context)?;
             return Ok(());
@@ -963,10 +1633,13 @@ impl Accounts {
         if self.snapshot.selected == Some(context) {
             return Ok(false);
         }
+        self.remember_poll_room();
         self.clear_content();
         self.snapshot.selected = Some(context);
         self.restore_room_metadata(context);
         self.restore_messages(context);
+        self.snapshot.content_panel.context = Some(context);
+        self.restore_poll_room(context);
         self.touch();
         Ok(true)
     }
@@ -975,6 +1648,22 @@ impl Accounts {
             return result;
         }
         match intent {
+            UiIntent::Typing { context, active } => self.typing_activity(context, active)?,
+            UiIntent::RefreshThreads(scope) => self.refresh_threads(scope)?,
+            UiIntent::PageThreads { account, offset } => self.page_threads(account, offset)?,
+            UiIntent::MarkRoomUnread { request, context } => {
+                self.queue_room_unread(request, context)?;
+            }
+            UiIntent::Discover {
+                account,
+                request,
+                action,
+            } => self.submit_discovery(account, request, action)?,
+            UiIntent::AccountSearch {
+                account,
+                request,
+                action,
+            } => self.submit_account_search(account, request, action)?,
             UiIntent::FinishFileExport { request, context } => {
                 self.finish_file_export(request, context)
             }
@@ -985,6 +1674,14 @@ impl Accounts {
                 ordinal,
             } => {
                 self.open_message_link(context, message, source, ordinal)?;
+            }
+            UiIntent::OpenLocation {
+                context,
+                message,
+                placeholder,
+                id,
+            } => {
+                self.open_location(context, message, placeholder, id)?;
             }
             UiIntent::RemoveAccount {
                 request,
@@ -1290,12 +1987,50 @@ impl Accounts {
                 self.failures.retain(|(a, _)| *a != account);
             }
             UiIntent::SelectAccount(scope) => {
+                self.reminders.cancel_navigation();
                 if !self.cache.is_local(scope) {
                     self.current(scope)?;
                 }
                 self.select(Some(scope));
             }
-            UiIntent::OpenConversation(context) => self.open(context)?,
+            UiIntent::OpenConversation(context) => {
+                self.reminders.cancel_navigation();
+                self.open(context)?;
+            }
+            UiIntent::RefreshAccountReminders(scope) => {
+                if self.snapshot.active_account != Some(scope) {
+                    return Err(SubmitError::StaleScope);
+                }
+                self.refresh_account_reminders(scope);
+            }
+            UiIntent::RefreshFederationInvitations(scope) => {
+                if self.snapshot.active_account != Some(scope) {
+                    return Err(SubmitError::StaleScope);
+                }
+                self.refresh_federation(scope);
+            }
+            UiIntent::ChangeFederationInvitation {
+                scope,
+                invitation,
+                accept,
+            } => {
+                self.change_federation(scope, invitation, accept)?;
+            }
+            UiIntent::OpenReminder {
+                request,
+                context,
+                message,
+            } => {
+                self.reminders.cancel_navigation();
+                self.open_reminder(request, context, message)?;
+            }
+            UiIntent::OpenNotificationMessage {
+                request,
+                context,
+                message,
+            } => {
+                self.open_notification_message(request, context, message)?;
+            }
             UiIntent::Refresh(context) => {
                 self.current(context.account)?;
                 let already_selected = self.snapshot.selected == Some(context);
@@ -1321,26 +2056,40 @@ impl Accounts {
                 request,
                 context,
                 archived,
-            } => self.mutate(
+            } => match self.queue_message_action(
                 request,
                 context,
-                ProtocolRequest::SetArchived {
-                    conversation: context.conversation,
-                    archived,
-                },
-            )?,
+                &talk_core::ui::messaging::MessageAction::SetArchived(archived),
+            ) {
+                Some(result) => result?,
+                None => self.mutate(
+                    request,
+                    context,
+                    ProtocolRequest::SetArchived {
+                        conversation: context.conversation,
+                        archived,
+                    },
+                )?,
+            },
             UiIntent::SetFavorite {
                 request,
                 context,
                 favorite,
-            } => self.mutate(
+            } => match self.queue_message_action(
                 request,
                 context,
-                ProtocolRequest::SetFavorite {
-                    conversation: context.conversation,
-                    favorite,
-                },
-            )?,
+                &talk_core::ui::messaging::MessageAction::SetFavorite(favorite),
+            ) {
+                Some(result) => result?,
+                None => self.mutate(
+                    request,
+                    context,
+                    ProtocolRequest::SetFavorite {
+                        conversation: context.conversation,
+                        favorite,
+                    },
+                )?,
+            },
             UiIntent::AcknowledgeMutation { request, context } => {
                 if self
                     .snapshot
@@ -1406,6 +2155,10 @@ impl Accounts {
                     .logout(account)
                     .map_err(submit_error)?;
                 self.preferences.retain(|p| p.scope.account != account);
+                self.status_pending
+                    .retain(|(scope, _, _)| scope.account != account);
+                self.message_pending
+                    .retain(|(scope, _)| scope.account != account);
                 self.history.remove_account(account);
                 self.outbox.retire_account(account);
                 if self
@@ -1435,17 +2188,62 @@ impl Accounts {
         {
             return Err(SubmitError::Busy);
         }
+        let optimistic = match &protocol {
+            ProtocolRequest::SetFavorite { favorite, .. } => Some(OptimisticRoom {
+                request,
+                context,
+                favorite: Some(*favorite),
+                archived: None,
+            }),
+            ProtocolRequest::SetArchived { archived, .. } => Some(OptimisticRoom {
+                request,
+                context,
+                favorite: None,
+                archived: Some(*archived),
+            }),
+            _ => None,
+        };
         self.request(
             context.account,
             protocol,
             Purpose::Mutation(request, context),
-        )
+        )?;
+        self.optimistic_room = optimistic;
+        Ok(())
     }
 }
 pub struct Port(pub Rc<RefCell<Accounts>>);
 impl NativeDesktopPort for Port {
+    fn composer_drafts(
+        &self,
+        context: ConversationRef,
+    ) -> Page<talk_core::ui::messaging::ComposerDraft, 32> {
+        self.0.borrow().composer_drafts(context)
+    }
+    fn save_composer_draft(
+        &mut self,
+        context: ConversationRef,
+        draft: talk_core::ui::messaging::ComposerDraft,
+    ) -> Result<(), SubmitError> {
+        self.0.borrow_mut().save_composer_draft(context, draft)
+    }
+
+    #[cfg(debug_assertions)]
+    fn enable_latency_probe(&mut self) {
+        self.0.borrow_mut().latency.enable();
+    }
+    #[cfg(debug_assertions)]
+    fn observe_rendered(&mut self, snapshot: &PresentationSnapshot) {
+        self.0.borrow_mut().latency.rendered(snapshot);
+    }
     fn try_submit(&mut self, intent: UiIntent) -> Result<(), SubmitError> {
-        self.0.borrow_mut().submit(intent)
+        let mut model = self.0.borrow_mut();
+        #[cfg(debug_assertions)]
+        let start = model.latency.intent(&intent, &model.snapshot);
+        model.submit(intent)?;
+        #[cfg(debug_assertions)]
+        model.latency.begin(start);
+        Ok(())
     }
     fn take_snapshot(&mut self) -> Option<PresentationSnapshot> {
         let mut model = self.0.borrow_mut();
@@ -1455,7 +2253,31 @@ impl NativeDesktopPort for Port {
         }
         model.dirty = false;
         model.snapshot.revision = model.snapshot.revision.saturating_add(1);
-        Some(model.snapshot.clone())
+        let mut snapshot = model.snapshot.clone();
+        model.project_room_unread(&mut snapshot);
+        model.project_thread_list(&mut snapshot);
+        model.project_queued_settings(&mut snapshot);
+        if let Some(pending) = model.optimistic_room {
+            pending.project(&mut snapshot);
+        }
+        model.markup.project(&mut snapshot);
+        Some(snapshot)
+    }
+}
+impl Accounts {
+    pub(super) fn voice_allowed(&self, context: ConversationRef) -> bool {
+        self.snapshot.selected == Some(context)
+            && self.snapshot.active_account == Some(context.account)
+            && self.snapshot.content == ContentState::Ready
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel
+                        .availability(talk_core::ui::messaging::MessageFeature::Voice)
+                        .enabled()
+                    && panel
+                        .availability(talk_core::ui::messaging::MessageFeature::Files)
+                        .enabled()
+            })
     }
 }
 fn page<T, const N: usize>(items: impl IntoIterator<Item = T>) -> Page<T, N> {
@@ -1540,6 +2362,7 @@ fn support(s: protocol::FeatureSupport) -> FeatureSupport {
 }
 fn conversation(r: &protocol::Conversation, scope: AccountScope) -> ConversationView {
     ConversationView {
+        action_error: None,
         context: ConversationRef {
             account: scope,
             conversation: r.id,
@@ -1557,6 +2380,11 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
             _ => ConversationKind::Unknown,
         },
         unread: r.unread_messages.unwrap_or(0),
+        unread_direct_mention: r.unread_direct_mention,
+        last_read_message: r.last_read_message.map(u128::from),
+        unread_mention: r.unread_mention,
+        notification_muted: r.notification_muted,
+        last_activity: r.last_activity,
         favorite: r.favorite,
         tags: r.tag_ids.as_ref().map(|tags| {
             page(tags.as_slice().iter().map(|id| TagRef {
@@ -1578,8 +2406,25 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         },
         archived: r.archived,
         archive: r.archive,
-        presence: Presence::Unknown,
+        presence: match r.user_status.as_ref().map(|status| status.presence) {
+            Some(protocol::UserPresence::Online) => Presence::Available,
+            Some(protocol::UserPresence::Away) => Presence::Away,
+            Some(protocol::UserPresence::DoNotDisturb) => Presence::DoNotDisturb,
+            Some(protocol::UserPresence::Offline | protocol::UserPresence::Invisible) => {
+                Presence::Offline
+            }
+            Some(protocol::UserPresence::Unknown) | None => Presence::Unknown,
+        },
+        status_icon: r
+            .user_status
+            .as_ref()
+            .and_then(|status| status.icon.clone()),
+        status_message: r
+            .user_status
+            .as_ref()
+            .and_then(|status| status.message.clone()),
         participants: None,
+        participant_names: Page::empty(),
         send: r.actions.send_message,
         attach: Decision::Unknown,
         draft_clipboard: if r.sensitive || r.classified || r.organization.classified == Some(true) {
@@ -1589,9 +2434,30 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         } else {
             Decision::Unknown
         },
-        call: Decision::Unknown,
+        call: r.actions.join_call,
+        call_active: r.call_active,
         call_scope: r.call_scope,
     }
+}
+
+// Single-room metadata and mutation replies do not request status. Preserve only
+// the current same-room observation; the next authoritative list can clear it.
+fn conversation_with_existing(
+    room: &protocol::Conversation,
+    scope: AccountScope,
+    existing: &ConversationView,
+) -> ConversationView {
+    let mut row = conversation(room, scope);
+    if room.user_status.is_none()
+        && row.context == existing.context
+        && row.kind == ConversationKind::Direct
+        && existing.kind == ConversationKind::Direct
+    {
+        row.presence = existing.presence;
+        row.status_icon = existing.status_icon.clone();
+        row.status_message = existing.status_message.clone();
+    }
+    row
 }
 
 impl Purpose {

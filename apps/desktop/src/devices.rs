@@ -1,5 +1,5 @@
-//! Local, explicitly requested device checks. One worker owns every native stream.
-//! No call grant, server, recording, or serialized media is involved. Composition
+//! Local, explicitly requested device checks and voice capture. One worker owns every
+//! native stream. No call grant, server, or serialized media is involved. Composition
 //! saves DevicePreferences through SettingsRuntime, then applies the same values
 //! here and to prejoin. A future MediaPort consumer must resolve selected_plan()
 //! again after its own call authority checks; UnconfiguredMedia stays unconfigured.
@@ -17,6 +17,8 @@ mod audio;
 mod call;
 mod camera;
 mod frames;
+mod screen;
+mod voice;
 pub use frames::VideoFrame;
 
 use std::sync::{
@@ -35,6 +37,29 @@ const KINDS: [DeviceKind; 3] = [
 const TICK: Duration = Duration::from_millis(33);
 const REFRESH: Duration = Duration::from_secs(2);
 static LEASE: AtomicU64 = AtomicU64::new(1);
+
+use talk_core::ui::content::{VoicePhase, VoiceSnapshot};
+struct VoiceSession {
+    context: talk_core::ui::presentation::ConversationRef,
+    signal: Arc<Signal>,
+    recording: Option<Arc<voice::Recording>>,
+    phase: VoicePhase,
+    cancel: bool,
+    failure: Option<DeviceError>,
+    started: Instant,
+    elapsed_ms: u64,
+    wave: Option<talk_core::protocol::content::VoiceBytes>,
+}
+impl VoiceSession {
+    /// Yield the microphone without discarding captured audio or an explicit
+    /// send. A separate cancel or permission failure still wins.
+    fn yield_capture(&mut self) {
+        if !matches!(self.phase, VoicePhase::Review | VoicePhase::Failed(_)) {
+            self.signal.revoke();
+            self.phase = VoicePhase::Stopping;
+        }
+    }
+}
 
 /// Preferences, never a capture permission. Missing explicit devices are retained
 /// and blocked, not silently replaced with a different physical device.
@@ -130,6 +155,7 @@ struct State {
     stop_all: bool,
     desired: [Option<Desired>; 3],
     frame: Option<Arc<VideoFrame>>,
+    voice: Option<VoiceSession>,
 }
 impl State {
     fn changed(&mut self) {
@@ -181,6 +207,7 @@ impl DeviceRuntime {
                 stop_all: false,
                 desired: [None, None, None],
                 frame: None,
+                voice: None,
             }),
             wake: Condvar::new(),
         });
@@ -255,6 +282,93 @@ impl DeviceRuntime {
             camera: state.snapshot.camera.clone(),
         }
     }
+    /// Admit one scoped capture only after an explicit user action.
+    pub fn start_voice(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+    ) -> Result<(), DeviceError> {
+        let mut state = self.shared.lock();
+        if state.snapshot.runtime != RuntimeState::Running
+            || state.voice.is_some()
+            || state.desired[0].is_some()
+            || !matches!(state.snapshot.microphone_preview, PreviewState::Stopped)
+            || state.media.as_ref().and_then(|m| m.capture()).is_some()
+        {
+            return Err(DeviceError::Unavailable);
+        }
+        state.voice = Some(VoiceSession {
+            context,
+            signal: Arc::new(Signal::new()),
+            recording: None,
+            phase: VoicePhase::Starting,
+            cancel: false,
+            failure: None,
+            started: Instant::now(),
+            elapsed_ms: 0,
+            wave: None,
+        });
+        state.enumerate |= 1;
+        state.changed();
+        self.shared.wake.notify_one();
+        Ok(())
+    }
+    pub fn voice_snapshot(&self) -> Option<VoiceSnapshot> {
+        let state = self.shared.lock();
+        let session = state.voice.as_ref()?;
+        let (elapsed_ms, level) = session
+            .recording
+            .as_ref()
+            .map(|r| r.snapshot())
+            .unwrap_or((session.elapsed_ms, 0));
+        Some(VoiceSnapshot {
+            context: session.context,
+            phase: session.phase,
+            elapsed_ms,
+            level,
+        })
+    }
+    /// Stop revokes capture immediately. Review is published after native disposal.
+    pub fn stop_voice(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        cancel: bool,
+    ) -> Result<(), DeviceError> {
+        let mut state = self.shared.lock();
+        let session = state
+            .voice
+            .as_mut()
+            .filter(|s| s.context == context)
+            .ok_or(DeviceError::Stale)?;
+        if matches!(session.phase, VoicePhase::Review | VoicePhase::Failed(_)) {
+            if cancel {
+                state.voice = None;
+                state.changed();
+                return Ok(());
+            }
+            return Err(DeviceError::Stale);
+        }
+        session.cancel |= cancel;
+        session.signal.revoke();
+        session.phase = VoicePhase::Stopping;
+        state.changed();
+        self.shared.wake.notify_one();
+        Ok(())
+    }
+    /// Transfers the completed recording to its scoped upload owner once.
+    pub fn voice_audio(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+    ) -> Option<talk_core::protocol::content::VoiceBytes> {
+        let state = self.shared.lock();
+        if !state
+            .voice
+            .as_ref()
+            .is_some_and(|s| s.context == context && s.phase == VoicePhase::Review)
+        {
+            return None;
+        }
+        state.voice.as_ref()?.wave.clone()
+    }
     pub fn submit(&self, intent: DeviceIntent) -> Result<(), DeviceError> {
         let mut state = self.shared.lock();
         if state.snapshot.runtime != RuntimeState::Running {
@@ -294,6 +408,11 @@ impl DeviceRuntime {
                 }
                 admit_request(&mut state, request)?;
                 if values != state.preferences {
+                    if values.microphone != state.preferences.microphone
+                        && let Some(voice) = state.voice.as_mut()
+                    {
+                        voice.yield_capture();
+                    }
                     for index in 0..3 {
                         if selection(&values, index) != selection(&state.preferences, index) {
                             state.stop(index);
@@ -328,6 +447,15 @@ impl DeviceRuntime {
     pub fn request_shutdown(&self) {
         let mut state = self.shared.lock();
         if state.snapshot.runtime == RuntimeState::Running {
+            if state.voice.as_ref().is_some_and(|voice| {
+                matches!(voice.phase, VoicePhase::Review | VoicePhase::Failed(_))
+            }) {
+                state.voice = None;
+            } else if let Some(voice) = state.voice.as_mut() {
+                voice.cancel = true;
+                voice.signal.revoke();
+                voice.phase = VoicePhase::Stopping;
+            }
             for index in 0..3 {
                 state.stop(index);
             }
@@ -358,6 +486,14 @@ fn start_desired(
     session: PreviewSession,
     index: usize,
 ) -> Result<(), DeviceError> {
+    if index == 0
+        && state
+            .voice
+            .as_ref()
+            .is_some_and(|voice| !matches!(voice.phase, VoicePhase::Review | VoicePhase::Failed(_)))
+    {
+        return Err(DeviceError::Unavailable);
+    }
     if state.stop_all
         || matches!(
             preview_mut(&mut state.snapshot, index),
@@ -415,6 +551,7 @@ impl Drop for Active {
 fn run(shared: &Shared) {
     let mut calls = call::Calls::default();
     let mut active: [Option<Active>; 3] = [None, None, None];
+    let mut voice_capture: Option<audio::Capture> = None;
     let mut inventory = Inventory::default();
     let mut frames = frames::FramePool::default();
     let mut refreshed = Instant::now();
@@ -423,6 +560,9 @@ fn run(shared: &Shared) {
         let call_present = media.as_ref().and_then(|m| m.capture()).is_some();
         if call_present {
             let mut state = shared.lock();
+            if let Some(voice) = state.voice.as_mut() {
+                voice.yield_capture();
+            }
             for index in 0..3 {
                 state.stop(index);
             }
@@ -464,7 +604,11 @@ fn run(shared: &Shared) {
         }
         let refresh = {
             let mut state = shared.lock();
-            if state.stop_all && active.iter().all(Option::is_none) {
+            if state.stop_all
+                && active.iter().all(Option::is_none)
+                && (state.snapshot.runtime != RuntimeState::Draining
+                    || (voice_capture.is_none() && state.voice.is_none()))
+            {
                 state.snapshot.session = None;
                 state.snapshot.microphone_preview = PreviewState::Stopped;
                 state.snapshot.camera_preview = PreviewState::Stopped;
@@ -477,13 +621,14 @@ fn run(shared: &Shared) {
                 }
                 state.changed();
             }
-            let refresh = if (state.snapshot.session.is_some() || call_present)
-                && refreshed.elapsed() >= REFRESH
-            {
-                7
-            } else {
-                state.enumerate
-            };
+            let refresh =
+                if (state.snapshot.session.is_some() || call_present || state.voice.is_some())
+                    && refreshed.elapsed() >= REFRESH
+                {
+                    7
+                } else {
+                    state.enumerate
+                };
             state.enumerate = 0;
             refresh
         };
@@ -505,6 +650,138 @@ fn run(shared: &Shared) {
                 next.inventory_revision.0 = next.inventory_revision.0.saturating_add(1);
                 state.snapshot = next;
                 state.changed();
+            }
+        }
+        // The selected-device worker is the sole native microphone owner. A
+        // call or stop revokes callbacks before dropping the stream; only then
+        // may completed PCM be handed to the scoped upload owner.
+        let stopping = {
+            let state = shared.lock();
+            state.voice.as_ref().is_some_and(|v| {
+                !v.signal.valid() && !matches!(v.phase, VoicePhase::Review | VoicePhase::Failed(_))
+            })
+        };
+        if stopping {
+            drop(voice_capture.take());
+            let Some((recording, cancel, failure)) = ({
+                let state = shared.lock();
+                state
+                    .voice
+                    .as_ref()
+                    .map(|voice| (voice.recording.clone(), voice.cancel, voice.failure))
+            }) else {
+                continue;
+            };
+            let elapsed_ms = recording.as_ref().map_or(0, |r| r.snapshot().0);
+            let wave = if cancel || failure.is_some() {
+                None
+            } else {
+                recording
+                    .and_then(|r| r.wave())
+                    .and_then(|wave| talk_core::protocol::content::VoiceBytes::new(wave).ok())
+            };
+            let mut state = shared.lock();
+            if state.voice.as_ref().is_none_or(|voice| voice.cancel) {
+                state.voice = None;
+            } else if let Some(voice) = state.voice.as_mut() {
+                voice.wave = wave;
+                voice.elapsed_ms = elapsed_ms;
+                voice.recording = None;
+                voice.phase = if voice.wave.is_some() {
+                    VoicePhase::Review
+                } else {
+                    VoicePhase::Failed(match failure.unwrap_or(DeviceError::CaptureFailed) {
+                        DeviceError::PermissionDenied => {
+                            talk_core::ui::UnavailableReason::PermissionDenied
+                        }
+                        DeviceError::Removed
+                        | DeviceError::InvalidSelection
+                        | DeviceError::Unavailable => talk_core::ui::UnavailableReason::Unsupported,
+                        _ => talk_core::ui::UnavailableReason::Unconfigured,
+                    })
+                };
+            }
+            state.changed();
+        }
+        let start = {
+            let state = shared.lock();
+            state
+                .voice
+                .as_ref()
+                .filter(|v| v.phase == VoicePhase::Starting && v.signal.valid())
+                .map(|v| (v.signal.clone(), state.preferences.microphone.clone()))
+        };
+        if let Some((signal, choice)) = start {
+            let recording = Arc::new(voice::Recording::new());
+            let result = inventory
+                .effective(&choice, DeviceKind::Microphone)
+                .and_then(|id| {
+                    inventory
+                        .audio_backend
+                        .as_ref()
+                        .ok_or(DeviceError::Unavailable)?
+                        .record_voice(&id, signal.clone(), recording.clone())
+                });
+            let mut discard = None;
+            {
+                let mut state = shared.lock();
+                if let Some(session) = state
+                    .voice
+                    .as_mut()
+                    .filter(|v| Arc::ptr_eq(&v.signal, &signal))
+                {
+                    match result {
+                        Ok(capture) if signal.valid() => {
+                            voice_capture = Some(capture);
+                            session.recording = Some(recording);
+                            session.phase = VoicePhase::Recording;
+                        }
+                        Ok(capture) => discard = Some(capture),
+                        Err(error) => {
+                            session.failure = Some(error);
+                            session.signal.revoke();
+                            session.phase = VoicePhase::Stopping;
+                        }
+                    }
+                    state.changed();
+                } else if let Ok(capture) = result {
+                    discard = Some(capture);
+                }
+            }
+            drop(discard);
+        }
+        {
+            let mut state = shared.lock();
+            let choice = state.preferences.microphone.clone();
+            if let Some(session) = state
+                .voice
+                .as_mut()
+                .filter(|v| v.phase == VoicePhase::Recording)
+            {
+                let error = decode_error(session.signal.error.load(Ordering::Acquire))
+                    .or_else(|| session.signal.stalled().then_some(DeviceError::Removed))
+                    .or_else(|| {
+                        voice_capture
+                            .as_ref()
+                            .is_some_and(|capture| {
+                                inventory
+                                    .effective(&choice, DeviceKind::Microphone)
+                                    .as_ref()
+                                    != Ok(capture.id())
+                            })
+                            .then_some(DeviceError::Removed)
+                    })
+                    .or_else(|| {
+                        (!session.signal.observed.load(Ordering::Acquire)
+                            && session.started.elapsed() >= Duration::from_secs(8))
+                        .then_some(DeviceError::CaptureFailed)
+                    });
+                if error.is_some() || session.recording.as_ref().is_some_and(|r| r.full()) {
+                    session.failure = error;
+                    session.signal.revoke();
+                    session.phase = VoicePhase::Stopping;
+                    state.changed();
+                }
             }
         }
         if let Some(media) = &media {
@@ -665,6 +942,11 @@ fn run(shared: &Shared) {
             continue;
         }
         if calls.active()
+            || voice_capture.is_some()
+            || state
+                .voice
+                .as_ref()
+                .is_some_and(|v| matches!(v.phase, VoicePhase::Starting | VoicePhase::Stopping))
             || active.iter().any(Option::is_some)
             || state.desired.iter().any(Option::is_some)
         {

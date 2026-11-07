@@ -5,17 +5,17 @@ use gpui::{AnyElement, Bounds, Element, ElementId, KeyDownEvent, Pixels, Point, 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Target {
     context: ConversationRef,
+    thread: Option<u128>,
     generation: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Choice {
-    File,
-    Poll,
-    Schedule,
-    Scheduled,
-    Silent,
-    Reminders,
+    File = 0,
+    CloudFile = 1,
+    Poll = 2,
+    Scheduled = 4,
+    Silent = 5,
 }
 impl Choice {
     fn id(self, target: Target) -> ElementId {
@@ -32,15 +32,18 @@ impl Choice {
 struct Session {
     generation: u64,
     target: Option<Target>,
+    opened: Option<Instant>,
 }
 impl Session {
-    fn open(&mut self, context: ConversationRef) -> Option<Target> {
+    fn open(&mut self, context: ConversationRef, thread: Option<u128>) -> Option<Target> {
         self.generation = self.generation.checked_add(1)?;
         let target = Target {
             context,
+            thread,
             generation: self.generation,
         };
         self.target = Some(target);
+        self.opened = Some(Instant::now());
         Some(target)
     }
     fn accepts(&self, target: Target, selected: Option<ConversationRef>) -> bool {
@@ -76,6 +79,7 @@ impl Menu {
     }
     fn clear(&mut self) {
         self.session.target = None;
+        self.session.opened = None;
         self.pending_focus = false;
         self.return_focus = None;
         self.scroll.set_offset(gpui::point(px(0.), px(0.)));
@@ -91,19 +95,26 @@ struct Item {
 }
 
 impl Desktop {
+    fn composer_menu_target_current(&self, target: Target) -> bool {
+        target.thread.is_none()
+            || self.overlay == Some(Overlay::Thread)
+                && self.thread_parent == target.thread.map(|root| (target.context, root))
+    }
     fn composer_menu_context_current(&self) -> bool {
-        self.snapshot.selected.is_some_and(|context| {
-            self.snapshot.active_account == Some(context.account)
-                && self
-                    .snapshot
-                    .conversations
-                    .as_slice()
-                    .iter()
-                    .any(|row| row.context == context)
-        }) && matches!(
-            self.snapshot.content,
-            ContentState::Ready | ContentState::Offline
-        )
+        self.composer_available()
+            && self.snapshot.selected.is_some_and(|context| {
+                self.snapshot.active_account == Some(context.account)
+                    && self
+                        .snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .any(|row| row.context == context)
+            })
+            && matches!(
+                self.snapshot.content,
+                ContentState::Ready | ContentState::Offline
+            )
     }
 
     fn composer_menu_items(&self, target: Target) -> Vec<Item> {
@@ -114,40 +125,64 @@ impl Desktop {
                 .session
                 .accepts(target, self.snapshot.selected)
             || !self.composer_menu_context_current()
+            || !self.composer_menu_target_current(target)
         {
             return Vec::new();
         }
+        let restricted = target.thread.is_some()
+            || self.drafts.target(target.context).new_thread
+            || self.drafts.target(target.context).private_reply.is_some();
         let message = |choice, label, icon, feature| Item {
             choice,
             label,
             icon,
-            availability: self.message_available(feature),
+            availability: if feature == MessageFeature::Files && restricted {
+                Availability::when(false, "Anhänge in Threads sind noch nicht verfügbar.")
+            } else {
+                self.message_available(feature)
+            },
         };
         vec![
             message(
                 Choice::File,
-                "Datei anhängen",
+                "Vom Computer hochladen",
                 "paperclip",
                 MessageFeature::Files,
             ),
             Item {
+                choice: Choice::CloudFile,
+                label: "Aus NextCloud teilen",
+                icon: "cloud",
+                availability: Availability::when(
+                    !restricted
+                        && (self.message_feature_enabled(MessageFeature::Files)
+                            || self.snapshot.content == ContentState::Offline
+                                && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                                    panel.context == target.context
+                                        && panel.availability(MessageFeature::Files).enabled()
+                                }))
+                        && self.composer_available()
+                        && self.snapshot.content_panel.file_browser_supported != Some(false),
+                    if self.snapshot.content_panel.file_browser_supported == Some(false) {
+                        "Diese Dateioption ist derzeit nicht verfügbar."
+                    } else {
+                        "Dateien können in diesem Gespräch nicht gesendet werden."
+                    },
+                ),
+            },
+            Item {
                 choice: Choice::Poll,
                 label: "Umfrage erstellen",
-                icon: "plus",
+                icon: "bar-chart-2",
                 availability: Availability::when(
-                    self.content_scope_current()
+                    !restricted
+                        && self.content_scope_current()
                         && self.snapshot.content_panel.poll_create.enabled(),
                     crate::presentation::conversation_dialog::unavailable(
                         self.snapshot.content_panel.poll_create,
                     ),
                 ),
             },
-            message(
-                Choice::Schedule,
-                "Nachricht planen",
-                "clock",
-                MessageFeature::Schedules,
-            ),
             message(
                 Choice::Scheduled,
                 "Geplante Nachrichten",
@@ -160,17 +195,15 @@ impl Desktop {
                 "moon",
                 MessageFeature::Silent,
             ),
-            message(
-                Choice::Reminders,
-                "Erinnerungen",
-                "bell",
-                MessageFeature::Reminders,
-            ),
         ]
+        .into_iter()
+        .filter(|item| item.availability.is_enabled())
+        .collect()
     }
 
     pub(in crate::presentation) fn toggle_composer_menu(
         &mut self,
+        thread: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -184,7 +217,12 @@ impl Desktop {
         let Some(context) = self.snapshot.selected else {
             return;
         };
-        let Some(target) = self.content_ui.composer_menu.session.open(context) else {
+        let thread = (thread && self.overlay == Some(Overlay::Thread))
+            .then_some(self.thread_parent)
+            .flatten()
+            .filter(|(parent, _)| *parent == context)
+            .map(|(_, root)| root);
+        let Some(target) = self.content_ui.composer_menu.session.open(context, thread) else {
             return;
         };
         self.message_ui.menu.clear();
@@ -192,7 +230,11 @@ impl Desktop {
         self.content_ui.composer_menu.geometry.borrow_mut().target = Some(target);
         self.content_ui.composer_menu.return_focus = self
             .control_focus
-            .current(&"attach".into())
+            .current(&if target.thread.is_some() {
+                "thread-attach".into()
+            } else {
+                "attach".into()
+            })
             .or_else(|| window.focused(cx));
         self.content_ui.composer_menu.pending_focus = true;
         self.hover_hints.cancel();
@@ -213,7 +255,11 @@ impl Desktop {
             if let Some(focus) = focus.filter(|focus| self.root_focus.contains(focus, window)) {
                 focus.focus(window);
             } else {
-                self.composer.focus_handle(cx).focus(window);
+                if target.is_some_and(|target| target.thread.is_some()) {
+                    self.thread_composer.focus_handle(cx).focus(window);
+                } else {
+                    self.composer.focus_handle(cx).focus(window);
+                }
             }
         }
         cx.notify();
@@ -236,14 +282,26 @@ impl Desktop {
         }
         self.dismiss_composer_menu(false, window, cx);
         // A picker/dialog must inherit the editor, never this retired popup.
-        self.composer.focus_handle(cx).focus(window);
+        if target.thread.is_some() {
+            self.thread_composer.focus_handle(cx).focus(window);
+        } else {
+            self.composer.focus_handle(cx).focus(window);
+        }
+        if target.thread.is_some() && choice == Choice::Silent {
+            let mut compose = self.thread_drafts.target(target.context);
+            compose.silent = !compose.silent;
+            let _ = self.thread_drafts.set_target(target.context, compose);
+            cx.notify();
+            return;
+        }
         let action = match choice {
             Choice::File => LocalAction::Message(Action::Command(MessageAction::PickUpload)),
+            Choice::CloudFile => {
+                LocalAction::Content(crate::presentation::content::Action::OpenCloudBrowser)
+            }
             Choice::Poll => LocalAction::Content(crate::presentation::content::Action::CreatePoll),
-            Choice::Schedule => LocalAction::Message(Action::Schedule),
             Choice::Scheduled => LocalAction::Message(Action::Command(MessageAction::Scheduled)),
             Choice::Silent => LocalAction::Message(Action::Silent),
-            Choice::Reminders => LocalAction::Message(Action::Command(MessageAction::Reminders)),
         };
         self.handle(action, window, cx);
     }
@@ -251,6 +309,7 @@ impl Desktop {
     pub(in crate::presentation) fn composer_menu_anchor(
         &self,
         context: ConversationRef,
+        thread: bool,
     ) -> impl IntoElement {
         let geometry = self.content_ui.composer_menu.geometry.clone();
         let target = self
@@ -258,7 +317,7 @@ impl Desktop {
             .composer_menu
             .session
             .target
-            .filter(|target| target.context == context);
+            .filter(|target| target.context == context && target.thread.is_some() == thread);
         gpui::canvas(
             move |bounds, _, _| {
                 if let Some(target) = target {
@@ -289,16 +348,21 @@ impl Desktop {
                     .session
                     .accepts(target, self.snapshot.selected)
                 || !self.composer_menu_context_current()
+                || !self.composer_menu_target_current(target)
                 || self.message_ui.menu.target().is_some()
                 || !window.is_window_active()
                 || self.update_restart_pending
                 || self.projection_blocked
                 || self.prejoin.is_some()
+                || self.waiting_in_lobby()
                 || self.incoming_visible()
                 || self.onboarding_open
                 || self.account_removal.confirming()
                 || self.navigation_open
-                || !matches!(self.overlay, None | Some(Overlay::CallChat))
+                || !matches!(
+                    self.overlay,
+                    None | Some(Overlay::CallChat | Overlay::Thread)
+                )
                 || moved_focus
             {
                 self.dismiss_composer_menu(false, window, cx);
@@ -324,7 +388,11 @@ impl Desktop {
         let width = self
             .sp(260.)
             .min((window.viewport_size().width - px(24.)).max(px(1.)));
-        let silent = self.drafts.target(target.context).silent;
+        let silent = if target.thread.is_some() {
+            self.thread_drafts.target(target.context).silent
+        } else {
+            self.drafts.target(target.context).silent
+        };
         let body = self
             .context_menu_surface()
             .id(scoped_id(
@@ -355,41 +423,77 @@ impl Desktop {
             ))
             .children(items.into_iter().map(|item| {
                 let id = item.choice.id(target);
-                self.control(
-                    id.clone(),
-                    if item.choice == Choice::Silent && silent {
-                        ButtonStyle::Secondary
-                    } else {
-                        ButtonStyle::Quiet
-                    },
-                    item.availability.hinted(),
-                    LocalAction::Content(crate::presentation::content::Action::ComposerChoice(
-                        target,
-                        item.choice,
-                    )),
-                    cx,
-                )
-                .w_full()
-                .min_w_0()
-                .justify_start()
-                .gap_2()
-                .child(self.scaled_icon(item.icon, 15., self.theme.muted))
-                .child(div().min_w_0().truncate().child(self.l(item.label)))
-                .when(item.choice == Choice::Silent && silent, |d| {
-                    d.child(self.scaled_icon("check", 14., self.theme.accent))
-                })
-                .child(self.reason_tip(
-                    id,
-                    item.availability,
-                    Some(item.label),
-                    cx,
-                ))
+                div()
+                    .flex()
+                    .flex_col()
+                    .when(matches!(item.choice, Choice::File | Choice::Poll), |d| {
+                        d.when(item.choice == Choice::Poll, |d| {
+                            d.mt_1().border_t_1().border_color(self.theme.border)
+                        })
+                        .child(
+                            div()
+                                .px_3()
+                                .pt_2()
+                                .text_size(self.sp(12.))
+                                .text_color(self.theme.muted)
+                                .child(self.l(if item.choice == Choice::File {
+                                    "Hochladen"
+                                } else {
+                                    "Erstellen"
+                                })),
+                        )
+                    })
+                    .child(
+                        self.style_list_row(
+                            self.control(
+                                id.clone(),
+                                if item.choice == Choice::Silent && silent {
+                                    ButtonStyle::Secondary
+                                } else {
+                                    ButtonStyle::Quiet
+                                },
+                                item.availability.hinted(),
+                                LocalAction::Content(
+                                    crate::presentation::content::Action::ComposerChoice(
+                                        target,
+                                        item.choice,
+                                    ),
+                                ),
+                                cx,
+                            ),
+                            crate::presentation::controls::RowSize::Regular,
+                        )
+                        .w_full()
+                        .min_w_0()
+                        .justify_start()
+                        .gap_2()
+                        .child(self.scaled_icon(item.icon, 16., self.theme.muted))
+                        .child(div().min_w_0().truncate().child(self.l(item.label)))
+                        .when(item.choice == Choice::Silent && silent, |d| {
+                            d.child(self.scaled_icon("check", 14., self.theme.accent))
+                        })
+                        .child(self.reason_tip(
+                            id,
+                            item.availability,
+                            Some(item.label),
+                            cx,
+                        )),
+                    )
             }));
         Some(
             Popup {
                 target,
                 geometry,
-                child: body.into_any_element(),
+                child: self.reveal_observation(
+                    scoped_id(
+                        "composer-popup-reveal",
+                        target.context,
+                        0,
+                        u128::from(target.generation),
+                    ),
+                    div().child(body),
+                    self.content_ui.composer_menu.session.opened,
+                ),
                 width,
             }
             .into_any_element(),
@@ -630,19 +734,31 @@ mod tests {
         }
     }
     #[test]
+    fn switching_composer_panes_retires_old_targets_in_the_same_room() {
+        let mut session = Session::default();
+        let main = session.open(room(1), None).unwrap();
+        let thread = session.open(room(1), Some(10)).unwrap();
+        assert!(!session.accepts(main, Some(room(1))));
+        assert!(session.accepts(thread, Some(room(1))));
+        assert_eq!(thread.thread, Some(10));
+        let next = session.open(room(1), Some(11)).unwrap();
+        assert!(!session.accepts(thread, Some(room(1))));
+        assert!(session.accepts(next, Some(room(1))));
+    }
+    #[test]
     fn reopened_and_replaced_room_reject_old_popup_callbacks() {
         let mut session = Session::default();
-        let old = session.open(room(1)).unwrap();
+        let old = session.open(room(1), None).unwrap();
         assert!(session.accepts(old, Some(room(1))));
         assert!(!session.accepts(old, Some(room(2))));
         session.target = None;
         assert!(!session.accepts(old, Some(room(1))));
-        let new = session.open(room(1)).unwrap();
+        let new = session.open(room(1), None).unwrap();
         assert_ne!(old, new);
         assert!(!session.accepts(old, Some(room(1))));
         assert!(session.accepts(new, Some(room(1))));
         session.generation = u64::MAX;
-        assert!(session.open(room(2)).is_none());
+        assert!(session.open(room(2), None).is_none());
     }
     #[test]
     fn popup_prefers_above_and_stays_inside_every_viewport_edge() {
