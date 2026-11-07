@@ -3,7 +3,7 @@ use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
     controls::{Availability, scoped_id},
 };
-use gpui::{Context, Div, Focusable, KeyDownEvent, Window, div, prelude::*, px};
+use gpui::{Context, Div, Focusable, KeyDownEvent, Window, prelude::*, px};
 use std::time::{Duration, Instant};
 use talk_core::ui::{
     AccountScope, UnavailableReason, messaging::MessageActionError, presentation::ConversationRef,
@@ -222,48 +222,33 @@ impl Desktop {
                 && Instant::now() < toast.expires
         })?;
         Some(
-            div()
-                .w_full()
-                .flex_none()
-                .py_1()
-                .flex()
-                .items_start()
-                .gap_2()
-                .child(self.scaled_icon(
-                    "info",
-                    17.,
-                    if toast.reason == MessageActionError::Uncertain {
-                        self.theme.warning
-                    } else {
-                        self.theme.danger
-                    },
-                ))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(self.sp(13.))
-                        .line_height(self.sp(19.))
-                        .text_color(self.theme.text)
-                        .child(self.l(copy(toast.reason))),
+            self.banner(
+                if toast.reason == MessageActionError::Uncertain {
+                    super::controls::BannerRole::Warning
+                } else {
+                    super::controls::BannerRole::Error
+                },
+                self.l(copy(toast.reason)),
+            )
+            .w_full()
+            .flex_none()
+            .child(
+                self.icon_button(
+                    scoped_id(
+                        "dismiss-action-toast",
+                        toast.key.context,
+                        u128::from(toast.key.id),
+                        0,
+                    ),
+                    ("x", "Meldung schließen"),
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::DismissActionToast(toast.key.context, toast.key.id),
+                    cx,
                 )
-                .child(
-                    self.icon_button(
-                        scoped_id(
-                            "dismiss-action-toast",
-                            toast.key.context,
-                            u128::from(toast.key.id),
-                            0,
-                        ),
-                        ("x", "Meldung schließen"),
-                        ButtonStyle::Quiet,
-                        Availability::available(),
-                        LocalAction::DismissActionToast(toast.key.context, toast.key.id),
-                        cx,
-                    )
-                    .size(px(28.))
-                    .min_h(px(28.)),
-                ),
+                .size(px(28.))
+                .min_h(px(28.)),
+            ),
         )
     }
 }
