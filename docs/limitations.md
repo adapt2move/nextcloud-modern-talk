@@ -38,12 +38,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   a temporary disconnection, but retires on scope or permission loss and does
   not survive restart. Incoming originals are retained only for their player and
   are not available offline. Playback accepts WAV PCM, Ogg Opus/Vorbis and supported
-  MP4/WebM audio codecs up to 32 MiB. AAC needs an installed native decoder;
-  unsupported or unavailable codecs offer download. The deterministic waveform
-  placeholder supports pointer scrubbing and five-second arrow-key seeking;
-  it is not derived from the audio. Native
-  microphone, speaker, permission and mobile interoperability have not yet
-  been qualified.
+  MP4/WebM audio codecs up to 32 MiB. AAC playback uses a native decoder on
+  Linux and macOS; other platforms and unavailable codecs offer download. The
+  deterministic waveform placeholder supports pointer scrubbing and five-second
+  arrow-key seeking; it is not derived from the audio. Native microphone, speaker,
+  permission and mobile interoperability have not yet been qualified.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms

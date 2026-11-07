@@ -137,6 +137,70 @@ fn permission_errors_are_typed_and_stale_callbacks_cannot_publish() {
     assert_eq!(signal.error.load(Ordering::Acquire), 0);
 }
 
+fn test_voice(phase: VoicePhase) -> VoiceSession {
+    use talk_core::ui::{AccountId, AccountScope, ConversationId, HostId, RuntimeGeneration};
+    let account = AccountScope {
+        account: AccountId::from_local(1),
+        runtime: RuntimeGeneration::from_local(1),
+    };
+    let context = talk_core::ui::presentation::ConversationRef {
+        account,
+        conversation: ConversationId {
+            account: account.account,
+            host: HostId::from_local(1),
+            local: 1,
+        },
+    };
+    VoiceSession {
+        context,
+        signal: Arc::new(Signal::new()),
+        recording: None,
+        phase,
+        cancel: false,
+        failure: None,
+        started: Instant::now(),
+        elapsed_ms: 0,
+        wave: None,
+    }
+}
+
+#[test]
+fn yielding_the_microphone_preserves_recordings_and_explicit_cancellation() {
+    let mut voice = test_voice(VoicePhase::Recording);
+    voice.yield_capture();
+    assert_eq!(voice.phase, VoicePhase::Stopping);
+    assert!(!voice.signal.valid());
+    assert!(!voice.cancel);
+    voice.phase = VoicePhase::Review;
+    voice.wave = Some(talk_core::protocol::content::VoiceBytes::new(vec![1]).unwrap());
+    voice.yield_capture();
+    assert_eq!(voice.phase, VoicePhase::Review);
+    assert!(voice.wave.is_some());
+    voice.cancel = true;
+    voice.phase = VoicePhase::Stopping;
+    voice.yield_capture();
+    assert!(voice.cancel);
+}
+
+#[test]
+fn stopping_preview_keeps_review_but_shutdown_retires_it() {
+    let runtime = DeviceRuntime::start().unwrap();
+    {
+        let mut state = runtime.shared.lock();
+        state.voice = Some(test_voice(VoicePhase::Review));
+        state.snapshot.session = Some(PreviewSession(1));
+    }
+    runtime
+        .submit(DeviceIntent::StopPreview {
+            session: PreviewSession(1),
+        })
+        .unwrap();
+    wait_for(&runtime, Duration::from_secs(3), |s| s.session.is_none());
+    assert_eq!(runtime.voice_snapshot().unwrap().phase, VoicePhase::Review);
+    shutdown(&runtime);
+    assert!(runtime.voice_snapshot().is_none());
+}
+
 #[test]
 fn unavailable_start_stop_ack_and_obsolete_session_are_honest() {
     let runtime = DeviceRuntime::start().unwrap();
