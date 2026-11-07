@@ -944,7 +944,7 @@ impl NextcloudClient {
             || matches!(&command, C::AssignBreakouts(assignments) if !assignments.as_slice().is_empty())
         {
             // Re-observe participant identities and roles before submitting a map.
-            self.members(c, id).await?;
+            self.members(c, id, caps).await?;
         }
         let wire = match command {
             C::SetName(v) => WireCommand::Rename(v.as_str().into()),
