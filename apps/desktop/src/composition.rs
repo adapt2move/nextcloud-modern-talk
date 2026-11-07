@@ -218,7 +218,10 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
     let development = options.scenario.is_some();
     let overlay = match options.scenario.as_deref() {
         Some("settings") => Some(Overlay::Settings),
-        Some("details" | "lobby-settings") => Some(Overlay::RoomInfo),
+        Some(
+            "details" | "room-avatar" | "lobby-settings" | "breakout-configure" | "breakout-free"
+            | "breakout-help",
+        ) => Some(Overlay::RoomInfo),
         Some("participants") => Some(Overlay::Participants),
         Some("files") => Some(Overlay::Files),
         Some("account-reminders") => Some(Overlay::Reminders),
@@ -297,6 +300,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                 match options.scenario.as_deref() {
                     Some(name @ ("chat-message-tools" | "chat-reminder-time" | "chat-reminder-menu" | "chat-schedule-time" | "chat-schedule-edit")) => view.fixture_message_tools(name, window, cx),
                     Some("lobby-settings") => view.fixture_lobby_settings(cx),
+                    Some("breakout-configure" | "breakout-free" | "breakout-help") => view.fixture_breakouts(cx),
                     _ => (),
                 }
                 view

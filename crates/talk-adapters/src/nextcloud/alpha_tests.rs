@@ -1,5 +1,7 @@
 use super::*;
-use talk_core::protocol::conversation::{ConversationCommand as C, Setting};
+use talk_core::protocol::conversation::{
+    ConversationCommand as C, ConversationResult as CR, Setting,
+};
 use talk_core::protocol::messaging::{
     MessagingCommand as M, MessagingFeature, MessagingResult as R,
 };
@@ -1010,43 +1012,253 @@ async fn federation_invitation_actions_are_capability_and_account_scoped() {
     for major in [34, 35] {
         for case in ["disabled", "wrong-user", "accept", "decline"] {
             let mut capabilities = caps(major);
-            capabilities["capabilities"]["spreed"]["features"].as_array_mut().unwrap().push(json!("federation-v1"));
+            capabilities["capabilities"]["spreed"]["features"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("federation-v1"));
             capabilities["capabilities"]["spreed"]["config"]["federation"] = json!({
                 "enabled": case != "disabled", "incoming-enabled": true,
             });
             let invitation = json!({"id":9,"localToken":"testroom", "userId": if case == "wrong-user" {"someone_else"} else {"fixture_user"},
                 "roomName":"Fictional room", "inviterDisplayName":"Fictional inviter"});
             let mut replies = vec![Reply::data(capabilities.clone())];
-            if case != "disabled" { replies.push(Reply::data(json!([invitation]))); }
+            if case != "disabled" {
+                replies.push(Reply::data(json!([invitation])));
+            }
             if matches!(case, "accept" | "decline") {
                 replies.push(Reply::data(capabilities));
                 let mut accepted = room();
                 accepted["remoteServer"] = json!("https://remote.example.invalid");
-                replies.push(Reply::data(if case == "accept" { accepted } else { Value::Null }));
+                replies.push(Reply::data(if case == "accept" {
+                    accepted
+                } else {
+                    Value::Null
+                }));
             }
             let server = Server::start(replies).await;
             let runtime = runtime();
             let mut client = client(&server.origin, runtime.clone());
-            let list = client.request(context(&runtime), ProtocolRequest::FederationInvitations).await;
+            let list = client
+                .request(context(&runtime), ProtocolRequest::FederationInvitations)
+                .await;
             if case == "wrong-user" {
                 assert_eq!(list.err().unwrap().kind, ErrorKind::WrongScope);
                 continue;
             }
-            let ProtocolReply::FederationInvitations(view) = list.unwrap() else { panic!("invitations") };
+            let ProtocolReply::FederationInvitations(view) = list.unwrap() else {
+                panic!("invitations")
+            };
             assert_eq!(view.supported, case != "disabled");
-            if case == "disabled" { assert_eq!(server.count(), 1); continue; }
+            if case == "disabled" {
+                assert_eq!(server.count(), 1);
+                continue;
+            }
             let item = &view.items.as_slice()[0];
             assert_eq!(item.room.as_str(), "Fictional room");
             assert_ne!(item.id, 9);
             let operation = OperationId::from_local(44);
-            let reply = client.request(context(&runtime), ProtocolRequest::ChangeFederationInvitation {
-                operation, invitation: item.id, accept: case == "accept",
-            }).await.unwrap();
-            assert!(matches!(reply, ProtocolReply::FederationInvitationChanged { operation: got, invitation } if got == operation && invitation == item.id));
+            let reply = client
+                .request(
+                    context(&runtime),
+                    ProtocolRequest::ChangeFederationInvitation {
+                        operation,
+                        invitation: item.id,
+                        accept: case == "accept",
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(
+                matches!(reply, ProtocolReply::FederationInvitationChanged { operation: got, invitation } if got == operation && invitation == item.id)
+            );
             let seen = server.seen.lock().unwrap();
             let request = String::from_utf8_lossy(&seen[3]);
             assert!(request.starts_with(if case == "accept" { "POST " } else { "DELETE " }));
             assert!(request.contains("/ocs/v2.php/apps/spreed/api/v1/federation/invitation/9"));
         }
+    }
+}
+
+#[tokio::test]
+async fn federation_chat_uses_remote_capabilities_before_read_and_send() {
+    for major in [34, 35] {
+        for supports_chat in [false, true] {
+            let mut capabilities = caps(major);
+            capabilities["capabilities"]["spreed"]["features"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("federation-v1"));
+            capabilities["capabilities"]["spreed"]["config"]["federation"] =
+                json!({"enabled":true,"incoming-enabled":true});
+            let mut room_data = room();
+            room_data["remoteServer"] = json!("https://remote.example.invalid");
+            let mut remote = capabilities["capabilities"]["spreed"].clone();
+            if !supports_chat {
+                remote["features"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|feature| feature.as_str() != Some("chat-v2"));
+            }
+            let mut replies = vec![
+                Reply::data(capabilities.clone()),
+                Reply::data(room_data.clone()),
+                Reply::data(remote.clone()),
+            ];
+            if supports_chat {
+                replies.push(Reply::data(json!([message(7)])));
+                replies.extend([
+                    Reply::data(capabilities),
+                    Reply::data(room_data),
+                    Reply::data(remote),
+                ]);
+                let mut sent = Reply::envelope(201, "ok", 201, message(8));
+                sent.echo_reference = true;
+                replies.push(sent);
+            }
+            let server = Server::start(replies).await;
+            let runtime = runtime();
+            let mut client = client(&server.origin, runtime.clone());
+            let conversation = bind(&mut client);
+            let history = client
+                .request(
+                    context(&runtime),
+                    ProtocolRequest::Messaging {
+                        conversation,
+                        operation: OperationId::from_local(1),
+                        command: M::History {
+                            before: None,
+                            thread: None,
+                        },
+                    },
+                )
+                .await;
+            if !supports_chat {
+                assert!(history.is_err());
+                assert_eq!(server.count(), 3);
+                continue;
+            }
+            assert!(
+                matches!(history, Ok(ProtocolReply::Messaging { result: R::Messages { ref messages, .. }, .. }) if messages.as_slice().len() == 1)
+            );
+            let send = client
+                .request(
+                    context(&runtime),
+                    ProtocolRequest::Messaging {
+                        conversation,
+                        operation: OperationId::from_local(2),
+                        command: M::Send {
+                            text: Text::new("Hello from the other server").unwrap(),
+                            options: Default::default(),
+                        },
+                    },
+                )
+                .await;
+            assert!(
+                matches!(send, Ok(ProtocolReply::Messaging { result: R::Message(ref message), .. }) if message.own)
+            );
+            assert_eq!(server.count(), 8);
+            let requests = server.seen.lock().unwrap();
+            assert!(String::from_utf8_lossy(&requests[2]).starts_with(
+                "GET /cloud/ocs/v2.php/apps/spreed/api/v4/room/testroom/capabilities"
+            ));
+            assert!(String::from_utf8_lossy(&requests[6]).starts_with(
+                "GET /cloud/ocs/v2.php/apps/spreed/api/v4/room/testroom/capabilities"
+            ));
+        }
+    }
+}
+
+#[tokio::test]
+async fn breakout_modes_assignments_and_broadcast_use_scoped_rooms() {
+    for major in [34, 35] {
+        let mut capabilities = caps(major);
+        capabilities["capabilities"]["spreed"]["features"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("breakout-rooms-v1"));
+        capabilities["capabilities"]["spreed"]["config"]["call"]["breakout-rooms"] = json!(true);
+        let mut parent = room();
+        parent["participantType"] = json!(1);
+        parent["breakoutRoomMode"] = json!(2);
+        parent["breakoutRoomStatus"] = json!(1);
+        let mut child = room();
+        child["id"] = json!(8);
+        child["token"] = json!("childone");
+        child["objectType"] = json!("room");
+        child["objectId"] = json!("testroom");
+        let participant = json!({"attendeeId":42,"actorType":"users","actorId":"fixture_other",
+            "displayName":"Fictional person","participantType":3,"permissions":255,"roomToken":"testroom"});
+        let server = Server::start(vec![
+            Reply::data(capabilities.clone()),
+            Reply::data(parent.clone()),
+            Reply::data(json!([participant.clone()])),
+            Reply::data(capabilities.clone()),
+            Reply::data(parent.clone()),
+            Reply::data(json!([participant])),
+            Reply::data(json!([child.clone(), parent.clone()])),
+            Reply::data(capabilities),
+            Reply::data(parent.clone()),
+            Reply::envelope(201, "ok", 201, json!([child, parent])),
+        ])
+        .await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let request = |operation, command| ProtocolRequest::ConversationSettings {
+            conversation,
+            operation: OperationId::from_local(operation),
+            command,
+        };
+        let ProtocolReply::ConversationSettings {
+            result: CR::Members(members),
+            ..
+        } = client
+            .request(context(&runtime), request(1, C::Members))
+            .await
+            .unwrap()
+        else {
+            panic!("members")
+        };
+        let assignment = talk_core::protocol::conversation::BreakoutAssignment {
+            member: members.as_slice()[0].id,
+            room: 0,
+        };
+        let mut assignments = Page::empty();
+        assignments.try_push(assignment).unwrap();
+        let configured = client
+            .request(
+                context(&runtime),
+                request(
+                    2,
+                    C::ConfigureBreakouts {
+                        amount: 1,
+                        mode: talk_core::protocol::conversation::BreakoutMode::Manual,
+                        assignments,
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(configured, ProtocolReply::ConversationSettings { result: CR::BreakoutRooms(ref rooms), .. } if rooms.as_slice().len() == 1)
+        );
+        let broadcast = client
+            .request(
+                context(&runtime),
+                request(
+                    3,
+                    C::BroadcastBreakouts(Text::new("Fictional update").unwrap()),
+                ),
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(broadcast, ProtocolReply::ConversationSettings { result: CR::BreakoutRooms(ref rooms), .. } if rooms.as_slice().len() == 1)
+        );
+        let seen = server.seen.lock().unwrap();
+        let configure = String::from_utf8_lossy(&seen[6]);
+        assert!(configure.contains("mode=2"));
+        assert!(configure.contains("attendeeMap=%7B%2242%22%3A0%7D"));
+        assert!(String::from_utf8_lossy(&seen[9]).contains("/breakout-rooms/testroom/broadcast"));
     }
 }

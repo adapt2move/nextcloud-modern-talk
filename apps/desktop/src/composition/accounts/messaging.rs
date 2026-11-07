@@ -1207,6 +1207,23 @@ impl Accounts {
             self.invalidate_history(context, ContentState::Denied);
             return;
         }
+        // A selected federated room can establish its first remote capability
+        // observation while the account list still has only an unknown policy.
+        if self.snapshot.selected == Some(context)
+            && self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|room| room.context == context && room.send == Decision::Unknown)
+            && matches!(&result, Ok(wire::MessagingResult::Messages { capabilities: Some(capabilities), .. })
+                if capabilities.actions.as_slice().iter().any(|(feature, availability)|
+                    *feature == wire::MessagingFeature::Send && availability.implemented
+                    && availability.server == protocol::FeatureSupport::Supported
+                    && availability.allowed == Decision::Allowed))
+        {
+            self.invalidate_account(context.account, protocol::AccountChange::Conversations);
+        }
         // A switched-away room still receives its admitted canonical updates.
         // Mutation receipts also settle without changing another room's panels.
         if self.snapshot.selected != Some(context) {

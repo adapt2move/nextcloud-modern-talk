@@ -1,4 +1,5 @@
 //! Native room dialogs keep their originating context and submit typed, correlated intents.
+mod breakouts;
 mod members;
 
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, controls::Availability, input::TextInput};
@@ -18,14 +19,16 @@ pub(crate) enum Tab {
     Privacy,
     Permissions,
     Meeting,
+    Breakouts,
 }
 impl Tab {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::General,
         Self::Notifications,
         Self::Privacy,
         Self::Permissions,
         Self::Meeting,
+        Self::Breakouts,
     ];
     fn applies(self, kind: Option<ConversationKind>) -> bool {
         !matches!(
@@ -40,6 +43,7 @@ impl Tab {
             Self::Privacy => "Datenschutz",
             Self::Permissions => "Berechtigungen",
             Self::Meeting => "Meeting",
+            Self::Breakouts => "Gruppenräume",
         }
     }
     fn icon(self) -> &'static str {
@@ -49,6 +53,7 @@ impl Tab {
             Self::Privacy => "shield",
             Self::Permissions => "lock",
             Self::Meeting => "video",
+            Self::Breakouts => "users",
         }
     }
 }
@@ -73,6 +78,7 @@ pub(crate) enum Action {
     Avatar,
     Password,
     LobbyTime(talk_core::preferences::time::RepeatedTime),
+    Breakouts(breakouts::Action),
     CopyGuestLink,
 }
 pub(super) struct RoomUi {
@@ -99,6 +105,8 @@ pub(super) struct RoomUi {
     pub password: Entity<TextInput>,
     pub lobby_time: Entity<TextInput>,
     lobby_time_error: Option<talk_core::preferences::time::LocalTimeError>,
+    breakouts: breakouts::State,
+    breakout_broadcast: Entity<TextInput>,
 }
 impl RoomUi {
     pub fn new(theme: super::theme::Theme, cx: &mut Context<Desktop>) -> Self {
@@ -117,6 +125,8 @@ impl RoomUi {
         let avatar = cx.new(|cx| TextInput::new("Emoji", 64, theme, cx));
         let password = cx.new(|cx| TextInput::new("Neues Passwort", 512, theme, cx));
         let lobby_time = cx.new(|cx| TextInput::new("JJJJ-MM-TT HH:MM", 32, theme, cx));
+        let breakout_broadcast =
+            cx.new(|cx| TextInput::new("Nachricht an alle Gruppenräume", 4096, theme, cx));
         Self {
             create_direct: true,
             create_account: None,
@@ -141,9 +151,11 @@ impl RoomUi {
             password,
             lobby_time,
             lobby_time_error: None,
+            breakouts: breakouts::State::default(),
+            breakout_broadcast,
         }
     }
-    pub fn inputs(&self) -> [Entity<TextInput>; 7] {
+    pub fn inputs(&self) -> [Entity<TextInput>; 8] {
         [
             self.name.clone(),
             self.description.clone(),
@@ -152,6 +164,7 @@ impl RoomUi {
             self.avatar.clone(),
             self.password.clone(),
             self.lobby_time.clone(),
+            self.breakout_broadcast.clone(),
         ]
     }
 }
@@ -175,6 +188,14 @@ impl Desktop {
         }
         self.room_ui.context = self.snapshot.selected;
         self.room_ui.tab = Tab::Meeting;
+        self.refresh_room_dialog(cx);
+    }
+    pub(crate) fn fixture_breakouts(&mut self, cx: &mut Context<Self>) {
+        if !self.development {
+            return;
+        }
+        self.room_ui.context = self.snapshot.selected;
+        self.room_ui.tab = Tab::Breakouts;
         self.refresh_room_dialog(cx);
     }
     pub(crate) fn room_members_applicable(&self) -> bool {
@@ -201,6 +222,7 @@ impl Desktop {
             self.room_ui.name_observation = None;
             self.room_ui.description_observation = None;
             self.room_ui.lobby_time_error = None;
+            self.room_ui.breakouts = breakouts::State::default();
             self.room_ui.confirmation = None;
             for input in self.room_ui.inputs() {
                 input.update(cx, |i, _| i.reset());
@@ -234,6 +256,7 @@ impl Desktop {
             self.room_ui.name_observation = None;
             self.room_ui.description_observation = None;
             self.room_ui.lobby_time_error = None;
+            self.room_ui.breakouts = breakouts::State::default();
             self.room_ui.confirmation = None;
             self.room_ui.members.reset();
             self.room_ui.pending_member_focus = None;
@@ -251,6 +274,7 @@ impl Desktop {
         self.refresh_member_preview();
         self.refresh_member_csv_pick(cx);
         self.load_bots_on_entry();
+        self.refresh_breakouts();
         if let Some(details) = self
             .snapshot
             .conversation_panel
@@ -323,6 +347,7 @@ impl Desktop {
             return;
         }
         match action {
+            Action::Breakouts(action) => self.breakout_action(action, cx),
             Action::Tab(tab) => {
                 if !tab.applies(self.selected().map(|row| row.kind)) {
                     return;
@@ -724,6 +749,13 @@ impl Desktop {
                 .into_iter()
                 .enumerate()
                 .filter(|(_, tab)| tab.applies(row.map(|row| row.kind)))
+                .filter(|(_, tab)| {
+                    *tab != Tab::Breakouts
+                        || self
+                            .room_panel()
+                            .and_then(|panel| panel.details.as_ref())
+                            .is_some_and(|details| details.breakout_supported)
+                })
             {
                 items.push(self.dialog_nav_item(
                     ("room-tab", i),
@@ -925,6 +957,33 @@ impl Desktop {
                                     .min_w_0(),
                                 ),
                         )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .gap_2()
+                                .child(self.button(
+                                    "room-avatar-upload",
+                                    "Bild hochladen",
+                                    ButtonStyle::Secondary,
+                                    self.room_available(RoomSetting::Avatar),
+                                    LocalAction::Room(Action::Command(
+                                        ConversationAction::PickAvatar,
+                                    )),
+                                    cx,
+                                ))
+                                .child(self.button(
+                                    "room-avatar-remove",
+                                    "Avatar entfernen",
+                                    ButtonStyle::Quiet,
+                                    self.room_available(RoomSetting::Avatar),
+                                    LocalAction::Room(Action::Command(
+                                        ConversationAction::RemoveAvatar,
+                                    )),
+                                    cx,
+                                )),
+                        )
+                        .child(self.hint(self.l("Bilder werden mittig quadratisch zugeschnitten.")))
                         .child(self.room_field(
                             "Name",
                             &self.room_ui.name,
@@ -1386,23 +1445,12 @@ impl Desktop {
                             } else {
                                 "Kein bestätigtes Gastpasswort."
                             }))),
-                    )
-                    .child(
-                        self.dialog_section(Some("Gruppenräume"))
-                            .child(self.hint(self.l(
-                                "Gruppenräume teilen das Meeting auf. Sie sind keine Verzeichnisgruppen.",
-                            )))
-                            .child(self.dialog_actions().child(self.room_button(
-                                "room-breakouts",
-                                "Zwei Gruppenräume vorbereiten",
-                                RoomSetting::Breakouts,
-                                ConversationAction::ConfigureBreakouts {
-                                    amount: 2,
-                                    automatic: true,
-                                },
-                                cx,
-                            ))),
                     );
+            }
+            Tab::Breakouts => {
+                page = page.when_some(self.breakout_section(cx), |page, section| {
+                    page.child(section)
+                });
             }
         }
         page

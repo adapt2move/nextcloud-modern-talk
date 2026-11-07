@@ -10,6 +10,7 @@ use talk_core::ui::{content::DownloadView, messaging::MessageFeature};
 #[derive(Clone)]
 pub(crate) enum Kind {
     Upload,
+    Avatar,
     Csv {
         edit_generation: u64,
     },
@@ -51,6 +52,17 @@ fn csv_available(snapshot: &PresentationSnapshot, context: ConversationRef) -> b
                     !details.classified
                         && details.availability(RoomSetting::CsvImport).enabled()
                         && details.availability(RoomSetting::Invite).enabled()
+                })
+        })
+}
+fn avatar_available(snapshot: &PresentationSnapshot, context: ConversationRef) -> bool {
+    snapshot.active_account == Some(context.account)
+        && snapshot.selected == Some(context)
+        && snapshot.conversation_panel.as_ref().is_some_and(|panel| {
+            panel.context == context
+                && !panel.details_stale
+                && panel.details.as_ref().is_some_and(|details| {
+                    !details.classified && details.availability(RoomSetting::Avatar).enabled()
                 })
         })
 }
@@ -261,7 +273,9 @@ impl Accounts {
         {
             return Err(SubmitError::Busy);
         }
-        let permitted = if matches!(kind, Kind::Csv { .. }) {
+        let permitted = if matches!(kind, Kind::Avatar) {
+            avatar_available(&self.snapshot, context)
+        } else if matches!(kind, Kind::Csv { .. }) {
             csv_available(&self.snapshot, context)
         } else {
             self.snapshot.message_panel.as_ref().is_some_and(|p| {
@@ -282,6 +296,9 @@ impl Accounts {
             if let Some(panel) = &mut self.snapshot.conversation_panel {
                 panel.csv_file = None;
             }
+        }
+        if matches!(kind, Kind::Avatar) {
+            self.avatar_picker = Some((request, context));
         }
         self.picker = Some(Picker {
             request,
@@ -316,6 +333,38 @@ impl Accounts {
             self.csv_file_owner.dialog = None;
             self.picker_open = false;
             self.finish_csv_selection(picker, edit_generation, result);
+            return;
+        }
+        if matches!(picker.kind, Kind::Avatar) {
+            self.picker_open = false;
+            if self.avatar_picker.take() != Some((picker.request, picker.context))
+                || self.current(picker.context.account).is_err()
+                || !avatar_available(&self.snapshot, picker.context)
+            {
+                return;
+            }
+            let result = result
+                .map_err(|_| SubmitError::Unavailable(UnavailableReason::Unconfigured))
+                .and_then(|path| match path {
+                    None => Ok(()),
+                    Some(path) => self.start_avatar_upload(picker.request, picker.context, path),
+                });
+            if let Err(error) = result {
+                let reason = match error {
+                    SubmitError::Unavailable(reason) => reason,
+                    _ => UnavailableReason::Busy,
+                };
+                if let Some(panel) = self
+                    .snapshot
+                    .conversation_panel
+                    .as_mut()
+                    .filter(|p| p.context == picker.context)
+                {
+                    panel.state =
+                        talk_core::ui::conversation::RemoteState::Failed(picker.request, reason);
+                }
+                self.touch();
+            }
             return;
         }
         self.picker_open = false;
@@ -369,7 +418,7 @@ impl Accounts {
         let mut upload_name = None;
         let mut download = None;
         let command = match &picker.kind {
-            Kind::Csv { .. } => return Err(SubmitError::StaleScope),
+            Kind::Csv { .. } | Kind::Avatar => return Err(SubmitError::StaleScope),
             Kind::Upload => {
                 let name = path
                     .file_name()

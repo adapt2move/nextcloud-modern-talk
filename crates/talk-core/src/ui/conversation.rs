@@ -83,6 +83,22 @@ pub enum MemberRole {
     Unknown,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BreakoutMode {
+    Automatic,
+    Manual,
+    Free,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BreakoutAssignment {
+    pub member: PersonRef,
+    pub room: u8,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BreakoutRoom {
+    pub context: ConversationRef,
+    pub name: Text<256>,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DirectorySource {
     User,
     Group,
@@ -191,6 +207,10 @@ pub struct RoomDetails {
     pub lobby_timer: Option<u64>,
     pub has_password: Option<bool>,
     pub participant_count: Option<u32>,
+    pub breakout_mode: Option<BreakoutMode>,
+    pub breakout_started: Option<bool>,
+    pub breakout_child: bool,
+    pub breakout_supported: bool,
     pub guest_access: Option<bool>,
     pub leave: Decision,
     pub controls: Page<(RoomSetting, Availability), 32>,
@@ -262,6 +282,8 @@ pub struct ConversationPanel {
     pub csv_duplicates: u16,
     pub csv_invalid: u16,
     pub csv_file: Option<CsvFileResult>,
+    pub breakout_rooms: Page<BreakoutRoom, 20>,
+    pub breakout_loaded: bool,
     pub result: Option<RoomResult>,
 }
 impl ConversationPanel {
@@ -284,6 +306,8 @@ impl ConversationPanel {
             csv_duplicates: 0,
             csv_invalid: 0,
             csv_file: None,
+            breakout_rooms: Page::empty(),
+            breakout_loaded: false,
             result: None,
         }
     }
@@ -294,6 +318,7 @@ pub enum ConversationAction {
     SetName(Text<256>),
     SetDescription(Text<4000>),
     SetEmojiAvatar(Text<64>),
+    PickAvatar,
     RemoveAvatar,
     SetReadOnly(bool),
     SetNotifications(NotificationLevel),
@@ -337,8 +362,17 @@ pub enum ConversationAction {
     },
     ConfigureBreakouts {
         amount: u8,
-        automatic: bool,
+        mode: BreakoutMode,
+        assignments: Page<BreakoutAssignment, 100>,
     },
+    BreakoutRooms,
+    AssignBreakouts(Page<BreakoutAssignment, 100>),
+    StartBreakouts,
+    StopBreakouts,
+    RemoveBreakouts,
+    BroadcastBreakouts(Text<4096>),
+    SwitchBreakout(ConversationRef),
+    RequestBreakoutAssistance,
 }
 impl ConversationAction {
     pub fn reads(&self) -> bool {
@@ -353,6 +387,7 @@ impl ConversationAction {
                 | Self::PreviewCsv(_)
                 | Self::PickCsv { .. }
                 | Self::CancelCsvPick { .. }
+                | Self::BreakoutRooms
         )
     }
 }

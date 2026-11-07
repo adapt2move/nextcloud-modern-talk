@@ -27,19 +27,20 @@
     }
   ],
   "counts": {
-    "implemented": 94,
-    "missing": 57,
+    "implemented": 101,
+    "missing": 51,
     "not-client": 23,
-    "partial": 13
+    "partial": 12
   },
   "operations": [
     {
       "operation_id": "avatar-upload-avatar",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/avatar",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::UploadRoomAvatar",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/AvatarController.php",
+      "scope": "Bounded multipart PNG upload; the adapter centers and crops a locally selected image and rechecks moderator authority."
     },
     {
       "operation_id": "avatar-get-avatar",
@@ -125,9 +126,10 @@
       "operation_id": "breakout_room-configure-breakout-rooms",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}",
-      "status": "partial",
+      "status": "implemented",
       "api": "Request::Conversation / conversation::Command::ConfigureBreakouts",
-      "scope": "Automatic/manual bounded creation supported; custom attendee mapping and switch/assistance/broadcast workflow remain missing."
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/BreakoutRoomController.php",
+      "scope": "Automatic, manual and free modes with a bounded attendee map; the adapter refreshes participant authority."
     },
     {
       "operation_id": "breakout_room-remove-breakout-rooms",
@@ -141,25 +143,28 @@
       "operation_id": "breakout_room-broadcast-chat-message",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/broadcast",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::BroadcastBreakouts",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/BreakoutRoomController.php",
+      "scope": "Bounded moderator broadcast to breakout rooms."
     },
     {
       "operation_id": "breakout_room-apply-attendee-map",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/attendees",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::AssignBreakouts",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/BreakoutRoomController.php",
+      "scope": "Bounded attendee assignment with fresh, room-scoped participant identities."
     },
     {
       "operation_id": "breakout_room-request-assistance",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/request-assistance",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::RequestBreakoutAssistance",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/BreakoutRoomController.php",
+      "scope": "Participant assistance request from an observed breakout child room."
     },
     {
       "operation_id": "breakout_room-reset-request-for-assistance",
@@ -189,9 +194,10 @@
       "operation_id": "breakout_room-switch-breakout-room",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/switch",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::SwitchBreakout",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/BreakoutRoomController.php",
+      "scope": "Free-mode switching to an observed child of the current parent."
     },
     {
       "operation_id": "calendar_integration-get-dashboard-events",
@@ -1174,9 +1180,10 @@
       "operation_id": "room-get-capabilities",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/capabilities",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::FederatedRoomCapabilities",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/RoomController.php",
+      "scope": "Bounded room-scoped remote capabilities are intersected with the current local capabilities before basic federated chat. Other federated features remain gated."
     },
     {
       "operation_id": "room-schedule-meeting",

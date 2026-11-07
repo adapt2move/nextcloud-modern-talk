@@ -61,6 +61,10 @@ pub const SCENARIOS: &[&str] = &[
     "chat-summary-pending",
     "chat-summary-result",
     "lobby-settings",
+    "room-avatar",
+    "breakout-configure",
+    "breakout-free",
+    "breakout-help",
     "thread-error",
     "chat-content",
     "chat-content-progress",
@@ -285,6 +289,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             .find(|message| {
                 !message.metadata.system
                     && !message.metadata.deleted
+                    && matches!(
+                        message.delivery,
+                        DeliveryState::Received | DeliveryState::ServerAccepted
+                    )
                     && !message.body.as_str().trim().is_empty()
                     && message.metadata.rich.as_slice().is_empty()
             })
@@ -598,7 +606,17 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }));
         return state;
     }
-    if matches!(scenario, Some("details-ready" | "lobby-settings")) {
+    if matches!(
+        scenario,
+        Some(
+            "details-ready"
+                | "room-avatar"
+                | "lobby-settings"
+                | "breakout-configure"
+                | "breakout-free"
+                | "breakout-help"
+        )
+    ) {
         let mut state = snapshot(Some("chat"));
         dialog::configure(&mut state);
         if scenario == Some("lobby-settings")
@@ -609,6 +627,58 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         {
             details.lobby = Some(true);
             details.lobby_timer = Some(1_800_003_600);
+        }
+        if matches!(
+            scenario,
+            Some("breakout-configure" | "breakout-free" | "breakout-help")
+        ) && let Some(panel) = state.conversation_panel.as_mut()
+        {
+            use talk_core::ui::conversation::{
+                BreakoutMode, BreakoutRoom, DirectorySource, Member, MemberRole, PersonRef,
+                RoomSetting,
+            };
+            let context = panel.context;
+            if let Some(details) = panel.details.as_mut() {
+                details.breakout_mode = Some(if scenario == Some("breakout-free") {
+                    BreakoutMode::Free
+                } else {
+                    BreakoutMode::Manual
+                });
+                details.breakout_started = Some(true);
+                details.breakout_child = scenario == Some("breakout-help");
+                if scenario != Some("breakout-configure") {
+                    details.controls = page(details.controls.as_slice().iter().copied().map(
+                        |(key, mut availability)| {
+                            if key == RoomSetting::Breakouts {
+                                availability.allowed = Decision::Denied;
+                            }
+                            (key, availability)
+                        },
+                    ));
+                }
+            }
+            panel.members = page([("Mara Fischer", 11), ("Jonas Weber", 12)].map(
+                |(name, local)| Member {
+                    id: PersonRef { context, local },
+                    name: text(name),
+                    role: MemberRole::Member,
+                    source: DirectorySource::User,
+                    permissions: Some(255),
+                    self_user: false,
+                },
+            ));
+            panel.members_loaded = true;
+            panel.breakout_rooms = page([
+                BreakoutRoom {
+                    context: super::fixtures::context(101),
+                    name: text("Gruppe 1"),
+                },
+                BreakoutRoom {
+                    context: super::fixtures::context(102),
+                    name: text("Gruppe 2"),
+                },
+            ]);
+            panel.breakout_loaded = true;
         }
         return state;
     }

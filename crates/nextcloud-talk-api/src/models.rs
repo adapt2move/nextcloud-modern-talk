@@ -135,6 +135,8 @@ pub struct Room {
     pub recording_status: Option<u64>,
     pub last_pinned: Option<u64>,
     pub hidden_pinned: Option<u64>,
+    pub breakout_mode: Option<u64>,
+    pub breakout_status: Option<u64>,
 }
 impl Room {
     pub(crate) fn decode(v: &Value) -> Result<Self, ErrorKind> {
@@ -192,6 +194,8 @@ impl Room {
             recording_status: integer(v.get("callRecording")),
             last_pinned: integer(v.get("lastPinnedId")),
             hidden_pinned: integer(v.get("hiddenPinnedId")),
+            breakout_mode: integer(v.get("breakoutRoomMode")),
+            breakout_status: integer(v.get("breakoutRoomStatus")),
         };
         RoomToken::parse(&result.token)?;
         Ok(result)

@@ -624,6 +624,7 @@ fn project(reply: api::Reply) -> Result<Response, ErrorKind> {
         | R::TranslationLanguages(_)
         | R::Translated(_)
         | R::FederationInvitations(_)
+        | R::FederatedRoomCapabilities(_)
         | R::TaskProcessing(_) => {
             return Err(ErrorKind::Malformed);
         }

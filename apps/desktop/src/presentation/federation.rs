@@ -15,7 +15,7 @@ impl Desktop {
             return body;
         };
         body = body.child(self.hint(
-            self.l("Föderierte Gespräche können in dieser Version noch nicht geöffnet werden."),
+            self.l("Föderierte Gespräche unterstützen Textnachrichten. Anrufe und weitere Funktionen sind noch nicht verfügbar."),
         ));
         if view.failed {
             body = body.child(self.hint(self.l("Die Einladung konnte nicht bearbeitet werden.")));

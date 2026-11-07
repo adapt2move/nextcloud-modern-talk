@@ -28,6 +28,10 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         lobby_timer: None,
         has_password: Some(false),
         participant_count: Some(7),
+        breakout_mode: None,
+        breakout_started: None,
+        breakout_child: false,
+        breakout_supported: true,
         guest_access: Some(false),
         leave: Decision::Allowed,
         controls: page(

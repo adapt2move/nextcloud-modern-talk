@@ -48,7 +48,7 @@ impl Dialogs {
                     finished.set(true);
                 })
             }
-            Kind::Csv { .. } => {
+            Kind::Csv { .. } | Kind::Avatar => {
                 let response = cx.prompt_for_paths(gpui::PathPromptOptions {
                     files: true,
                     directories: false,

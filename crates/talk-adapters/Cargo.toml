@@ -31,6 +31,7 @@ zip.workspace = true
 url.workspace = true
 zeroize.workspace = true
 getrandom.workspace = true
+image.workspace = true
 rusqlite.workspace = true
 dirs.workspace = true
 jiff.workspace = true

@@ -52,6 +52,17 @@ pub enum Discoverability {
     Everyone,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BreakoutMode {
+    Automatic,
+    Manual,
+    Free,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BreakoutAssignment {
+    pub member: MemberId,
+    pub room: u8,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecipientSource {
     User,
     Group,
@@ -130,6 +141,10 @@ pub struct ConversationDetails {
     pub recording_consent: Option<bool>,
     pub has_password: Option<bool>,
     pub participant_count: Option<u32>,
+    pub breakout_mode: Option<BreakoutMode>,
+    pub breakout_started: Option<bool>,
+    pub breakout_child: bool,
+    pub breakout_supported: bool,
     pub controls: Page<(Setting, ActionAvailability), 32>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -142,6 +157,10 @@ pub enum ConversationCommand {
         color: Option<Text<32>>,
     },
     RemoveAvatar,
+    /// Private native file selection, consumed only by the account adapter.
+    SetImageAvatar {
+        local_path: Text<16384>,
+    },
     SetReadOnly(bool),
     SetNotifications(NotificationLevel),
     SetCallNotifications(bool),
@@ -199,8 +218,13 @@ pub enum ConversationCommand {
     BreakoutRooms,
     ConfigureBreakouts {
         amount: u8,
-        automatic: bool,
+        mode: BreakoutMode,
+        assignments: Page<BreakoutAssignment, 100>,
     },
+    AssignBreakouts(Page<BreakoutAssignment, 100>),
+    BroadcastBreakouts(Text<4096>),
+    SwitchBreakout(ConversationId),
+    RequestBreakoutAssistance,
     StartBreakouts,
     StopBreakouts,
     RemoveBreakouts,
@@ -218,6 +242,7 @@ pub enum ConversationResult {
         invalid_count: u16,
     },
     BreakoutRooms(Page<Conversation, 20>),
+    BreakoutSwitched(Box<Conversation>),
     GuestLink(Text<2048>),
     Changed,
     Deleted,

@@ -320,22 +320,21 @@ impl Desktop {
                     }),
                 |sidebar, view| {
                     sidebar.child(
-                        self.button_with_leading_icon(
+                        self.button(
                             "nav-federation",
-                            (
-                                self.lf(
-                                    "Einladungen ({n})",
-                                    &[("n", &view.invitations.as_slice().len().to_string())],
-                                ),
-                                "users",
-                            ),
+                            "",
                             ButtonStyle::Quiet,
                             true,
                             LocalAction::Open(Overlay::Federation),
                             cx,
                         )
                         .w_full()
-                        .justify_start(),
+                        .justify_start()
+                        .child(self.scaled_icon("users", 18., self.theme.text))
+                        .child(self.lf(
+                            "Einladungen ({n})",
+                            &[("n", &view.invitations.as_slice().len().to_string())],
+                        )),
                     )
                 },
             )

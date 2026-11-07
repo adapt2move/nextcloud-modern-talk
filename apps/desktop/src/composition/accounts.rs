@@ -70,6 +70,12 @@ enum Purpose {
     FederationChange(AccountScope, OperationId, u128),
     LiveEvents(AccountScope),
     Call(talk_core::ids::CallScope),
+    BreakoutLeave(
+        talk_core::ids::CallScope,
+        RequestId,
+        ConversationRef,
+        ConversationRef,
+    ),
     Tags(AccountScope),
     TagMutation(RequestId, AccountScope),
     Login(RequestId, LoginWork),
@@ -124,6 +130,7 @@ pub struct Accounts {
     content_owner: content::ContentOwner,
     media: std::sync::Arc<talk_adapters::media::MediaService>,
     call_ui: Option<calls::CallUi>,
+    breakout_leave: Option<calls::BreakoutLeave>,
     call_poll_at: Instant,
     call_events: calls::CallEvents,
     call_actions: std::sync::Arc<calls::CallActions>,
@@ -157,6 +164,7 @@ pub struct Accounts {
     cache: cache::Cache,
     picker: Option<files::Picker>,
     picker_open: bool,
+    avatar_picker: Option<(RequestId, ConversationRef)>,
     csv_file_owner: files::CsvOwner,
     attachment_owner: files::Owner,
     message_poll_at: Instant,
@@ -177,6 +185,7 @@ impl Accounts {
             ),
             media,
             call_ui: None,
+            breakout_leave: None,
             call_poll_at: Instant::now(),
             call_events: calls::CallEvents::new(),
             call_actions: std::sync::Arc::new(calls::CallActions::new()),
@@ -209,6 +218,7 @@ impl Accounts {
             cache: cache::Cache::default(),
             picker: None,
             picker_open: false,
+            avatar_picker: None,
             csv_file_owner: files::CsvOwner::default(),
             attachment_owner: files::Owner::default(),
             message_poll_at: Instant::now(),
@@ -320,6 +330,8 @@ impl Accounts {
     fn clear_content(&mut self) {
         self.clear_attachment_work();
         self.cancel_csv_file();
+        self.avatar_picker = None;
+        self.breakout_leave = None;
         self.queued_read.clear();
         self.clear_content_assets();
         self.picker = None;
@@ -358,6 +370,7 @@ impl Accounts {
         self.load_tags = None;
         self.clear_content();
         self.project_account_reminders();
+        self.project_federation();
         self.load_rooms = scope;
         self.touch();
     }
@@ -563,9 +576,11 @@ impl Accounts {
         self.tick_file_work();
         self.tick_background();
         self.tick_account_reminders();
+        self.tick_notification_navigation();
         self.tick_federation();
         self.tick_translations();
         self.tick_summary();
+        self.tick_breakout_leave();
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
@@ -690,6 +705,7 @@ impl Accounts {
                 self.cache_history(context);
             },
             Purpose::Call(scope) => self.complete_call(scope, result),
+            Purpose::BreakoutLeave(scope, request, context, target) => self.complete_breakout_leave(scope, request, context, target, result),
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
             Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
             Purpose::AccountReminders(scope, version) => self.complete_account_reminders(scope, version, result),
@@ -1325,12 +1341,16 @@ impl Accounts {
                 self.failures.retain(|(a, _)| *a != account);
             }
             UiIntent::SelectAccount(scope) => {
+                self.reminders.cancel_navigation();
                 if !self.cache.is_local(scope) {
                     self.current(scope)?;
                 }
                 self.select(Some(scope));
             }
-            UiIntent::OpenConversation(context) => self.open(context)?,
+            UiIntent::OpenConversation(context) => {
+                self.reminders.cancel_navigation();
+                self.open(context)?;
+            }
             UiIntent::RefreshAccountReminders(scope) => {
                 if self.snapshot.active_account != Some(scope) {
                     return Err(SubmitError::StaleScope);
@@ -1355,6 +1375,7 @@ impl Accounts {
                 context,
                 message,
             } => {
+                self.reminders.cancel_navigation();
                 self.open_reminder(request, context, message)?;
             }
             UiIntent::OpenNotificationMessage {

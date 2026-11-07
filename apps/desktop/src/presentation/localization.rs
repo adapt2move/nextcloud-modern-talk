@@ -1,5 +1,7 @@
 //! Own interface copy only. User, room and message content never enters this catalog.
 //! Source keys are stable German author strings; translations remain centralized.
+mod avatar;
+mod breakouts;
 mod chat;
 mod connection;
 mod content;
@@ -22,6 +24,8 @@ pub fn text(locale: Locale, key: &str) -> &str {
     }
     for catalog in [
         chat::MESSAGES,
+        avatar::MESSAGES,
+        breakouts::MESSAGES,
         message_tools::MESSAGES,
         message_translation::MESSAGES,
         message_summary::MESSAGES,
@@ -91,6 +95,8 @@ mod tests {
             recovery::MESSAGES,
             conversation::MESSAGES,
             chat::MESSAGES,
+            avatar::MESSAGES,
+            breakouts::MESSAGES,
             message_tools::MESSAGES,
             message_translation::MESSAGES,
             message_summary::MESSAGES,

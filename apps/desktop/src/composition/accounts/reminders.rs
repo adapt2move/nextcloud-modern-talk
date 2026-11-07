@@ -13,10 +13,28 @@ struct Entry {
 #[derive(Default)]
 pub(super) struct Reminders {
     entries: Vec<Entry>,
+    pending_navigation: Option<Navigation>,
+}
+struct Navigation {
+    request: RequestId,
+    context: ConversationRef,
+    message: u128,
+    deadline: Instant,
+    due: Instant,
 }
 impl Reminders {
     pub(super) fn retain_accounts(&mut self, scopes: &[AccountScope]) {
         self.entries.retain(|entry| scopes.contains(&entry.scope));
+        if self
+            .pending_navigation
+            .as_ref()
+            .is_some_and(|target| !scopes.contains(&target.context.account))
+        {
+            self.pending_navigation = None;
+        }
+    }
+    pub(super) fn cancel_navigation(&mut self) {
+        self.pending_navigation = None;
     }
     fn entry(&mut self, scope: AccountScope) -> Option<&mut Entry> {
         if !self.entries.iter().any(|entry| entry.scope == scope) {
@@ -241,22 +259,66 @@ impl Accounts {
         message: u128,
     ) -> Result<(), SubmitError> {
         self.current(context.account)?;
-        if !context.is_consistent()
-            || !self
-                .background
-                .account(context.account)
-                .is_some_and(|account| {
-                    account
-                        .rooms
-                        .as_slice()
-                        .iter()
-                        .any(|room| room.context == context)
-                })
-        {
+        if !context.is_consistent() || u64::try_from(message).ok().is_none_or(|id| id == 0) {
             return Err(SubmitError::StaleScope);
         }
+        self.reminders.cancel_navigation();
         self.select(Some(context.account));
-        self.open_message_target(request, context, message)
+        if self
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .any(|room| room.context == context)
+        {
+            return self.open_message_target(request, context, message);
+        }
+        // Room lists load independently of native notification delivery. Preserve
+        // one bounded target while a fresh account observation is requested;
+        // a user navigation or runtime retirement cancels it immediately.
+        let now = Instant::now();
+        self.reminders.pending_navigation = Some(Navigation {
+            request,
+            context,
+            message,
+            deadline: now + Duration::from_secs(60),
+            due: now,
+        });
+        self.load_rooms = Some(context.account);
+        self.touch();
+        Ok(())
+    }
+
+    pub(super) fn tick_notification_navigation(&mut self) {
+        let Some(target) = self.reminders.pending_navigation.as_ref() else {
+            return;
+        };
+        if self.snapshot.active_account != Some(target.context.account)
+            || Instant::now() >= target.deadline
+            || self.current(target.context.account).is_err()
+        {
+            self.reminders.pending_navigation = None;
+            return;
+        }
+        if Instant::now() < target.due
+            || !self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|room| room.context == target.context)
+        {
+            return;
+        }
+        let (request, context, message) = (target.request, target.context, target.message);
+        if let Some(target) = self.reminders.pending_navigation.as_mut() {
+            target.due = Instant::now() + Duration::from_secs(1);
+        }
+        match self.open_message_target(request, context, message) {
+            Ok(()) => self.reminders.pending_navigation = None,
+            Err(SubmitError::Busy) => (),
+            Err(_) => self.reminders.pending_navigation = None,
+        }
     }
 
     pub(super) fn open_message_target(

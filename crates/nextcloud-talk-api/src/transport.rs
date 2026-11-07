@@ -186,6 +186,7 @@ struct RequestOptions {
     account_probe: bool,
     limit: Duration,
     empty_response: EmptyResponse,
+    avatar: Option<Vec<u8>>,
 }
 #[derive(Clone, Copy)]
 enum EmptyResponse {
@@ -498,6 +499,7 @@ impl Transport {
                 account_probe,
                 limit: REQUEST_LIMIT,
                 empty_response: EmptyResponse::Reject,
+                avatar: None,
             },
         )
         .await
@@ -518,6 +520,7 @@ impl Transport {
                 account_probe: false,
                 limit: REQUEST_LIMIT,
                 empty_response: EmptyResponse::History,
+                avatar: None,
             },
         )
         .await
@@ -538,6 +541,7 @@ impl Transport {
                 account_probe: false,
                 limit: REQUEST_LIMIT,
                 empty_response: EmptyResponse::Summary,
+                avatar: None,
             },
         )
         .await
@@ -557,6 +561,7 @@ impl Transport {
                 account_probe: false,
                 limit: Duration::from_secs(35),
                 empty_response: EmptyResponse::Reject,
+                avatar: None,
             },
         )
         .await
@@ -575,6 +580,40 @@ impl Transport {
                 account_probe: false,
                 limit: REQUEST_LIMIT,
                 empty_response: EmptyResponse::NotificationList,
+                avatar: None,
+            },
+        )
+        .await
+    }
+    pub(crate) async fn avatar_upload(
+        &mut self,
+        context: &OperationContext,
+        route: &str,
+        png: &[u8],
+    ) -> Result<Response, PortError> {
+        self.request_dispatched = false;
+        const BOUNDARY: &str = "nmt-avatar-boundary-7fd31a9b2c";
+        if png.len() > crate::MAX_AVATAR_BYTES
+            || png
+                .windows(BOUNDARY.len())
+                .any(|part| part == BOUNDARY.as_bytes())
+        {
+            return Err(self.error(ErrorKind::TooLarge));
+        }
+        let mut body = format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"avatar.png\"\r\nContent-Type: image/png\r\n\r\n").into_bytes();
+        body.extend_from_slice(png);
+        body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+        self.perform(
+            context,
+            Method::POST,
+            route,
+            &[],
+            &[],
+            RequestOptions {
+                account_probe: false,
+                limit: REQUEST_LIMIT,
+                empty_response: EmptyResponse::Reject,
+                avatar: Some(body),
             },
         )
         .await
@@ -656,7 +695,15 @@ impl Transport {
             value.set_sensitive(true);
             request = request.header(COOKIE, value);
         }
-        if !form.is_empty() {
+        let avatar = options.avatar.is_some();
+        if let Some(body) = options.avatar {
+            request = request
+                .header(
+                    CONTENT_TYPE,
+                    "multipart/form-data; boundary=nmt-avatar-boundary-7fd31a9b2c",
+                )
+                .body(body);
+        } else if !form.is_empty() {
             request = request.form(form);
         }
         let request = request
@@ -665,7 +712,14 @@ impl Transport {
         if request
             .body()
             .and_then(reqwest::Body::as_bytes)
-            .is_some_and(|body| body.len() > BODY_LIMIT)
+            .is_some_and(|body| {
+                body.len()
+                    > if avatar {
+                        crate::MAX_AVATAR_BYTES + 512
+                    } else {
+                        BODY_LIMIT
+                    }
+            })
         {
             return Err(self.error(ErrorKind::TooLarge));
         }

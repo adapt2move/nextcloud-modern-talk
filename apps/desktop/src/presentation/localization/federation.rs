@@ -16,9 +16,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Invitaciones federadas",
     ),
     (
-        "Föderierte Gespräche können in dieser Version noch nicht geöffnet werden.",
-        "Federated conversations cannot yet be opened in this version.",
-        "Esta versión aún no permite abrir conversaciones federadas.",
+        "Föderierte Gespräche unterstützen Textnachrichten. Anrufe und weitere Funktionen sind noch nicht verfügbar.",
+        "Federated conversations support text messages. Calls and other features are not yet available.",
+        "Las conversaciones federadas admiten mensajes de texto. Las llamadas y otras funciones aún no están disponibles.",
     ),
     (
         "Keine offenen Einladungen.",

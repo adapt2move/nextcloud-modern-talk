@@ -10,6 +10,14 @@ use talk_core::preferences::notifications::{
 use talk_core::ui::MediaIntent;
 use talk_core::ui::presentation::{CallStage, CallView, MediaState, ParticipantView, RequiredGate};
 
+pub(super) struct BreakoutLeave {
+    scope: CallScope,
+    request: RequestId,
+    context: ConversationRef,
+    target: ConversationRef,
+    deadline: Instant,
+}
+
 pub(super) struct CallEvents {
     event: Option<NotificationEvent>,
     notified: Option<CallScope>,
@@ -143,6 +151,133 @@ pub(super) struct CallUi {
     wishes: MediaWishes,
 }
 impl Accounts {
+    pub(super) fn leave_for_breakout(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+        target: ConversationRef,
+        scope: CallScope,
+    ) -> Result<(), SubmitError> {
+        use talk_core::ui::conversation::{BreakoutMode, RemoteState};
+        self.current(context.account)?;
+        if self.snapshot.selected != Some(context)
+            || target.account != context.account
+            || self.breakout_leave.is_some()
+            || self
+                .pending
+                .iter()
+                .any(|pending| matches!(pending.purpose, Purpose::Room(_, c, _, _) if c == context))
+            || self.call_ui.as_ref().is_none_or(|ui| ui.scope != scope)
+            || self
+                .snapshot
+                .conversation_panel
+                .as_ref()
+                .is_none_or(|panel| {
+                    panel.context != context
+                        || panel.details_stale
+                        || panel.state.pending()
+                        || !panel.breakout_loaded
+                        || !panel
+                            .breakout_rooms
+                            .as_slice()
+                            .iter()
+                            .any(|room| room.context == target)
+                        || !panel.details.as_ref().is_some_and(|details| {
+                            details.breakout_supported
+                                && details.breakout_mode == Some(BreakoutMode::Free)
+                                && details.breakout_started == Some(true)
+                        })
+                })
+        {
+            return Err(SubmitError::StaleScope);
+        }
+        self.media.close_call(scope);
+        self.call_actions.clear();
+        self.call_events.event = None;
+        self.request(
+            scope.account,
+            ProtocolRequest::Meeting(Command::Stop(scope)),
+            Purpose::BreakoutLeave(scope, request, context, target),
+        )?;
+        self.breakout_leave = Some(BreakoutLeave {
+            scope,
+            request,
+            context,
+            target,
+            deadline: Instant::now() + Duration::from_secs(60),
+        });
+        if let Some(panel) = self.snapshot.conversation_panel.as_mut() {
+            panel.state = RemoteState::Saving(request);
+        }
+        self.touch();
+        Ok(())
+    }
+
+    pub(super) fn complete_breakout_leave(
+        &mut self,
+        scope: CallScope,
+        request: RequestId,
+        context: ConversationRef,
+        target: ConversationRef,
+        result: Result<RuntimeReply, IdentityError>,
+    ) {
+        let ended = matches!(&result, Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(value)))
+            if value.call == scope && value.phase == Phase::Ended);
+        self.complete_call(scope, result);
+        let valid = self.breakout_leave.as_ref().is_some_and(|pending| {
+            pending.scope == scope
+                && pending.request == request
+                && pending.context == context
+                && pending.target == target
+                && Instant::now() < pending.deadline
+        });
+        if !valid
+            || self.snapshot.selected != Some(context)
+            || self.current(context.account).is_err()
+        {
+            return;
+        }
+        self.breakout_leave = None;
+        if ended
+            && self
+                .room_action(
+                    request,
+                    context,
+                    talk_core::ui::conversation::ConversationAction::SwitchBreakout(target),
+                )
+                .is_ok()
+        {
+            return;
+        }
+        self.fail_breakout_leave(request, context);
+    }
+
+    pub(super) fn tick_breakout_leave(&mut self) {
+        if self
+            .breakout_leave
+            .as_ref()
+            .is_some_and(|pending| Instant::now() >= pending.deadline)
+        {
+            if let Some(pending) = self.breakout_leave.take() {
+                self.fail_breakout_leave(pending.request, pending.context);
+            }
+        }
+    }
+
+    fn fail_breakout_leave(&mut self, request: RequestId, context: ConversationRef) {
+        if let Some(panel) = self
+            .snapshot
+            .conversation_panel
+            .as_mut()
+            .filter(|panel| panel.context == context)
+        {
+            panel.state = talk_core::ui::conversation::RemoteState::Failed(
+                request,
+                UnavailableReason::PolicyStale,
+            );
+            self.touch();
+        }
+    }
     pub fn call_dispatcher(
         &self,
     ) -> Arc<dyn crate::settings::notifications::NotificationCallDispatcher> {
@@ -508,6 +643,16 @@ impl Accounts {
         wishes: MediaWishes,
         direct: bool,
     ) -> Result<(), SubmitError> {
+        if self.breakout_leave.is_some()
+            || self.pending.iter().any(|pending| {
+                matches!(
+                    pending.purpose,
+                    Purpose::Room(_, _, _, conversations::Work::BreakoutSwitch)
+                )
+            })
+        {
+            return Err(SubmitError::Busy);
+        }
         self.current(scope.account)?;
         if self.call_ui.as_ref().is_some_and(|ui| ui.scope != scope)
             && self

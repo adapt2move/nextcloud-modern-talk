@@ -10,7 +10,8 @@ use talk_core::lifecycle::Cancellation;
 use talk_core::policy::Moment;
 use talk_core::ports::{NextcloudPort, OperationContext, ProtocolReply, ProtocolRequest};
 use talk_core::protocol::conversation::{
-    ConversationCommand as C, ConversationResult as CR, NotificationLevel, RecipientSource, Setting,
+    BreakoutAssignment, BreakoutMode, ConversationCommand as C, ConversationResult as CR,
+    NotificationLevel, RecipientSource, Setting,
 };
 use talk_core::protocol::messaging::{
     ComposeOptions, MessagingCommand as M, MessagingResult as MR,
@@ -142,6 +143,103 @@ async fn released_server_messaging_and_room_controls() {
         panic!("details")
     };
     assert_eq!(details.conversation.role, Role::Owner);
+    if details.breakout_supported
+        && details
+            .controls
+            .as_slice()
+            .iter()
+            .any(|(setting, availability)| {
+                *setting == Setting::Breakouts
+                    && availability.server == FeatureSupport::Supported
+                    && availability.allowed == talk_core::policy::Decision::Allowed
+            })
+    {
+        let CR::Members(members) = settings(
+            &mut client,
+            &runtime,
+            id,
+            1001,
+            "breakout-members",
+            C::Members,
+        )
+        .await
+        else {
+            panic!("breakout members")
+        };
+        let participant = members
+            .as_slice()
+            .iter()
+            .find(|member| !member.is_self && member.role == Role::Member)
+            .expect("synthetic member");
+        let mut assignments = talk_core::bounded::Page::empty();
+        assignments
+            .try_push(BreakoutAssignment {
+                member: participant.id,
+                room: 0,
+            })
+            .unwrap();
+        let configured = settings(
+            &mut client,
+            &runtime,
+            id,
+            1002,
+            "breakout-configure",
+            C::ConfigureBreakouts {
+                amount: 2,
+                mode: BreakoutMode::Manual,
+                assignments: assignments.clone(),
+            },
+        )
+        .await;
+        assert!(matches!(configured, CR::BreakoutRooms(_)));
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1003,
+            "breakout-assign",
+            C::AssignBreakouts(assignments),
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1004,
+            "breakout-start",
+            C::StartBreakouts,
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1005,
+            "breakout-broadcast",
+            C::BroadcastBreakouts(text("Synthetic breakout notice")),
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1006,
+            "breakout-stop",
+            C::StopBreakouts,
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1007,
+            "breakout-remove",
+            C::RemoveBreakouts,
+        )
+        .await;
+    } else {
+        println!("alpha-backend breakouts: server unsupported (correctly gated)");
+    }
     settings(
         &mut client,
         &runtime,
@@ -226,6 +324,23 @@ async fn released_server_messaging_and_room_controls() {
         },
     )
     .await;
+    let avatar_file = tempfile::tempdir().unwrap();
+    let avatar_path = avatar_file.path().join("synthetic-wide.png");
+    image::RgbaImage::from_pixel(8, 4, image::Rgba([80, 140, 210, 255]))
+        .save(&avatar_path)
+        .unwrap();
+    let uploaded = settings(
+        &mut client,
+        &runtime,
+        id,
+        1000,
+        "image-avatar",
+        C::SetImageAvatar {
+            local_path: text(avatar_path.to_str().unwrap()),
+        },
+    )
+    .await;
+    assert!(matches!(uploaded, CR::Details(_)));
     settings(
         &mut client,
         &runtime,
@@ -560,6 +675,15 @@ async fn released_server_messaging_and_room_controls() {
         M::Reminders,
     )
     .await;
+    let reminders = client
+        .request(context(&runtime), ProtocolRequest::UpcomingReminders)
+        .await
+        .unwrap();
+    assert!(
+        matches!(reminders, ProtocolReply::UpcomingReminders(ref value)
+        if value.supported && value.reminders.as_slice().iter().any(|reminder| reminder.message == first))
+    );
+    println!("alpha-backend account-reminders: pass");
     m(
         &mut client,
         &runtime,

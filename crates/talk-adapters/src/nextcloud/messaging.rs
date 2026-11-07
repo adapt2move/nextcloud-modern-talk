@@ -135,7 +135,8 @@ fn availability(
         room.actions.read_messages
     };
     ActionAvailability {
-        implemented: !matches!(f, F::Typing),
+        implemented: !matches!(f, F::Typing)
+            && (!caps.federation_verified || matches!(f, F::Read | F::Send | F::Reply)),
         server: if f == F::Translation {
             match (caps.supported(), caps.translation_providers) {
                 (true, Some(true)) => FeatureSupport::Supported,
@@ -780,6 +781,26 @@ impl NextcloudClient {
         use MessagingCommand as C;
         use MessagingResult as R;
         let data = self.room_data(c, id).await?;
+        let effective_caps;
+        let caps = if wire::is_federated(&data) {
+            effective_caps = self
+                .federation_capabilities_for_room(c, id, caps, is_mutation(&command))
+                .await?;
+            if !matches!(
+                command,
+                C::Capabilities
+                    | C::History { .. }
+                    | C::Poll { .. }
+                    | C::Context(_)
+                    | C::ReconcileSend
+                    | C::Send { .. }
+            ) {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            &effective_caps
+        } else {
+            caps
+        };
         let room = wire::room(&data, id, caps).map_err(|k| self.error(k))?;
         if command == C::Capabilities {
             return Ok(R::Capabilities(

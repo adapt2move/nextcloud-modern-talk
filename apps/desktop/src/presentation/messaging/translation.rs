@@ -37,9 +37,10 @@ impl Desktop {
         message: &MessageView,
     ) -> bool {
         self.snapshot.selected == Some(context)
-            && self.snapshot.content == ContentState::Ready
-            && self.message_feature_enabled(MessageFeature::Translation)
-            && self.translation_language(context).is_some()
+            && (self.current_translation(message).is_some()
+                || self.snapshot.content == ContentState::Ready
+                    && self.message_feature_enabled(MessageFeature::Translation)
+                    && self.translation_language(context).is_some())
             && message_actions_allowed(message)
             && !message.metadata.truncated
             && message.metadata.rich.as_slice().is_empty()
@@ -51,17 +52,27 @@ impl Desktop {
         message: &MessageView,
     ) -> Option<&'a talk_core::ui::messaging::Translation> {
         let context = self.snapshot.selected?;
-        let language = self.translation_language(context)?;
+        let desired = match self.locale {
+            talk_core::preferences::Locale::German => "de",
+            talk_core::preferences::Locale::Spanish => "es",
+            talk_core::preferences::Locale::English => "en",
+        };
         self.snapshot
             .message_panel
-            .as_ref()?
+            .as_ref()
+            .filter(|panel| panel.context == context)?
             .translations
             .as_slice()
             .iter()
             .find(|item| {
                 item.message == message.local_id
                     && item.source == message.body
-                    && item.language == language
+                    && item
+                        .language
+                        .as_str()
+                        .split(['-', '_'])
+                        .next()
+                        .is_some_and(|base| base.eq_ignore_ascii_case(desired))
             })
     }
 

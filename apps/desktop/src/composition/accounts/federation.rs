@@ -195,7 +195,7 @@ impl Accounts {
             self.invalidate_account(scope, protocol::AccountChange::Conversations);
         }
     }
-    fn project_federation(&mut self) {
+    pub(super) fn project_federation(&mut self) {
         let value = self.snapshot.active_account.and_then(|scope| {
             let entry = self
                 .federation

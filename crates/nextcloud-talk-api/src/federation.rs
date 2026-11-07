@@ -3,6 +3,40 @@
 use crate::{ErrorKind, models::RoomToken};
 use serde_json::Value;
 
+/// Only capability data needed to qualify the proxied basic chat route.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteCapabilities {
+    pub features: Vec<String>,
+    pub message_limit: Option<u64>,
+}
+impl RemoteCapabilities {
+    pub(crate) fn decode(value: &Value) -> Result<Self, ErrorKind> {
+        let features = value
+            .get("features")
+            .and_then(Value::as_array)
+            .ok_or(ErrorKind::Malformed)?;
+        if features.len() > 256 {
+            return Err(ErrorKind::TooLarge);
+        }
+        let mut result = Vec::with_capacity(features.len());
+        for feature in features {
+            let feature = feature.as_str().ok_or(ErrorKind::Malformed)?;
+            if feature.len() > 128 {
+                return Err(ErrorKind::TooLarge);
+            }
+            result.push(feature.to_owned());
+        }
+        let message_limit = value["config"]["chat"]
+            .get("max-length")
+            .and_then(Value::as_u64)
+            .filter(|n| *n > 0);
+        Ok(Self {
+            features: result,
+            message_limit,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Invitation {
     pub id: u64,

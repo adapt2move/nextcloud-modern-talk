@@ -1,5 +1,6 @@
 //! Nextcloud HTTP/OCS deep module. Wire identifiers, authenticated transport and
 //! correlation journals stay here; core receives bounded normalized observations.
+mod avatar_upload;
 pub(crate) mod avatars;
 mod call_policy;
 mod content;
@@ -89,6 +90,10 @@ struct RoomBinding {
     token: String,
     server_id: Option<u64>,
     read_through: Option<u64>,
+    federated_capabilities: Option<(
+        std::time::Instant,
+        nextcloud_talk_api::federation::RemoteCapabilities,
+    )>,
 }
 struct PendingSend {
     operation: OperationId,
@@ -121,6 +126,7 @@ pub struct NextcloudClient {
     summaries: Vec<summary::Binding>,
     invitations: Vec<federation::Binding>,
     invitation_actions: Vec<OperationId>,
+    breakout_rooms: Vec<conversation::BreakoutBinding>,
     members: Vec<conversation::MemberBinding>,
     recipients: Vec<conversation::RecipientBinding>,
     people: Vec<people::PersonBinding>,
@@ -225,6 +231,7 @@ impl NextcloudClient {
             summaries: Vec::new(),
             invitations: Vec::new(),
             invitation_actions: Vec::new(),
+            breakout_rooms: Vec::new(),
             members: Vec::new(),
             recipients: Vec::new(),
             people: Vec::new(),
@@ -318,6 +325,7 @@ impl NextcloudClient {
             token: token.to_owned(),
             server_id,
             read_through: None,
+            federated_capabilities: None,
         });
         Ok(id)
     }
@@ -858,9 +866,17 @@ impl NextcloudClient {
                     if rooms.as_slice().iter().any(|r: &Conversation| r.id == id) {
                         return Err(self.error(ErrorKind::Malformed));
                     }
-                    let mut room = wire::room(data, id, &caps).map_err(|k| self.error(k))?;
-                    self.project_call(&mut room, data, &caps)?;
-                    self.project_room_tags(&mut room, data, &caps)?;
+                    let room_caps = self
+                        .cached_federation_capabilities(id, &caps)
+                        .unwrap_or_else(|| caps.clone());
+                    let room_caps = if wire::is_federated(data) {
+                        &room_caps
+                    } else {
+                        &caps
+                    };
+                    let mut room = wire::room(data, id, room_caps).map_err(|k| self.error(k))?;
+                    self.project_call(&mut room, data, room_caps)?;
+                    self.project_room_tags(&mut room, data, room_caps)?;
                     rooms
                         .try_push(room)
                         .map_err(|_| self.error(ErrorKind::TooLarge))?;

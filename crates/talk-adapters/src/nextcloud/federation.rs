@@ -11,6 +11,91 @@ pub(super) struct Binding {
 }
 
 impl NextcloudClient {
+    fn combine_federation_capabilities(
+        local: &Capabilities,
+        remote: &api::federation::RemoteCapabilities,
+    ) -> Capabilities {
+        let mut caps = local.clone();
+        caps.features
+            .retain(|feature| remote.features.contains(feature));
+        caps.federation_verified = true;
+        caps.read_receipts = Some(false);
+        caps.typing_status = Some(false);
+        caps.attachments_allowed = Some(false);
+        caps.translation_providers = Some(false);
+        caps.summary_threshold = None;
+        caps.call_enabled = Decision::Denied;
+        caps.message_limit = match (
+            local.message_limit,
+            remote
+                .message_limit
+                .and_then(|limit| u32::try_from(limit).ok()),
+        ) {
+            (Some(local), Some(remote)) => Some(local.min(remote)),
+            _ => None,
+        };
+        caps
+    }
+
+    pub(super) fn cached_federation_capabilities(
+        &self,
+        room: ConversationId,
+        local: &Capabilities,
+    ) -> Option<Capabilities> {
+        if !local.has("federation-v1")
+            || local.federation_enabled != Some(true)
+            || local.federation_incoming != Some(true)
+        {
+            return None;
+        }
+        let (_, remote) = self
+            .rooms
+            .iter()
+            .find(|item| item.id == room)?
+            .federated_capabilities
+            .as_ref()
+            .filter(|(expires, _)| *expires > std::time::Instant::now())?;
+        Some(Self::combine_federation_capabilities(local, remote))
+    }
+
+    pub(super) async fn federation_capabilities_for_room(
+        &mut self,
+        context: &OperationContext,
+        room: ConversationId,
+        local: &Capabilities,
+        fresh: bool,
+    ) -> Result<Capabilities, PortError> {
+        if !local.has("federation-v1")
+            || local.federation_enabled != Some(true)
+            || local.federation_incoming != Some(true)
+        {
+            return Err(self.error(ErrorKind::Unsupported));
+        }
+        if !fresh && let Some(cached) = self.cached_federation_capabilities(room, local) {
+            return Ok(cached);
+        }
+        let token = api::models::RoomToken::parse(self.check_room(room)?)
+            .map_err(|kind| self.error(transport::kind(kind)))?;
+        let api::Reply::FederatedRoomCapabilities(remote) = self
+            .transport
+            .api_request(context, api::Request::FederatedRoomCapabilities(token))
+            .await?
+        else {
+            return Err(self.error(ErrorKind::Malformed));
+        };
+        let combined = Self::combine_federation_capabilities(local, &remote);
+        let binding = self
+            .rooms
+            .iter_mut()
+            .find(|item| item.id == room)
+            .ok_or_else(|| self.transport.error(ErrorKind::WrongScope))?;
+        binding.federated_capabilities = Some((
+            std::time::Instant::now() + std::time::Duration::from_secs(20),
+            remote,
+        ));
+        Ok(combined)
+    }
+
     async fn federation_enabled(&mut self, context: &OperationContext) -> Result<bool, PortError> {
         let caps = self.capabilities(context).await?;
         self.supported(&caps)?;
@@ -118,7 +203,10 @@ impl NextcloudClient {
         };
         let response = self.transport.api_request(context, request).await?;
         match (accept, response) {
-            (true, api::Reply::Room(room)) if api::models::RoomToken::parse(&room.token).ok().as_ref() == Some(&token) && room.remote => {
+            (true, api::Reply::Room(room))
+                if api::models::RoomToken::parse(&room.token).ok().as_ref() == Some(&token)
+                    && room.remote =>
+            {
                 self.bind_room(&room.project())?;
             }
             (false, api::Reply::Acknowledged) => (),
