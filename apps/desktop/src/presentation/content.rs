@@ -150,6 +150,7 @@ pub(super) struct ContentUi {
     pub question: Entity<TextInput>,
     pub options: Vec<Entity<TextInput>>,
     option_count: usize,
+    poll_invalid_attempted: bool,
     multiple: bool,
     max_votes: u16,
     hidden_results: bool,
@@ -217,6 +218,7 @@ impl ContentUi {
                 .map(|_| cx.new(|cx| TextInput::new("Antwortoption", 1000, theme, cx)))
                 .collect(),
             option_count: 2,
+            poll_invalid_attempted: false,
             multiple: false,
             max_votes: 1,
             hidden_results: false,
@@ -529,6 +531,7 @@ impl Desktop {
             }
             self.content_ui.options.truncate(2);
             self.content_ui.option_count = 2;
+            self.content_ui.poll_invalid_attempted = false;
             self.content_ui.multiple = false;
             self.content_ui.max_votes = 1;
             self.content_ui.hidden_results = false;
@@ -683,6 +686,7 @@ impl Desktop {
                 self.content_ui.editing_draft = None;
                 self.content_ui.drafts_open = false;
                 self.content_ui.option_count = 2;
+                self.content_ui.poll_invalid_attempted = false;
                 self.content_ui.multiple = false;
                 self.content_ui.max_votes = 1;
                 self.content_ui.hidden_results = false;
@@ -1727,6 +1731,7 @@ impl Desktop {
                 {
                     return;
                 }
+                self.content_ui.poll_invalid_attempted = false;
                 self.content_ui.return_overlay = self.overlay;
                 self.content_ui.menu = false;
                 self.handle(LocalAction::Open(Overlay::CreatePoll), window, cx);
@@ -2130,6 +2135,9 @@ impl Desktop {
         ) {
             return false;
         }
+        if self.overlay == Some(Overlay::CreatePoll) {
+            self.content_ui.poll_invalid_attempted = false;
+        }
         if self.overlay == Some(Overlay::ContentPreview) {
             if !self.snapshot.selected.is_some_and(|c| {
                 c.account.runtime.as_local() == 0 || c.conversation.host.as_local() == 0
@@ -2334,10 +2342,18 @@ impl Desktop {
     pub(super) fn poll_drafts_open(&self) -> bool {
         self.content_ui.drafts_open
     }
-    pub(super) fn poll_dialog_preferred_height(&self) -> f32 {
+    pub(super) fn poll_dialog_preferred_height(&self, cx: &Context<Self>) -> f32 {
         let additional_options = self.content_ui.option_count.saturating_sub(2) as f32;
         let vote_limit = if self.content_ui.multiple { 48. } else { 0. };
-        (520. + additional_options * 52. + vote_limit).min(632.)
+        let validation = if self.content_ui.poll_invalid_attempted
+            && !self.content_ui.drafts_open
+            && self.poll_draft(cx).is_none()
+        {
+            48.
+        } else {
+            0.
+        };
+        (520. + additional_options * 52. + vote_limit + validation).min(632.)
     }
     pub(super) fn poll_drafts_header(&self, cx: &Context<Self>) -> Option<gpui::Stateful<Div>> {
         (self.content_scope_current() && self.snapshot.content_panel.poll_drafts_manage.enabled())
@@ -2518,7 +2534,7 @@ impl Desktop {
             .take(self.content_ui.option_count)
             .map(|input| input.read(cx).content.clone())
             .collect();
-        let options_interacted = options.iter().any(|value| !value.trim().is_empty());
+        let show_validation = self.content_ui.poll_invalid_attempted;
         body = div()
             .flex()
             .flex_col()
@@ -2528,8 +2544,11 @@ impl Desktop {
                 self.input_surface(&self.content_ui.question, cx)
                     .child(self.content_ui.question.clone()),
             );
-        if options_interacted && self.content_ui.question.read(cx).content.trim().is_empty() {
-            body = body.child(self.hint(self.l("Gib eine Frage ein.")));
+        if show_validation && self.content_ui.question.read(cx).content.trim().is_empty() {
+            body = body.child(
+                self.hint(self.l("Gib eine Frage ein."))
+                    .text_color(self.theme.danger),
+            );
         }
         if self.content_ui.editing_draft.is_some() {
             body = body.child(self.hint(self.l("Entwurf bearbeiten")));
@@ -2625,7 +2644,7 @@ impl Desktop {
                     ),
             );
         }
-        if options_interacted
+        if show_validation
             && (options.iter().any(|value| value.trim().is_empty())
                 || options.iter().enumerate().any(|(index, value)| {
                     options[..index]
@@ -2634,7 +2653,8 @@ impl Desktop {
                 }))
         {
             body = body.child(
-                self.hint(self.l("Mindestens zwei unterschiedliche Antwortoptionen eingeben.")),
+                self.hint(self.l("Mindestens zwei unterschiedliche Antwortoptionen eingeben."))
+                    .text_color(self.theme.danger),
             );
         }
         body = body
@@ -2798,7 +2818,33 @@ impl Desktop {
                     },
                     LocalAction::Content(Action::SubmitPoll),
                     cx,
-                )))
+                ).when(available && !busy && !valid && !self.background_inert, |button| {
+                    button
+                        .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, _, cx| {
+                            this.show_poll_validation(cx);
+                            cx.stop_propagation();
+                        }))
+                        .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.show_poll_validation(cx);
+                                cx.stop_propagation();
+                            }
+                        }))
+                })))
+    }
+
+    fn show_poll_validation(&mut self, cx: &mut Context<Self>) {
+        if self.overlay == Some(Overlay::CreatePoll)
+            && self.content_scope_current()
+            && self.snapshot.content == ContentState::Ready
+            && !self.media_offline()
+            && self.snapshot.content_panel.poll_create.enabled()
+            && !self.poll_submission_blocked()
+            && self.poll_draft(cx).is_none()
+        {
+            self.content_ui.poll_invalid_attempted = true;
+            cx.notify();
+        }
     }
     pub(super) fn poll_card(&self, id: u64, cx: &Context<Self>) -> Div {
         let Some(poll) = self

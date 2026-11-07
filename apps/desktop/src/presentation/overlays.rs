@@ -296,7 +296,7 @@ impl Desktop {
                 .into_any_element()
         };
         let preferred_height = match overlay {
-            Overlay::CreatePoll => self.poll_dialog_preferred_height(),
+            Overlay::CreatePoll => self.poll_dialog_preferred_height(cx),
             Overlay::CloudFiles => {
                 let rows = self
                     .snapshot

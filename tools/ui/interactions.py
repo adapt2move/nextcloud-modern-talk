@@ -494,6 +494,11 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'poll-dialog':
         expect('empty poll starts without validation warnings', ['Umfrage erstellen'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
+        click('Veröffentlichen', inspected_point=(1280, 800, 865, 650))
+        expect('an invalid publish attempt shows inline field reasons',
+               ['Gib eine Frage ein', 'Mindestens zwei unterschiedliche Antwortoptionen'])
+        if 'UI_POLL_FIXTURE create' in (out / f'{label}.log').read_text():
+            raise AssertionError('An invalid poll attempt must not submit a create intent')
         # Exercise plain-text paste in each poll input independently.
         for value, question in [('TEAMESSEN', True), ('GARTEN', False), ('WERKSTATT', False)]:
             if not question:
@@ -507,6 +512,8 @@ def exercise(scenario, env, xid, out, label, large=False):
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
         click('Veröffentlichen', inspected_point=(1280, 800, 865, 704))
         expect_settled('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
+        if (out / f'{label}.log').read_text().count('UI_POLL_FIXTURE create') != 1:
+            raise AssertionError('A valid poll should submit exactly once')
     elif scenario == 'poll-settings':
         expect('conversation settings omit the composer poll action', ['Allgemein', 'Nachrichten'], ['Umfrage erstellen'])
         click('auswählen', xmin=400, ymin=150)
