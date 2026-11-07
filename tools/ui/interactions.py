@@ -68,6 +68,8 @@ def exercise(scenario, env, xid, out, label, large=False):
                 count_text=normalized(run(['tesseract', str(count_path), 'stdout', '--psm', '7'], env).stdout)
                 count_path.unlink()
                 fuzzy_count=re.search(rf'\b{selection_count.group(1)}\s*ausge\w{{4,8}}', count_text)
+                if selection_count.group(1) == '1' and not fuzzy_count:
+                    fuzzy_count = re.search(r'^l\s*ausge\w{4,8}', count_text)
             aliases = {
                 'Projektübersicht.pdf': ('projektibersichtpdf', 'projektiibersichtpdf'),
                 'Zwischenablage.png': ('wischenablagepng',),
