@@ -62,21 +62,24 @@ impl Desktop {
         &self,
         avatar: Div,
         presence: Presence,
-        _avatar_size: f32,
+        avatar_size: f32,
         background: gpui::Hsla,
     ) -> Div {
         if presence == Presence::Unknown {
             return avatar;
         }
-        // The requested diameter excludes the two-point surface ring. Half of
-        // the footprint sits outside on each axis, keeping initials unobscured.
-        let diameter = 10.;
-        let footprint = diameter + 4.;
+        // Small sidebar avatars need more clearance for their initials. Keep
+        // most of the indicator outside while larger avatars retain their edge.
+        let (right, bottom) = if avatar_size <= 24. {
+            (9., 8.)
+        } else {
+            (7., 7.)
+        };
         div().flex_none().relative().child(avatar).child(
             self.presence_indicator(self.theme.presence_dot(presence), background)
                 .absolute()
-                .right(px(-footprint / 2.))
-                .bottom(px(-footprint / 2.)),
+                .right(px(-right))
+                .bottom(px(-bottom)),
         )
     }
     pub fn shell(&self, window: &Window, cx: &Context<Self>) -> Div {

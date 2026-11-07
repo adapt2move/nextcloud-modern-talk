@@ -65,13 +65,13 @@ impl Theme {
         };
         vec![
             BoxShadow {
-                color: color.opacity(if self.dark { 0.18 } else { 0.05 } * strength),
+                color: color.opacity(if self.dark { 0.22 } else { 0.07 } * strength),
                 offset: point(px(0.), px(1.)),
                 blur_radius: px(2.),
                 spread_radius: px(0.),
             },
             BoxShadow {
-                color: color.opacity(if self.dark { 0.35 } else { 0.07 } * strength),
+                color: color.opacity(if self.dark { 0.40 } else { 0.10 } * strength),
                 offset: point(px(0.), px(offset)),
                 blur_radius: px(blur),
                 spread_radius: px(0.),
@@ -186,10 +186,10 @@ impl Theme {
             ],
         };
         let (disabled, hover, segment) = match (dark, sage) {
-            (false, false) => (0x4f6078, 0xeaf0f8, 0xffffff),
+            (false, false) => (0x485b75, 0xeaf0f8, 0xffffff),
             (false, true) => (0x515d53, 0xeef1eb, 0xffffff),
-            (true, false) => (0x9fb2c9, 0x293646, 0x2e3b4d),
-            (true, true) => (0x9bafa1, 0x2d3a32, 0x33413a),
+            (true, false) => (0xa8b9cf, 0x293646, 0x2e3b4d),
+            (true, true) => (0xa7baad, 0x2d3a32, 0x33413a),
         };
         Self {
             dark,
@@ -207,7 +207,13 @@ impl Theme {
             surface: color(values[2]),
             subtle: color(values[3]),
             text: color(values[4]),
-            muted: color(values[5]),
+            // Secondary labels also remain readable over a blurred, strongly
+            // contrasting backdrop; the underlying surface palette is intact.
+            muted: color(match (dark, sage) {
+                (false, false) => 0x485b75,
+                (false, true) => 0x515d53,
+                _ => values[5],
+            }),
             placeholder: color(match (dark, sage) {
                 (false, false) => 0x657285,
                 (false, true) => 0x6b736a,

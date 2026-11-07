@@ -2128,11 +2128,16 @@ impl Desktop {
                         .child(self.history_boundary(cx)),
                 )
             } else {
-                body.child(div().flex_1().child(self.state_note(
-                    "chat",
-                    "Noch keine Nachrichten.",
-                    "Hier erscheinen die Nachrichten dieses Gesprächs.",
-                )))
+                body.child(
+                    div().flex_1().min_h_0().child(
+                        self.state_note(
+                            "chat",
+                            "Noch keine Nachrichten.",
+                            "Hier erscheinen die Nachrichten dieses Gesprächs.",
+                        )
+                        .size_full(),
+                    ),
+                )
             };
         } else if state.initial_loading() || context_pending {
             body = body.child(self.collection_skeleton(Skeleton::Messages, "messages"));

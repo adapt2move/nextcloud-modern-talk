@@ -10,6 +10,7 @@ pub(in crate::presentation) const CONTENT_RADIUS: f32 = 16.;
 #[derive(Clone, Copy)]
 pub(in crate::presentation) enum CardStyle {
     Inset,
+    InsetRaised,
     Raised,
     Outlined,
 }
@@ -35,6 +36,9 @@ impl Desktop {
         let card = card.rounded(px(12.));
         match style {
             CardStyle::Inset => card.bg(self.theme.subtle),
+            CardStyle::InsetRaised => card
+                .bg(self.theme.subtle)
+                .shadow(self.theme.elevation(Elevation::Raised)),
             CardStyle::Raised => card
                 .bg(self.theme.surface)
                 .border_1()

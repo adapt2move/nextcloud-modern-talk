@@ -1,6 +1,6 @@
 //! Shared form geometry. Focus borders and disabled pointer behavior use the same
 //! control owner as buttons; input entities retain editing and IME state.
-use crate::presentation::{Desktop, input::TextInput};
+use crate::presentation::{Desktop, input::TextInput, theme::Elevation};
 use gpui::{Context, Div, Entity, Focusable, FontWeight, div, prelude::*, px};
 
 #[derive(Clone, Copy)]
@@ -21,9 +21,11 @@ impl Desktop {
             .border_1()
             .border_color(self.theme.input_border)
             .bg(self.theme.surface)
+            .shadow(self.theme.elevation(Elevation::Raised))
             .flex()
             .flex_col()
             .gap_2()
+            .child(super::inner_highlight(self.theme, 12.))
     }
     /// Geometry shared by list rows; callers retain their own action and focus.
     pub(in crate::presentation) fn style_list_row<T: Styled>(&self, row: T, size: RowSize) -> T {

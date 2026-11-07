@@ -2905,7 +2905,8 @@ impl Desktop {
             .max_w(px(if full { 620. } else { 480. }))
             .gap_2()
             .when(!full, |d| {
-                self.style_card(d.p_4(), super::controls::CardStyle::Inset)
+                self.style_card(d.relative().p_4(), super::controls::CardStyle::InsetRaised)
+                    .child(super::controls::inner_highlight(self.theme, 12.))
             })
             .child(
                 div()

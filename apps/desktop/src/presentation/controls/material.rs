@@ -6,8 +6,8 @@ use gpui::{
 };
 
 const TILE: f32 = 128.;
-const LIGHT_GLASS_ALPHA: f32 = 0.95;
-const DARK_GLASS_ALPHA: f32 = 0.92;
+const LIGHT_GLASS_ALPHA: f32 = 0.87;
+const DARK_GLASS_ALPHA: f32 = 0.88;
 // A window cannot create an unbounded number of retained decorative views.
 const MAX_TILES_PER_AXIS: usize = 64;
 
@@ -25,7 +25,9 @@ pub(in crate::presentation) fn glass_corners(
     canvas(
         |_, _, _| (),
         move |bounds, (), window, _| {
-            let supported = window.paint_backdrop(bounds, corners, px(18.));
+            // A compact blur keeps moving content visibly softened through the
+            // accessible tint instead of washing it into an indistinct flat fill.
+            let supported = window.paint_backdrop(bounds, corners, px(4.));
             let fill = if supported {
                 tint.opacity(if dark {
                     DARK_GLASS_ALPHA

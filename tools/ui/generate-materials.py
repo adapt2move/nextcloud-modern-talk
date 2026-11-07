@@ -39,8 +39,9 @@ def generate():
         data = bytearray()
         for y in range(SIDE):
             for x in range(SIDE):
-                # One 3.5%-opacity dot per 16 logical pixels.
-                data.extend((*color, 9 if x % 16 == 8 and y % 16 == 8 else 0))
+                # A tiny rounded, 4.7%-opacity dot per 16 logical pixels.
+                dot = abs(x % 16 - 8) + abs(y % 16 - 8) <= 1
+                data.extend((*color, 12 if dot else 0))
         return data
 
     return {
