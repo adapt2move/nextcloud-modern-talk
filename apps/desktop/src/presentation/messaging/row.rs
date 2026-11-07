@@ -623,6 +623,13 @@ impl Desktop {
                 self.l("Lange Nachricht gekürzt angezeigt. Bearbeiten ist hier nicht verfügbar."),
             ));
         }
+        let has_toolbar =
+            !m.metadata.deleted && upload.is_none() && self.media_span(m.local_id).is_none();
+        let toolbar_id = row_id("message-toolbar-reveal", 0);
+        let hovered_id = toolbar_id.clone();
+        let toolbar_admission = self
+            .toolbar_hover
+            .admission(&toolbar_id, std::time::Instant::now());
         div()
         .when(!thread && self.message_ui.first_unread == Some((context, m.local_id)), |row| {
             row.child(
@@ -636,6 +643,13 @@ impl Desktop {
             div()
                 .id(row_id("message", 0))
                 .group(action_group.clone())
+                .when(has_toolbar && !self.background_inert, |row| {
+                    row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                        if this.toolbar_hover.update(&hovered_id, *hovered, this.reduced_motion, std::time::Instant::now()) {
+                            cx.notify();
+                        }
+                    }))
+                })
                 .relative()
                 .px(px(if compact { 8. } else { 24. }))
                 .py(px(if continuation { 3. } else if compact { 4. } else { 12. }))
@@ -727,9 +741,9 @@ impl Desktop {
                 // Hover/menu controls never enter the message's flex layout.
                 // Revealing them cannot move text, metadata or delivery status.
                 .when(
-                    !m.metadata.deleted && upload.is_none() && self.media_span(m.local_id).is_none(),
+                    has_toolbar,
                     |d| {
-                        d.child(
+                        d.child(self.reveal_observation(toolbar_id,
                         div()
                             .absolute()
                             // One surface frames the tools without changing row geometry.
@@ -832,7 +846,7 @@ impl Desktop {
                                 .group_hover(action_group, |s| s.opacity(1.))
                                 .focus(|s| s.opacity(1.)),
                             ),
-                    )
+                        toolbar_admission))
                     },
                 ),
         )

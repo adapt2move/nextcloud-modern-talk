@@ -330,6 +330,7 @@ pub struct Desktop {
     reduced_motion: bool,
     motion_trigger: Option<motion::MotionTrigger>,
     unread_pop: Option<(ConversationRef, Instant)>,
+    toolbar_hover: motion::HoverMotion,
     dialog_motion: motion::DialogMotion,
     motion_frames: std::rc::Rc<std::cell::Cell<u64>>,
     emoji_picker_pending: Option<(ConversationRef, u64)>,
@@ -738,6 +739,7 @@ impl Desktop {
             reduced_motion: settings_port.reduced_motion(),
             motion_trigger: None,
             unread_pop: None,
+            toolbar_hover: motion::HoverMotion::default(),
             dialog_motion: motion::DialogMotion::default(),
             motion_frames: Default::default(),
             emoji_picker_pending: None,
@@ -1063,6 +1065,7 @@ impl Desktop {
             self.reduced_motion = reduced_motion;
             self.motion_trigger = None;
             self.unread_pop = None;
+            self.toolbar_hover.clear();
             cx.notify();
         }
         self.refresh_preferences(cx);
@@ -1097,6 +1100,11 @@ impl Desktop {
             ));
             cx.notify();
             return;
+        }
+        if self.snapshot.selected != next.selected
+            || self.snapshot.active_account != next.active_account
+        {
+            self.toolbar_hover.clear();
         }
         match motion::unread_update(&self.snapshot, &next, self.reduced_motion) {
             motion::UnreadUpdate::Retire => self.unread_pop = None,

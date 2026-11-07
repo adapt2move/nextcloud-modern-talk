@@ -137,6 +137,41 @@ pub(super) struct MotionTrigger {
     pub kind: TriggerKind,
     pub admitted: Instant,
 }
+
+/// One visible toolbar admission per window; moving within a row does not
+/// restart it, and a late leave from an older row cannot clear the new one.
+#[derive(Default)]
+pub(super) struct HoverMotion {
+    target: Option<(ElementId, Instant)>,
+}
+impl HoverMotion {
+    pub fn update(&mut self, id: &ElementId, hovered: bool, reduced: bool, now: Instant) -> bool {
+        if reduced {
+            return self.target.take().is_some();
+        }
+        let current = self.target.as_ref().is_some_and(|(target, _)| target == id);
+        if hovered && !current {
+            self.target = Some((id.clone(), now));
+            true
+        } else if !hovered && current {
+            self.target = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn admission(&self, id: &ElementId, now: Instant) -> Option<Instant> {
+        self.target
+            .as_ref()
+            .filter(|(target, at)| target == id && now.saturating_duration_since(*at) < REVEAL)
+            .map(|(_, at)| *at)
+    }
+
+    pub fn clear(&mut self) {
+        self.target = None;
+    }
+}
 impl MotionTrigger {
     fn switch_from(&self, id: &ElementId, value: Option<bool>, now: Instant) -> Option<bool> {
         let TriggerKind::Switch(from) = self.kind else {
@@ -682,5 +717,22 @@ mod tests {
         assert_eq!(pulse.pulse_elapsed(&id, now + CONTROL), None);
         assert_eq!(pulse.pulse_elapsed(&ElementId::from("another"), now), None);
         assert_eq!(pulse.reveal_elapsed(&id, now), None);
+    }
+
+    #[test]
+    fn hover_reveal_does_not_restart_or_let_an_old_leave_cancel_a_new_row() {
+        let now = Instant::now();
+        let first = ElementId::from("first");
+        let second = ElementId::from("second");
+        let mut hover = HoverMotion::default();
+        assert!(hover.update(&first, true, false, now));
+        assert!(!hover.update(&first, true, false, now + CONTROL));
+        assert_eq!(hover.admission(&first, now + CONTROL), Some(now));
+        assert_eq!(hover.admission(&first, now + REVEAL), None);
+        assert!(hover.update(&second, true, false, now + CONTROL));
+        assert!(!hover.update(&first, false, false, now + CONTROL));
+        assert_eq!(hover.admission(&second, now + CONTROL), Some(now + CONTROL));
+        assert!(hover.update(&second, true, true, now + CONTROL));
+        assert_eq!(hover.admission(&second, now + CONTROL), None);
     }
 }
