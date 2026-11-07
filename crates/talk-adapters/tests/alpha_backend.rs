@@ -927,6 +927,45 @@ async fn released_server_messaging_and_room_controls() {
             .iter()
             .any(|message| message.message.id == nested)
     );
+    let MR::Messages { messages, .. } = m(
+        &mut client,
+        &runtime,
+        id,
+        140,
+        "thread-live-room-poll",
+        M::Poll {
+            after: thread,
+            thread: None,
+        },
+    )
+    .await
+    else {
+        panic!("thread live poll")
+    };
+    assert!(
+        messages
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == nested && message.thread == Some(thread))
+    );
+    let MR::Threads(threads) = m(
+        &mut client,
+        &runtime,
+        id,
+        141,
+        "thread-live-count",
+        M::Threads,
+    )
+    .await
+    else {
+        panic!("thread activity")
+    };
+    assert!(
+        threads
+            .as_slice()
+            .iter()
+            .any(|item| item.root == thread && item.replies >= 2)
+    );
     m(
         &mut client,
         &runtime,

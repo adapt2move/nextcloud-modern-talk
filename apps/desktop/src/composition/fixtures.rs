@@ -1350,6 +1350,7 @@ impl DevelopmentPort {
                     "chat-ux"
                         | "chat-ux-call"
                         | "chat-edit"
+                        | "thread"
                         | "thread-error"
                         | "thread-list"
                         | "thread-paged"

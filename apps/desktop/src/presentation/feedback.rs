@@ -95,6 +95,11 @@ impl Feedback {
                 .surface
                 .is_none_or(|expected| expected == overlay.into())
     }
+    fn visible_in_composer(self, context: ConversationRef, thread: bool) -> bool {
+        let surface = thread.then_some(Overlay::Thread);
+        self.visible_in(Some(context), surface)
+            && (!thread || self.surface == Some(Surface::Overlay(Overlay::Thread)))
+    }
     pub fn expired(self, now: Instant) -> bool {
         self.expires_at.is_some_and(|deadline| now >= deadline)
     }
@@ -218,6 +223,10 @@ impl Desktop {
         self.feedback
             .is_some_and(|f| f.visible_in(self.snapshot.selected, self.overlay))
     }
+    pub(super) fn composer_feedback_visible(&self, context: ConversationRef, thread: bool) -> bool {
+        self.feedback
+            .is_some_and(|feedback| feedback.visible_in_composer(context, thread))
+    }
     pub(super) fn incoming_visible(&self) -> bool {
         self.snapshot.call.as_ref().is_some_and(|c| {
             c.stage == CallStage::Incoming && Some(c.scope) != self.dismissed_incoming
@@ -230,10 +239,17 @@ impl Desktop {
             && !self.incoming_visible()
     }
     pub(super) fn feedback_view(&self, cx: &Context<Self>) -> AnyElement {
+        self.feedback_view_on(self.overlay, cx)
+    }
+    pub(super) fn feedback_view_on(
+        &self,
+        overlay: Option<Overlay>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let t = self.theme;
         let Some(f) = self
             .feedback
-            .filter(|f| f.visible_in(self.snapshot.selected, self.overlay))
+            .filter(|f| f.visible_in(self.snapshot.selected, overlay))
         else {
             return div().into_any_element();
         };
@@ -396,6 +412,22 @@ mod tests {
         let mut newer_runtime = context(1);
         newer_runtime.account.runtime = RuntimeGeneration::from_local(2);
         assert!(!result.visible_in(Some(newer_runtime), Some(Overlay::Thread)));
+    }
+
+    #[test]
+    fn docked_composer_feedback_stays_on_its_own_surface() {
+        let room = context(1);
+        let thread = Feedback::error("Thread draft")
+            .in_conversation(room)
+            .on_surface(Some(Overlay::Thread));
+        assert!(thread.visible_in_composer(room, true));
+        assert!(!thread.visible_in_composer(room, false));
+        let main = Feedback::error("Main draft")
+            .in_conversation(room)
+            .on_surface(None);
+        assert!(main.visible_in_composer(room, false));
+        assert!(!main.visible_in_composer(room, true));
+        assert!(!thread.visible_in_composer(context(2), true));
     }
 
     #[test]

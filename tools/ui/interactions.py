@@ -152,6 +152,39 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('escape closes settings and restores draft', ['DRAFTALPHA'], ['Einstellungen'])
         type_text('X')
         expect('modal returns focus to invoking composer', ['DRAFTALPHAX'])
+    elif scenario == 'thread':
+        words = expect('thread pane uses shared message and composer surfaces',
+                       ['Design review', '2 Antworten', 'Mara Fischer', 'Im Thread antworten'])
+        before = next(int(word['left']) for word in words
+                      if normalized(word['text']).startswith('design')
+                      and int(word['top']) < 120 and int(word['left']) > 700)
+        run(['xdotool', 'mousemove', '--window', xid, '883', '400', 'mousedown', '1'], env)
+        run(['xdotool', 'mousemove', '--sync', '--window', xid, '870', '400'], env)
+        time.sleep(.3)
+        run(['xdotool', 'mousemove', '--sync', '--window', xid, '800', '400', 'mouseup', '1'], env)
+        time.sleep(1.5)
+        words = expect('thread resize keeps its content visible', ['Design review', '2 Antworten'])
+        after = next(int(word['left']) for word in words
+                     if normalized(word['text']).startswith('design')
+                     and int(word['top']) < 120 and int(word['left']) > 700)
+        if before - after < 30:
+            raise AssertionError('Dragging the left edge did not resize the thread pane')
+        checks.append({'check': 'thread pane resizes by dragging its left edge', 'result': 'pass'})
+        click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1010,700))
+        type_text('THREADDRAFT')
+        time.sleep(1.5)
+        expect('thread composer accepts text', ['THREADDRAFT'])
+        key('Return')
+        words = expect('thread Enter retains the draft after a rejected submission', ['THREADDRAFT', 'Nicht gesendet'])
+        if any(normalized(word['text']) == 'nicht' and int(word['left']) < after - 10 for word in words):
+            raise AssertionError('Thread submission feedback appeared in the main composer')
+        log = (out / f'{label}.log').read_text()
+        if not re.search(r'UI_CHAT_UX send room=\d+ bytes=11 .*thread=Some\(1\)', log):
+            raise AssertionError('Enter did not submit the draft to the scoped thread')
+        checks.append({'check': 'thread Enter submits the scoped draft', 'result': 'pass'})
+        key('Escape')
+        expect('Escape closes the thread pane and returns to the room',
+               ['Designteam'], ['Design review', 'THREADDRAFT'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])

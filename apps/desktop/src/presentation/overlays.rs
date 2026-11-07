@@ -339,7 +339,8 @@ impl Desktop {
                             d.child(self.creation_footer(cx))
                         })
                         .when(
-                            self.feedback_visible() && overlay != Overlay::CallChat,
+                            self.feedback_visible()
+                                && !matches!(overlay, Overlay::CallChat | Overlay::Thread),
                             |d| {
                                 d.child(
                                     div()

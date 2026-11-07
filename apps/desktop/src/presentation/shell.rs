@@ -639,13 +639,13 @@ impl Desktop {
                         d.child(self.hint(self.l(crate::presentation::input::RICH_REJECTION)))
                     })
                     .when(
-                        self.feedback_visible()
+                        self.composer_feedback_visible(row.context, thread)
                             && self.feedback.is_some_and(|f| {
                                 f.context == Some(row.context)
                                     || (f.context.is_none() && self.snapshot.call.is_none())
                             })
                             && self.composer_available(),
-                        |d| d.child(self.feedback_view(cx)),
+                        |d| d.child(self.feedback_view_on(thread.then_some(Overlay::Thread), cx)),
                     )
                     .when(!self.background_inert, |d| {
                         d.child(self.reason_tip(

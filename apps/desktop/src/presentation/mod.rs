@@ -787,7 +787,11 @@ impl Desktop {
                     "Sendestatus unklar. Vor erneutem Senden muss der Status abgeglichen werden.",
                 )),
             }
-            .map(|feedback| feedback.in_conversation(completed_context.unwrap_or(result.context)));
+            .map(|feedback| {
+                feedback
+                    .in_conversation(completed_context.unwrap_or(result.context))
+                    .on_surface(None)
+            });
             reset_draft = completed_context == next.selected && composer_unchanged;
             // A Busy acknowledgement leaves the same result in the producer's latest slot.
             self.pending_ack = Some(result);
@@ -821,7 +825,11 @@ impl Desktop {
                     "Sendestatus unklar. Vor erneutem Senden muss der Status abgeglichen werden.",
                 )),
             }
-            .map(|notice| notice.in_conversation(result.context));
+            .map(|notice| {
+                notice
+                    .in_conversation(result.context)
+                    .on_surface(Some(Overlay::Thread))
+            });
             self.pending_ack = Some(result);
         }
         if let Some(result) = next.organization_result {
