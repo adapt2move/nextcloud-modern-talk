@@ -1503,5 +1503,25 @@
       "api": null,
       "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
     }
+  ],
+  "external_operations": [
+    {
+      "operation_id": "nextcloud-search-providers",
+      "method": "GET",
+      "path": "/ocs/v2.php/search/providers",
+      "status": "implemented",
+      "api": "Request::SearchProviders",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/core/Controller/UnifiedSearchController.php",
+      "scope": "Bounded discovery of the talk-message provider and advertised filters; no third-party provider is queried."
+    },
+    {
+      "operation_id": "nextcloud-search-talk-message",
+      "method": "GET",
+      "path": "/ocs/v2.php/search/providers/talk-message/search",
+      "status": "implemented",
+      "api": "Request::SearchMessages",
+      "source": "https://github.com/nextcloud/spreed/blob/eed360d176edcb6888dad60965cb694e6bf62ae3/lib/Search/MessageSearch.php",
+      "scope": "Bounded account-wide message results and cursor, with provider-advertised filters and owner-scoped identities."
+    }
   ]
 }

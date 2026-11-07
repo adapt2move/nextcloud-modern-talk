@@ -323,6 +323,16 @@ impl Accounts {
             self.queued_read.clear();
         }
         if state == ContentState::Denied {
+            if let Some(panel) = &mut self.snapshot.search_panel {
+                panel.hits = page(
+                    panel
+                        .hits
+                        .as_slice()
+                        .iter()
+                        .filter(|hit| hit.context != context)
+                        .cloned(),
+                );
+            }
             self.revoke_room_metadata(context, UnavailableReason::PermissionDenied);
             self.invalidate_cached_room(context);
         }

@@ -6,6 +6,7 @@ pub mod conversation;
 pub mod messaging;
 /// Additive native presentation contract; the bootstrap consumer remains source-compatible.
 pub mod presentation;
+pub mod search;
 
 // Explicit data-only exports are the complete renderer vocabulary. Adding an export
 // requires review of its transitive fields and the matching checker allowlist.

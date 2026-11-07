@@ -19,6 +19,7 @@ pub mod notifications;
 pub mod poll;
 pub mod presence;
 pub mod scope;
+pub mod search;
 pub mod signaling;
 mod transport;
 pub use error::{ErrorKind, PortError as Error, Retry};
@@ -73,6 +74,8 @@ pub enum Request {
         room: RoomToken,
         command: conversation::Command,
     },
+    SearchProviders,
+    SearchMessages(search::Query),
     Account,
     Capabilities,
     Rooms,
@@ -146,6 +149,7 @@ pub enum Request {
     LeaveCall(RoomToken),
 }
 pub enum Reply {
+    SearchProvider(Option<search::Provider>),
     Chat(chat::Response),
     Conversation(conversation::Response),
     Account(Account),
@@ -703,6 +707,7 @@ impl Client {
 }
 #[derive(Clone, Copy)]
 enum Kind {
+    SearchProviders,
     Chat(chat::ResponseKind),
     Conversation(conversation::ResponseKind),
     Account,
@@ -748,6 +753,14 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
     let (method, route, query, form, kind) = match request {
         Request::Chat { room, command } => return chat::plan(room, command),
         Request::Conversation { room, command } => return conversation::plan(room, command),
+        Request::SearchProviders => (
+            Method::GET,
+            "ocs/v2.php/search/providers".into(),
+            vec![],
+            vec![],
+            Kind::SearchProviders,
+        ),
+        Request::SearchMessages(query) => return search::plan(query),
         Request::Account => (
             Method::GET,
             "ocs/v2.php/cloud/user".into(),
@@ -1074,6 +1087,7 @@ fn list<T>(
 fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
     let v = &r.data;
     Ok(match kind {
+        Kind::SearchProviders => return search::providers(v),
         Kind::Chat(kind) => return chat::decode(kind, v),
         Kind::Conversation(kind) => return conversation::decode(kind, v),
         Kind::Account => Reply::Account(Account::decode(v)?),

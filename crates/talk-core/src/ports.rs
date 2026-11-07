@@ -89,6 +89,7 @@ pub struct OperationContext {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolRequest {
+    SearchMessages(crate::protocol::search::Query),
     Content {
         operation: OperationId,
         command: crate::protocol::content::ContentCommand,
@@ -176,6 +177,7 @@ pub enum ProtocolRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolReply {
+    SearchMessages(crate::protocol::search::Results),
     Content {
         operation: OperationId,
         result: crate::protocol::content::ContentResult,

@@ -516,6 +516,7 @@ pub struct PresentationSnapshot {
     pub content_panel: super::content::ContentPanel,
     pub file_export: Option<super::content::FileExportView>,
     pub create_panel: Option<super::conversation::CreatePanel>,
+    pub search_panel: Option<super::search::Panel>,
     pub revision: u64,
     pub login: LoginView,
     pub accounts: Page<AccountView, 8>,
@@ -552,6 +553,11 @@ pub struct ConversationListState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiIntent {
+    AccountSearch {
+        account: AccountScope,
+        request: RequestId,
+        action: super::search::Action,
+    },
     /// Acknowledge or cancel only this native promise, including after navigation.
     FinishFileExport {
         request: RequestId,

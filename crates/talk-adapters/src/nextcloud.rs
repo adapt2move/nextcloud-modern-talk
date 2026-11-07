@@ -16,6 +16,7 @@ mod pdf_preview;
 mod people;
 mod preferences;
 mod projection;
+mod search;
 mod tags;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod test_support;
@@ -783,6 +784,9 @@ impl NextcloudClient {
         let caps = self.capabilities(context).await?;
         self.supported(&caps)?;
         match request {
+            ProtocolRequest::SearchMessages(query) => {
+                self.account_search(context, query, &caps).await
+            }
             ProtocolRequest::Content { operation, command } => Ok(ProtocolReply::Content {
                 operation,
                 result: self.content(context, operation, command, &caps).await?,

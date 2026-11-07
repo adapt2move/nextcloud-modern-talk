@@ -13,6 +13,7 @@ mod outbox;
 mod preview;
 mod reads;
 mod removal;
+mod search;
 mod startup;
 mod update;
 use crate::diagnostics::{
@@ -57,6 +58,7 @@ enum Purpose {
     Content(OperationId),
     Files(files::Work),
     Create(RequestId, AccountScope, creation::Work),
+    Search(RequestId, AccountScope, bool),
     Room(RequestId, ConversationRef, OperationId, conversations::Work),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
     IncomingCalls(AccountScope),
@@ -142,6 +144,7 @@ pub struct Accounts {
     outbox: outbox::Outbox,
     room_invite: Option<(RequestId, talk_core::ui::conversation::PersonRef)>,
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
+    account_search: Option<protocol::search::Query>,
     notices: notifications::Notices,
     background: background::Background,
     history: history::Cache,
@@ -188,6 +191,7 @@ impl Accounts {
             outbox: outbox::Outbox::default(),
             room_invite: None,
             message_search: None,
+            account_search: None,
             notices: notifications::Notices::default(),
             background: background::Background::default(),
             history: history::Cache::default(),
@@ -319,6 +323,8 @@ impl Accounts {
             return;
         }
         self.snapshot.active_account = scope;
+        self.account_search = None;
+        self.snapshot.search_panel = None;
         self.snapshot.create_panel = scope.map(talk_core::ui::conversation::CreatePanel::new);
         self.snapshot.conversations = scope
             .and_then(|s| self.background.account(s))
@@ -660,6 +666,7 @@ impl Accounts {
             Purpose::Content(operation) => self.complete_content(operation, result),
             Purpose::Files(work) => self.complete_file_work(work, result),
             Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
+            Purpose::Search(request,account,append)=>self.complete_account_search(request,account,append,result),
             Purpose::Room(request, context, operation, work) => self.complete_room(request, context, operation, work, result),
             Purpose::Message(request, context, operation, work) => {
                 self.complete_message((request, done.request.0), context, operation, work, result);
@@ -975,6 +982,11 @@ impl Accounts {
             return result;
         }
         match intent {
+            UiIntent::AccountSearch {
+                account,
+                request,
+                action,
+            } => self.submit_account_search(account, request, action)?,
             UiIntent::FinishFileExport { request, context } => {
                 self.finish_file_export(request, context)
             }

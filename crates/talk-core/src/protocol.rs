@@ -294,3 +294,4 @@ pub struct CallObservation {
 pub mod content;
 pub mod conversation;
 pub mod messaging;
+pub mod search;

@@ -592,6 +592,29 @@ impl Drafts {
 
 /// Defensive renderer validation. Producers still own full permission/lifecycle decisions.
 pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
+    if snapshot.search_panel.as_ref().is_some_and(|panel| {
+        Some(panel.account) != snapshot.active_account
+            || panel
+                .filters
+                .conversation
+                .is_some_and(|c| c.account != panel.account || !c.is_consistent())
+            || panel
+                .filters
+                .person
+                .is_some_and(|p| p.account != panel.account)
+            || panel.hits.as_slice().iter().any(|hit| {
+                hit.context.account != panel.account
+                    || !hit.context.is_consistent()
+                    || hit.message == 0
+                    || !snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .any(|r| r.context == hit.context)
+            })
+    }) {
+        return false;
+    }
     if snapshot.create_panel.as_ref().is_some_and(|panel| {
         Some(panel.account) != snapshot.active_account
             || panel
@@ -799,6 +822,7 @@ mod tests {
             content_panel: Default::default(),
             file_export: None,
             create_panel: None,
+            search_panel: None,
             revision: 1,
             login: LoginView {
                 phase: LoginPhase::EnterServer,

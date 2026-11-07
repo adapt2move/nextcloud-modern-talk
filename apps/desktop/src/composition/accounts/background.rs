@@ -383,6 +383,7 @@ impl Purpose {
     fn account(self) -> Option<AccountScope> {
         self.room().map(|c| c.account).or(match self {
             Self::Create(_, s, _)
+            | Self::Search(_, s, _)
             | Self::IncomingCalls(s)
             | Self::MessageNotifications(s)
             | Self::LiveEvents(s)
@@ -725,6 +726,26 @@ impl Accounts {
                     );
                 }
                 if self.snapshot.active_account == Some(scope) {
+                    if let Some(panel) = self
+                        .snapshot
+                        .search_panel
+                        .as_mut()
+                        .filter(|p| p.account == scope)
+                    {
+                        panel.hits = page(
+                            panel
+                                .hits
+                                .as_slice()
+                                .iter()
+                                .filter(|hit| {
+                                    list.rooms.as_slice().iter().any(|room| {
+                                        room.id == hit.context.conversation
+                                            && room.actions.read_messages == Decision::Allowed
+                                    })
+                                })
+                                .cloned(),
+                        );
+                    }
                     self.snapshot.conversations = rows;
                     self.snapshot.conversation_list = state;
                     self.restore_cache_selection();

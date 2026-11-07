@@ -40,6 +40,11 @@ fn metadata_identity(room: &protocol::Conversation) -> protocol::Conversation {
     identity
 }
 impl Metadata {
+    pub(super) fn readable(&self, context: ConversationRef) -> bool {
+        self.rooms.iter().any(|room| {
+            room.context == context && room.listed.actions.read_messages == Decision::Allowed
+        })
+    }
     pub(super) fn hint(&mut self) -> Vec<ConversationRef> {
         self.hinted = true;
         let mut retired = Vec::new();

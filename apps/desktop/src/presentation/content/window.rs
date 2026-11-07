@@ -157,6 +157,7 @@ mod tests {
             content_panel: Default::default(),
             file_export: None,
             create_panel: None,
+            search_panel: None,
             revision: 1,
             login: LoginView {
                 phase: LoginPhase::Ready,

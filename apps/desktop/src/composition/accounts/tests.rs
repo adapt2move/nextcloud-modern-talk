@@ -748,6 +748,7 @@ pub(super) fn model() -> Accounts {
         outbox: outbox::Outbox::default(),
         room_invite: None,
         message_search: None,
+        account_search: None,
         notices: notifications::Notices::default(),
         background: background::Background::default(),
         history: history::Cache::default(),
