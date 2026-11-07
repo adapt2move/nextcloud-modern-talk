@@ -44,6 +44,12 @@ def exercise(scenario, env, xid, out, label, large=False):
         run(["convert",str(path),"-crop",f"{width}x120+0+{height-120}","+repage","-resize","300%","-colorspace","gray","-auto-level",str(ocr_path)],env)
         text += normalized(run(["tesseract",str(ocr_path),"stdout","--psm","6"],env).stdout)
         ocr_path.unlink()
+        if scenario == 'server' and (width, height) == (1280, 800):
+            field_path = out / f'{label}-ocr-field.png'
+            run(['convert', str(path), '-crop', '416x48+596+304', '+repage', '-resize', '400%',
+                 '-colorspace', 'gray', '-auto-level', str(field_path)], env)
+            text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
+            field_path.unlink()
         if scenario == 'chat-cloud-files-offline' and (width, height) == (1280, 800):
             banner_path = out / f'{label}-ocr-banner.png'
             run(['convert', str(path), '-crop', '700x36+277+288', '+repage', '-resize', '400%',
