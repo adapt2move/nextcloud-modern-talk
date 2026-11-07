@@ -26,6 +26,175 @@ fn occupied(model: &mut Accounts, work: Work) {
 }
 
 #[test]
+fn unread_location_preserves_the_room_scope_and_start_sentinel() {
+    let room = crate::composition::fixtures::context(1);
+    assert!(matches!(
+        Read::UnreadAfter(0).command(room),
+        Ok(wire::MessagingCommand::UnreadAfter(None))
+    ));
+    let Ok(wire::MessagingCommand::UnreadAfter(Some(marker))) = Read::UnreadAfter(42).command(room)
+    else {
+        panic!("scoped unread cursor")
+    };
+    assert_eq!(marker.conversation, room.conversation);
+    assert_eq!(marker.sequence, 42);
+}
+
+#[test]
+fn older_thread_read_uses_the_current_root_and_cursor() {
+    let room = crate::composition::fixtures::context(1);
+    let Ok(wire::MessagingCommand::History {
+        before: Some(before),
+        thread: Some(root),
+    }) = (Read::ThreadOlder {
+        root: 7,
+        before: 42,
+    })
+    .command(room)
+    else {
+        panic!("thread page")
+    };
+    assert_eq!(before.conversation, room.conversation);
+    assert_eq!(before.sequence, 42);
+    assert_eq!(root.conversation, room.conversation);
+    assert_eq!(root.sequence, 7);
+}
+
+#[test]
+fn returning_to_latest_thread_page_shows_cached_tail_before_network_admission() {
+    let mut model = model();
+    let context = model.snapshot.selected.unwrap();
+    let mut older = model.snapshot.messages.as_slice()[0].clone();
+    older.local_id = 10;
+    let mut latest = older.clone();
+    latest.local_id = 50;
+    let mut root = older.clone();
+    root.local_id = 7;
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_messages = page([older]);
+    panel.thread_root_message = Some(root.clone());
+    panel.thread_has_newer = true;
+    panel.thread_older = Some(10);
+    model.project_history(context);
+    model
+        .history
+        .remember_thread(context, 7, page([latest.clone()]), None);
+    occupied(&mut model, Work::Thread);
+    assert!(matches!(
+        model.deliberate_read(RequestId(42), context, &view::MessageAction::Thread(7)),
+        Some(Ok(()))
+    ));
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.thread_messages.as_slice(), &[latest]);
+    assert_eq!(panel.thread_root_message, Some(root));
+    assert!(!panel.thread_has_newer);
+    assert_eq!(panel.thread_older, None);
+}
+
+#[test]
+fn transient_thread_page_retry_preserves_the_page_and_retires_on_navigation() {
+    let mut model = model();
+    let context = model.snapshot.selected.unwrap();
+    let now = Instant::now();
+    let mut read = job(now);
+    read.read = Read::ThreadOlder {
+        root: 7,
+        before: 42,
+    };
+    let retained = model.snapshot.messages.as_slice()[0].clone();
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_messages = page([retained.clone()]);
+    panel.thread_state = RemoteState::Loading(read.request);
+    model.queued_read.thread_retry = Some(ThreadRetry {
+        job: read.clone(),
+        attempts: 0,
+        due: None,
+        expires: now + Duration::from_secs(120),
+        failure: UnavailableReason::Busy,
+    });
+    let operation = OperationId::from_local(1);
+    model
+        .history
+        .admitted(context, operation, read.read.work(), read.request, 1);
+    model.apply_message(
+        read.request,
+        context,
+        operation,
+        read.read.work(),
+        Err(IdentityError::Request(ErrorKind::ServerUnavailable)),
+    );
+    assert_eq!(
+        model.snapshot.message_panel.as_ref().unwrap().thread_state,
+        RemoteState::Failed(
+            read.request,
+            UnavailableReason::Connection(ConnectionFailure::ServerUnavailable)
+        )
+    );
+    model.settle_thread_read(
+        context,
+        read.request,
+        read.read.work(),
+        Some(IdentityError::Request(ErrorKind::ServerUnavailable)),
+        now,
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.thread_state, RemoteState::Loading(read.request));
+    assert_eq!(panel.thread_messages.as_slice(), &[retained]);
+    let retry = model.queued_read.thread_retry.as_ref().unwrap();
+    assert_eq!(retry.due, Some(now + Duration::from_secs(2)));
+    assert_eq!(retry.job.read, read.read, "older-page cursor must not move");
+    model.tick_queued_read(now + Duration::from_secs(1));
+    assert!(model.queued_read.thread_retry.is_some());
+    model.snapshot.selected = Some(crate::composition::fixtures::context(2));
+    model.tick_queued_read(now + Duration::from_secs(2));
+    assert!(model.queued_read.thread_retry.is_none());
+    assert!(model.pending.is_empty());
+}
+
+#[test]
+fn thread_retry_backoff_is_bounded_and_permission_failures_are_not_retried() {
+    let now = Instant::now();
+    let read = job(now);
+    let mut retry = ThreadRetry {
+        job: read.clone(),
+        attempts: 0,
+        due: None,
+        expires: now + Duration::from_secs(120),
+        failure: UnavailableReason::Busy,
+    };
+    for (attempt, delay) in [2, 4, 8, 16].into_iter().enumerate() {
+        retry.attempts = attempt as u8;
+        assert!(retry.schedule(UnavailableReason::Busy, now));
+        assert_eq!(retry.due, Some(now + Duration::from_secs(delay)));
+    }
+    retry.attempts = 4;
+    assert!(!retry.schedule(UnavailableReason::Busy, now));
+    retry.attempts = 0;
+    assert!(!retry.schedule(UnavailableReason::Busy, retry.expires));
+
+    let mut model = model();
+    let context = model.snapshot.selected.unwrap();
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_state = RemoteState::Failed(read.request, UnavailableReason::PermissionDenied);
+    model.queued_read.thread_retry = Some(retry);
+    model.settle_thread_read(
+        context,
+        read.request,
+        Work::Thread,
+        Some(IdentityError::Request(ErrorKind::PermissionDenied)),
+        now,
+    );
+    assert!(model.queued_read.thread_retry.is_none());
+    assert_eq!(
+        model.snapshot.message_panel.as_ref().unwrap().thread_state,
+        RemoteState::Failed(read.request, UnavailableReason::PermissionDenied)
+    );
+}
+
+#[test]
 fn only_busy_nonadmission_retries_the_exact_request_and_target_without_extending_its_deadline() {
     let now = Instant::now();
     let mut pending = Some(job(now));
@@ -109,6 +278,41 @@ fn queued_thread_is_locally_accepted_and_correlated_before_any_operation_is_admi
         RemoteState::Failed(RequestId(42), UnavailableReason::Busy)
     );
     assert_eq!(model.pending.len(), 1);
+}
+
+#[test]
+fn switching_threads_projects_the_cached_root_and_replies_before_network_admission() {
+    let mut model = model();
+    let context = model.snapshot.selected.unwrap();
+    let mut root = model.snapshot.messages.as_slice()[0].clone();
+    root.local_id = 7;
+    root.body = text("Cached root");
+    let mut reply = root.clone();
+    reply.local_id = 8;
+    reply.body = text("Cached reply");
+    reply.metadata.thread = Some(7);
+    model
+        .history
+        .remember_thread(context, 7, page([reply]), Some(root));
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(9);
+    panel.thread_root_message = Some(model.snapshot.messages.as_slice()[0].clone());
+    occupied(&mut model, Work::Thread);
+    assert_eq!(
+        model.message_action(RequestId(42), context, view::MessageAction::Thread(7)),
+        Ok(())
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.thread_root, Some(7));
+    assert_eq!(
+        panel.thread_root_message.as_ref().unwrap().body.as_str(),
+        "Cached root"
+    );
+    assert_eq!(
+        panel.thread_messages.as_slice()[0].body.as_str(),
+        "Cached reply"
+    );
+    assert_eq!(panel.thread_state, RemoteState::Loading(RequestId(42)));
 }
 #[test]
 fn newest_target_supersedes_the_single_slot_and_never_steals_a_mutation_lease() {

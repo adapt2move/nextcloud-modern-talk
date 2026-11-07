@@ -2,7 +2,7 @@
 use super::collection::CollectionState;
 use super::controls::{Availability, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SidebarDestination};
-use gpui::{Context, Div, FontWeight, div, prelude::*, px};
+use gpui::{Context, Div, FontWeight, MouseButton, div, prelude::*, px};
 use talk_core::preferences::navigation::{
     AccountNavigation, NavigationEdit, NavigationSection, RemoteNavigationSupport,
 };
@@ -279,6 +279,18 @@ impl Desktop {
                 SidebarDestination::Inbox,
                 cx,
             ))
+            .when(
+                self.snapshot.threads.support == FeatureSupport::Supported,
+                |d| {
+                    d.child(self.sidebar_destination(
+                        "nav-threads",
+                        "Threads",
+                        "chat",
+                        SidebarDestination::Threads,
+                        cx,
+                    ))
+                },
+            )
             .child(self.sidebar_destination(
                 "nav-archive",
                 "Archiv",
@@ -723,11 +735,11 @@ impl Desktop {
         row: &ConversationView,
         namespace: &'static str,
         cx: &Context<Self>,
-    ) -> Div {
+    ) -> gpui::Stateful<Div> {
         let t = self.theme;
         let context = row.context;
         let selected = Some(context) == self.snapshot.selected
-            && self.destination != SidebarDestination::Inbox;
+            && self.destination == SidebarDestination::Conversations;
         let id = scoped_id(namespace, context, 0, 0);
         let row_focus = self.control_focus(id.clone(), cx);
         let avatar = if let Some(avatar) = self.projected_avatar(
@@ -770,6 +782,9 @@ impl Desktop {
         } else {
             avatar
         };
+        let can_mark_unread =
+            self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::MarkUnread);
+        let menu_open = self.room_menu == Some((context, namespace));
         let control = self
             .button(
                 id,
@@ -853,10 +868,12 @@ impl Desktop {
             })
             .when(row.unread > 0, |d| {
                 d.child(
-                    if matches!(
-                        row.kind,
-                        ConversationKind::Direct | ConversationKind::NoteToSelf
-                    ) {
+                    if row.unread_direct_mention == Some(true)
+                        || matches!(
+                            row.kind,
+                            ConversationKind::Direct | ConversationKind::NoteToSelf
+                        )
+                    {
                         div()
                             .flex_none()
                             .min_w(px(18.))
@@ -873,11 +890,19 @@ impl Desktop {
                             .items_center()
                             .justify_center()
                             .text_center()
-                            .child(if row.unread > 99 {
-                                "99+".to_owned()
-                            } else {
-                                row.unread.to_string()
-                            })
+                            .child(format!(
+                                "{}{}",
+                                if row.unread_direct_mention == Some(true) {
+                                    "@ "
+                                } else {
+                                    ""
+                                },
+                                if row.unread > 99 {
+                                    "99+".to_owned()
+                                } else {
+                                    row.unread.to_string()
+                                }
+                            ))
                     } else {
                         div().flex_none().size(px(6.)).rounded_full().bg(t.accent)
                     },
@@ -888,39 +913,100 @@ impl Desktop {
         let entry = super::state::call_entry(row, self.snapshot.content);
         let can_join = row.call_active == Some(true) && entry.is_some();
         div()
-            .relative()
+            .id(scoped_id(namespace, context, 1, 0))
             .flex_none()
-            .group("room-call-row")
             .flex()
-            .items_center()
+            .flex_col()
             .when(namespace == "room", |d| d.pl(px(4.)))
-            .child(control.flex_1().min_w_0())
-            .when_some(row.call_scope.filter(|_| can_join), |d, scope| {
-                let needs_navigation =
-                    matches!(entry, Some(super::state::CallEntry::Conference(_)))
-                        && self.snapshot.selected != Some(context);
-                d.child(
-                    self.button(
-                        scoped_id(namespace, context, 0, 3),
-                        if needs_navigation {
-                            "Öffnen"
-                        } else {
-                            "Beitreten"
-                        },
-                        ButtonStyle::Quiet,
-                        true,
-                        LocalAction::JoinRoomCall(scope),
-                        cx,
-                    )
-                    .absolute()
-                    .right(px(2.))
-                    .top(px(0.))
-                    .text_size(self.sp(11.))
-                    .px_1()
-                    .bg(if selected { t.selected } else { t.sidebar })
-                    .opacity(0.)
-                    .group_hover("room-call-row", |s| s.opacity(1.))
-                    .focus(|s| s.opacity(1.)),
+            .when(menu_open, |d| {
+                d.on_mouse_down_out(cx.listener(move |this, _, _, cx| {
+                    if this.room_menu == Some((context, namespace)) {
+                        this.room_menu = None;
+                        cx.notify();
+                    }
+                }))
+            })
+            .child(
+                div()
+                    .relative()
+                    .group("sidebar-room")
+                    .flex()
+                    .items_center()
+                    .when(can_mark_unread, |d| {
+                        d.on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, _, window, cx| {
+                                this.handle(
+                                    LocalAction::ToggleRoomMenu(context, namespace),
+                                    window,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        )
+                    })
+                    .child(control.flex_1().min_w_0())
+                    .when_some(row.call_scope.filter(|_| can_join), |d, scope| {
+                        let needs_navigation =
+                            matches!(entry, Some(super::state::CallEntry::Conference(_)))
+                                && self.snapshot.selected != Some(context);
+                        d.child(
+                            self.button(
+                                scoped_id(namespace, context, 0, 3),
+                                if needs_navigation {
+                                    "Öffnen"
+                                } else {
+                                    "Beitreten"
+                                },
+                                ButtonStyle::Quiet,
+                                true,
+                                LocalAction::JoinRoomCall(scope),
+                                cx,
+                            )
+                            .absolute()
+                            .right(px(if can_mark_unread { 30. } else { 2. }))
+                            .top(px(0.))
+                            .text_size(self.sp(11.))
+                            .px_1()
+                            .bg(if selected { t.selected } else { t.sidebar })
+                            .opacity(0.)
+                            .group_hover("sidebar-room", |s| s.opacity(1.))
+                            .focus(|s| s.opacity(1.)),
+                        )
+                    })
+                    .when(can_mark_unread, |row| {
+                        row.child(
+                            self.icon_button(
+                                scoped_id(namespace, context, 1, 1),
+                                ("more", "Weitere Optionen"),
+                                ButtonStyle::Quiet,
+                                Availability::available(),
+                                LocalAction::ToggleRoomMenu(context, namespace),
+                                cx,
+                            )
+                            .size(px(28.))
+                            .absolute()
+                            .right_0()
+                            .bg(if selected { t.selected } else { t.sidebar })
+                            .when(!menu_open && !self.keyboard_navigation, |d| d.opacity(0.))
+                            .group_hover("sidebar-room", |d| d.opacity(1.)),
+                        )
+                    }),
+            )
+            .when(menu_open && can_mark_unread, |row| {
+                row.child(
+                    self.context_menu_surface().ml_2().child(
+                        self.button_with_leading_icon(
+                            scoped_id(namespace, context, 1, 2),
+                            ("Als ungelesen markieren", "inbox"),
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::MarkRoomUnread(context),
+                            cx,
+                        )
+                        .justify_start()
+                        .w_full(),
+                    ),
                 )
             })
     }
@@ -977,11 +1063,174 @@ impl Desktop {
         );
         self.content_card(page)
     }
+
+    pub(super) fn threads_page(&self, cx: &Context<Self>) -> Div {
+        let mut rows = div().flex().flex_col().gap_1();
+        for thread in self.snapshot.threads.entries.as_slice() {
+            let Some(room) = self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .find(|room| room.context == thread.context)
+            else {
+                continue;
+            };
+            let unread = thread_unread(
+                room.last_read_message,
+                room.unread,
+                thread.root,
+                thread.replies,
+                thread.last_message,
+            ) == Some(true);
+            rows = rows.child(
+                self.control(
+                    scoped_id("subscribed-thread", thread.context, thread.root, 0),
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::OpenSubscribedThread(thread.context, thread.root),
+                    cx,
+                )
+                .w_full()
+                .justify_start()
+                .p_3()
+                .gap_3()
+                .child(div().flex_none().size(px(8.)).rounded_full().bg(if unread {
+                    self.theme.accent
+                } else {
+                    gpui::transparent_black()
+                }))
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .font_weight(if unread {
+                                    FontWeight::BOLD
+                                } else {
+                                    FontWeight::MEDIUM
+                                })
+                                .child(thread.title.as_str().to_owned()),
+                        )
+                        .child(self.hint(&format!(
+                            "{} · {}",
+                            room.title.as_str(),
+                            self.count(super::localization::Count::Replies, thread.replies.into())
+                        ))),
+                )
+                .when(unread, |row| row.child(self.hint(self.l("Ungelesen")))),
+            );
+        }
+        if self.snapshot.threads.content == ContentState::Ready
+            && self.snapshot.threads.entries.as_slice().is_empty()
+        {
+            let label = if self.snapshot.threads.offset > 0 || self.snapshot.threads.has_next {
+                "Keine Threads auf dieser Seite."
+            } else {
+                "Keine abonnierten Threads."
+            };
+            rows = rows.child(self.hint(self.l(label)));
+        }
+        if matches!(
+            self.snapshot.threads.content,
+            ContentState::Failed | ContentState::Denied
+        ) {
+            rows = rows.child(self.hint(self.l("Threads konnten nicht geladen werden.")));
+        }
+        let mut heading = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(div().flex_1().child(self.title(self.l("Threads"))));
+        if let Some(account) = self.snapshot.active_account {
+            heading = heading.child(self.icon_button(
+                "refresh-threads",
+                ("refresh", "Threads aktualisieren"),
+                ButtonStyle::Quiet,
+                Availability::when(self.snapshot.threads.content != ContentState::Loading, ""),
+                LocalAction::Intent(talk_core::ui::presentation::UiIntent::RefreshThreads(
+                    account,
+                )),
+                cx,
+            ));
+        }
+        let mut page = div().flex().flex_col().p_5().gap_3().child(heading);
+        if let Some(account) = self.snapshot.active_account {
+            let list = &self.snapshot.threads;
+            if list.offset > 0 || list.has_next {
+                let ready = list.content != ContentState::Loading;
+                page = page.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(self.button(
+                            "threads-previous",
+                            "Vorherige Threads",
+                            ButtonStyle::Quiet,
+                            ready && list.offset >= 50,
+                            LocalAction::Intent(
+                                talk_core::ui::presentation::UiIntent::PageThreads {
+                                    account,
+                                    offset: list.offset.saturating_sub(50),
+                                },
+                            ),
+                            cx,
+                        ))
+                        .child(self.button(
+                            "threads-next",
+                            "Weitere Threads",
+                            ButtonStyle::Quiet,
+                            ready && list.has_next && list.offset.checked_add(50).is_some(),
+                            LocalAction::Intent(
+                                talk_core::ui::presentation::UiIntent::PageThreads {
+                                    account,
+                                    offset: list.offset.saturating_add(50),
+                                },
+                            ),
+                            cx,
+                        )),
+                );
+            }
+        }
+        self.content_card(
+            page.child(
+                self.scroll_area(super::navigation::Region::Conversation)
+                    .flex_1()
+                    .min_h_0()
+                    .child(rows),
+            ),
+        )
+    }
+}
+
+fn thread_unread(
+    marker: Option<u128>,
+    unread: u32,
+    root: u128,
+    replies: u32,
+    last_message: Option<u128>,
+) -> Option<bool> {
+    let marker = marker?;
+    let latest = last_message.or_else(|| (replies == 0).then_some(root))?;
+    Some(unread > 0 && latest > marker)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unread_thread_requires_a_known_room_marker_and_recent_message() {
+        assert_eq!(thread_unread(Some(40), 1, 5, 2, Some(41)), Some(true));
+        assert_eq!(thread_unread(Some(41), 1, 5, 2, Some(41)), Some(false));
+        assert_eq!(thread_unread(None, 1, 5, 2, Some(41)), None);
+        assert_eq!(thread_unread(Some(40), 1, 5, 2, None), None);
+        assert_eq!(thread_unread(Some(40), 1, 41, 0, None), Some(true));
+    }
     #[test]
     fn direct_conversations_stay_first_and_titles_cannot_grant_a_category() {
         assert_eq!(

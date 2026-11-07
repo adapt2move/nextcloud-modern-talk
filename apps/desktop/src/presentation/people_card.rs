@@ -18,18 +18,19 @@ use talk_core::ui::{
 pub(crate) enum Source {
     Member(PersonRef),
     Message(ConversationRef, u128, bool),
+    ThreadMessage(ConversationRef, u128, bool),
 }
 impl Source {
     fn context(self) -> ConversationRef {
         match self {
             Self::Member(person) => person.context,
-            Self::Message(context, _, _) => context,
+            Self::Message(context, _, _) | Self::ThreadMessage(context, _, _) => context,
         }
     }
     fn id(self) -> u128 {
         match self {
             Self::Member(person) => person.local,
-            Self::Message(_, message, _) => message,
+            Self::Message(_, message, _) | Self::ThreadMessage(_, message, _) => message,
         }
     }
     fn ordinal(self) -> u128 {
@@ -37,6 +38,8 @@ impl Source {
             Self::Member(_) => 0,
             Self::Message(_, _, false) => 1,
             Self::Message(_, _, true) => 2,
+            Self::ThreadMessage(_, _, false) => 3,
+            Self::ThreadMessage(_, _, true) => 4,
         }
     }
 }
@@ -58,6 +61,7 @@ struct PendingMention {
     request: RequestId,
     author_key: talk_core::ui::Text<256>,
     edit_generation: u64,
+    thread: Option<u128>,
 }
 struct PendingCall {
     source: ConversationRef,
@@ -202,16 +206,8 @@ impl Desktop {
                 .as_slice()
                 .iter()
                 .find(|member| member.id == person),
-            Source::Message(_, id, _) => {
-                let key = self
-                    .snapshot
-                    .messages
-                    .as_slice()
-                    .iter()
-                    .find(|m| m.local_id == id)?
-                    .metadata
-                    .author_key
-                    .as_ref()?;
+            Source::Message(..) | Source::ThreadMessage(..) => {
+                let key = self.person_message(source)?.metadata.author_key.as_ref()?;
                 panel
                     .members
                     .as_slice()
@@ -221,15 +217,31 @@ impl Desktop {
         }
     }
     fn person_message(&self, source: Source) -> Option<&talk_core::ui::presentation::MessageView> {
-        let Source::Message(context, id, _) = source else {
-            return None;
+        let (context, id, thread) = match source {
+            Source::Message(context, id, _) => (context, id, false),
+            Source::ThreadMessage(context, id, _) => (context, id, true),
+            Source::Member(_) => return None,
         };
         (self.snapshot.selected == Some(context)).then_some(())?;
-        self.snapshot
-            .messages
-            .as_slice()
-            .iter()
-            .find(|message| message.local_id == id && !message.metadata.system)
+        if thread {
+            let panel = self.snapshot.message_panel.as_ref().filter(|panel| {
+                self.overlay == Some(super::Overlay::Thread)
+                    && panel.context == context
+                    && self.thread_parent == panel.thread_root.map(|root| (context, root))
+            })?;
+            panel
+                .thread_messages
+                .as_slice()
+                .iter()
+                .chain(panel.thread_root_message.iter())
+                .find(|message| message.local_id == id && !message.metadata.system)
+        } else {
+            self.snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .find(|message| message.local_id == id && !message.metadata.system)
+        }
     }
     fn person_can_mention(&self, source: Source) -> bool {
         self.people_card.mention.is_none()
@@ -255,8 +267,24 @@ impl Desktop {
             return;
         }
         if self.snapshot.selected != Some(pending.context)
-            || self.composer.read(cx).edit_generation() != pending.edit_generation
-            || self.composer.read(cx).composing()
+            || pending.thread.is_some()
+                && (self.overlay != Some(super::Overlay::Thread)
+                    || self.thread_parent != pending.thread.map(|root| (pending.context, root)))
+            || (if pending.thread.is_some() {
+                &self.thread_composer
+            } else {
+                &self.composer
+            })
+            .read(cx)
+            .edit_generation()
+                != pending.edit_generation
+            || (if pending.thread.is_some() {
+                &self.thread_composer
+            } else {
+                &self.composer
+            })
+            .read(cx)
+            .composing()
         {
             return;
         }
@@ -274,7 +302,12 @@ impl Desktop {
                 matches.next().is_none().then(|| first.identifier.clone())
             });
         if let Some(identifier) = identifier {
-            self.composer.update(cx, |input, cx| {
+            (if pending.thread.is_some() {
+                &self.thread_composer
+            } else {
+                &self.composer
+            })
+            .update(cx, |input, cx| {
                 input.insert_person_mention(identifier.as_str(), cx)
             });
         } else {
@@ -340,7 +373,7 @@ impl Desktop {
                 self.people_card.return_focus = window.focused(cx);
                 self.people_card.target = Some(Target { source, generation });
                 self.people_card.focus.focus(window);
-                if matches!(source, Source::Message(..))
+                if matches!(source, Source::Message(..) | Source::ThreadMessage(..))
                     && self.person_member(source).is_none()
                     && self.snapshot.conversation_panel.as_ref().is_none_or(|p| {
                         p.context != source.context() || (!p.members_loaded && !p.state.pending())
@@ -393,10 +426,25 @@ impl Desktop {
                     return;
                 };
                 let context = target.source.context();
+                let thread = if matches!(target.source, Source::ThreadMessage(..)) {
+                    self.thread_parent.map(|(_, root)| root)
+                } else {
+                    None
+                };
                 self.dismiss_person(false, window);
-                self.overlay = None;
-                self.composer_focus.focus(window);
-                let generation = self.composer.read(cx).edit_generation();
+                if thread.is_some() {
+                    self.thread_composer_focus.focus(window);
+                } else {
+                    self.overlay = None;
+                    self.composer_focus.focus(window);
+                }
+                let generation = (if thread.is_some() {
+                    &self.thread_composer
+                } else {
+                    &self.composer
+                })
+                .read(cx)
+                .edit_generation();
                 if let Some(request) =
                     self.submit_message(talk_core::ui::messaging::MessageAction::Mentions(name))
                 {
@@ -405,6 +453,7 @@ impl Desktop {
                         request,
                         author_key: key,
                         edit_generation: generation,
+                        thread,
                     });
                 }
             }
@@ -545,6 +594,8 @@ impl Desktop {
         }
         if self.people_card.target.is_some_and(|target| {
             self.snapshot.selected != Some(target.source.context())
+                || matches!(target.source, Source::ThreadMessage(..))
+                    && self.person_message(target.source).is_none()
                 || (self.person_member(target.source).is_none()
                     && self.person_message(target.source).is_none())
         }) || !window.is_window_active()

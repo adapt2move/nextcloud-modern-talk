@@ -114,6 +114,10 @@ pub enum CreateAction {
     Group(Text<256>),
     Direct(AccountPersonRef),
     DirectMember(PersonRef),
+    PrivateReply {
+        context: ConversationRef,
+        message: u128,
+    },
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CreationResult {

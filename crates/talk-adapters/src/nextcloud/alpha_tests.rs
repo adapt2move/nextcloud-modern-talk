@@ -1,7 +1,7 @@
 use super::*;
 use talk_core::protocol::conversation::{ConversationCommand as C, Setting};
 use talk_core::protocol::messaging::{
-    MessagingCommand as M, MessagingFeature, MessagingResult as R,
+    ComposeOptions, MessagingCommand as M, MessagingFeature, MessagingResult as R,
 };
 use talk_core::protocol::{FeatureSupport, Role};
 fn features(names: &[&str]) -> Value {
@@ -17,6 +17,182 @@ fn features(names: &[&str]) -> Value {
 }
 fn message(id: u64) -> Value {
     json!({"id":id,"token":"testroom","actorType":"users","actorId":"fixture_user","actorDisplayName":"Fixture","messageType":"comment","message":"original","timestamp":1,"referenceId":"","isReplyable":true,"messageParameters":{},"reactions":{},"reactionsSelf":[]})
+}
+
+#[tokio::test]
+async fn subscribed_threads_require_capability_and_known_account_room() {
+    for (enabled, token) in [(false, "testroom"), (true, "testroom"), (true, "otherroom")] {
+        let mut replies = vec![Reply::data(features(if enabled {
+            &["threads"]
+        } else {
+            &[]
+        }))];
+        if enabled {
+            replies.push(Reply::data(json!([{
+                "thread": {"id": 42, "roomToken": token, "title": "Topic", "numReplies": 2},
+                "attendee": {"notificationLevel": 1}
+            }])));
+        }
+        let server = Server::start(replies).await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let result = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::SubscribedThreads { offset: 0 },
+            )
+            .await;
+        if !enabled {
+            assert_eq!(result.unwrap_err().kind, ErrorKind::Unsupported);
+            assert_eq!(server.count(), 1);
+        } else {
+            let ProtocolReply::SubscribedThreads { threads, has_next } = result.unwrap() else {
+                panic!("threads")
+            };
+            assert!(!has_next);
+            if token == "otherroom" {
+                assert!(threads.as_slice().is_empty());
+            } else {
+                assert_eq!(threads.as_slice().len(), 1);
+                assert_eq!(threads.as_slice()[0].root.conversation, conversation);
+                assert_eq!(threads.as_slice()[0].root.sequence, 42);
+                assert_eq!(threads.as_slice()[0].replies, 2);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn subscribed_threads_skip_unbound_rooms_without_ending_pagination() {
+    let threads: Vec<_> = (1..=50)
+        .map(|id| {
+            json!({
+                "thread": {
+                    "id": id,
+                    "roomToken": if id == 1 { "testroom" } else { "otherroom" },
+                    "title": "Topic",
+                    "numReplies": 2
+                },
+                "attendee": {"notificationLevel": 1}
+            })
+        })
+        .collect();
+    let server = Server::start(vec![
+        Reply::data(features(&["threads"])),
+        Reply::data(json!(threads)),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let conversation = bind(&mut client);
+    let ProtocolReply::SubscribedThreads { threads, has_next } = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::SubscribedThreads { offset: 0 },
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("threads")
+    };
+    assert!(has_next);
+    assert_eq!(threads.as_slice().len(), 1);
+    assert_eq!(threads.as_slice()[0].root.conversation, conversation);
+    assert_eq!(threads.as_slice()[0].root.sequence, 1);
+}
+
+#[tokio::test]
+async fn thread_rename_authority_uses_fresh_role_and_scoped_root_actor() {
+    for (role, author, read_only, expected) in [
+        (3, Some("fixture_user"), true, Decision::Allowed),
+        (3, Some("someone_else"), false, Decision::Denied),
+        (3, None, false, Decision::Unknown),
+        (2, None, true, Decision::Allowed),
+        (6, Some("someone_else"), false, Decision::Denied),
+    ] {
+        let mut room_data = room();
+        room_data["participantType"] = json!(role);
+        room_data["readOnly"] = json!(u8::from(read_only));
+        let mut wire_thread = json!({
+            "thread": {"id": 42, "roomToken": "testroom", "title": "Topic", "numReplies": 2},
+            "attendee": {"notificationLevel": 1}
+        });
+        if let Some(author) = author {
+            wire_thread["first"] = json!({
+                "id": 42, "token": "testroom", "actorType": "users", "actorId": author
+            });
+        }
+        let server = Server::start(vec![
+            Reply::data(features(&["threads"])),
+            Reply::data(room_data),
+            Reply::data(wire_thread),
+        ])
+        .await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let ProtocolReply::Messaging { result, .. } = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Messaging {
+                    conversation,
+                    operation: OperationId::from_local(1),
+                    command: M::Thread(MessageId {
+                        conversation,
+                        sequence: 42,
+                    }),
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("thread")
+        };
+        let R::Thread(thread) = result else {
+            panic!("thread detail")
+        };
+        assert_eq!(thread.rename, expected);
+    }
+}
+
+#[tokio::test]
+async fn quoted_thread_reply_rejects_a_parent_from_another_thread_before_writing() {
+    let mut parent = message(8);
+    parent["threadId"] = json!(12);
+    let server = Server::start(vec![
+        Reply::data(features(&["threads", "chat-get-context", "chat-replies"])),
+        Reply::data(room()),
+        Reply::data(json!([parent])),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let conversation = bind(&mut client);
+    let mid = |sequence| MessageId {
+        conversation,
+        sequence,
+    };
+    let error = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::Messaging {
+                conversation,
+                operation: OperationId::from_local(1),
+                command: M::Send {
+                    text: Text::new("Quote").unwrap(),
+                    options: ComposeOptions {
+                        reply_to: Some(mid(8)),
+                        thread: Some(mid(7)),
+                        ..Default::default()
+                    },
+                },
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::WrongScope);
+    assert_eq!(server.count(), 3);
 }
 #[tokio::test]
 async fn reminder_writes_publish_only_confirmed_values_and_keep_read_failure_uncertain() {
@@ -305,6 +481,8 @@ async fn reaction_permission_is_independent_of_chat_permission() {
 async fn message_actor_keys_distinguish_equal_names_and_actor_types() {
     let mut first = message(7);
     first["actorId"] = json!("one");
+    first["threadId"] = json!(7);
+    first["threadReplies"] = json!(3);
     let mut second = message(8);
     second["actorId"] = json!("two");
     let mut guest = message(9);
@@ -343,6 +521,8 @@ async fn message_actor_keys_distinguish_equal_names_and_actor_types() {
         panic!("expected history");
     };
     let rows = messages.as_slice();
+    assert_eq!(rows[0].thread_replies, Some(3));
+    assert_eq!(rows[1].thread_replies, None);
     assert!(rows[0].author_key.is_some());
     assert_ne!(rows[0].author_key, rows[1].author_key);
     assert_ne!(rows[0].author_key, rows[2].author_key);
@@ -536,6 +716,34 @@ async fn unsupported_provider_and_unknown_permissions_are_truthful() {
             .any(|(f, a)| *f == MessagingFeature::Send && a.allowed == Decision::Unknown)
     );
 }
+#[test]
+fn direct_mention_flag_requires_capability_and_boolean_observation() {
+    let id = ConversationId {
+        account: scope().account,
+        host: HostId::from_local(1),
+        local: 1,
+    };
+    let mut data = room();
+    data["unreadMentionDirect"] = json!(true);
+    let without = wire::Capabilities::decode(&features(&[])).unwrap();
+    let with = wire::Capabilities::decode(&features(&["direct-mention-flag"])).unwrap();
+    assert_eq!(
+        wire::room(&data, id, &without)
+            .unwrap()
+            .unread_direct_mention,
+        None
+    );
+    assert_eq!(
+        wire::room(&data, id, &with).unwrap().unread_direct_mention,
+        Some(true)
+    );
+    data["unreadMentionDirect"] = json!("true");
+    assert_eq!(
+        wire::room(&data, id, &with).unwrap().unread_direct_mention,
+        None
+    );
+}
+
 #[test]
 fn settings_unknown_attributes_never_grant_owner_mutation() {
     let c = wire::Capabilities::decode(&features(&["room-description"])).unwrap();

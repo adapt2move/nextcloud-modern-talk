@@ -5,6 +5,7 @@ use gpui::{AnyElement, Bounds, Element, ElementId, KeyDownEvent, Pixels, Point, 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Target {
     context: ConversationRef,
+    thread: Option<u128>,
     generation: u64,
 }
 
@@ -35,10 +36,11 @@ struct Session {
     target: Option<Target>,
 }
 impl Session {
-    fn open(&mut self, context: ConversationRef) -> Option<Target> {
+    fn open(&mut self, context: ConversationRef, thread: Option<u128>) -> Option<Target> {
         self.generation = self.generation.checked_add(1)?;
         let target = Target {
             context,
+            thread,
             generation: self.generation,
         };
         self.target = Some(target);
@@ -117,14 +119,27 @@ impl Desktop {
                 .session
                 .accepts(target, self.snapshot.selected)
             || !self.composer_menu_context_current()
+            || target.thread
+                != (self.overlay == Some(Overlay::Thread))
+                    .then_some(self.thread_parent)
+                    .flatten()
+                    .filter(|(context, _)| Some(*context) == self.snapshot.selected)
+                    .map(|(_, root)| root)
         {
             return Vec::new();
         }
+        let restricted = target.thread.is_some()
+            || self.drafts.target(target.context).new_thread
+            || self.drafts.target(target.context).private_reply.is_some();
         let message = |choice, label, icon, feature| Item {
             choice,
             label,
             icon,
-            availability: self.message_available(feature),
+            availability: if feature == MessageFeature::Files && restricted {
+                Availability::when(false, "Anhänge in Threads sind noch nicht verfügbar.")
+            } else {
+                self.message_available(feature)
+            },
         };
         vec![
             message(
@@ -138,12 +153,13 @@ impl Desktop {
                 label: "Aus NextCloud teilen",
                 icon: "cloud",
                 availability: Availability::when(
-                    (self.message_feature_enabled(MessageFeature::Files)
-                        || self.snapshot.content == ContentState::Offline
-                            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
-                                panel.context == target.context
-                                    && panel.availability(MessageFeature::Files).enabled()
-                            }))
+                    !restricted
+                        && (self.message_feature_enabled(MessageFeature::Files)
+                            || self.snapshot.content == ContentState::Offline
+                                && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                                    panel.context == target.context
+                                        && panel.availability(MessageFeature::Files).enabled()
+                                }))
                         && self.composer_available()
                         && self.snapshot.content_panel.file_browser_supported != Some(false),
                     if self.snapshot.content_panel.file_browser_supported == Some(false) {
@@ -158,19 +174,28 @@ impl Desktop {
                 label: "Umfrage erstellen",
                 icon: "plus",
                 availability: Availability::when(
-                    self.content_scope_current()
+                    !restricted
+                        && self.content_scope_current()
                         && self.snapshot.content_panel.poll_create.enabled(),
                     crate::presentation::conversation_dialog::unavailable(
                         self.snapshot.content_panel.poll_create,
                     ),
                 ),
             },
-            message(
-                Choice::Schedule,
-                "Nachricht planen",
-                "clock",
-                MessageFeature::Schedules,
-            ),
+            Item {
+                choice: Choice::Schedule,
+                label: "Nachricht planen",
+                icon: "clock",
+                availability: if target.thread.is_some()
+                    || self.drafts.target(target.context).new_thread
+                {
+                    Availability::when(false, "Neue Threads können nicht geplant werden.")
+                } else if self.drafts.target(target.context).private_reply.is_some() {
+                    Availability::when(false, "Private Antworten können nicht geplant werden.")
+                } else {
+                    self.message_available(MessageFeature::Schedules)
+                },
+            },
             message(
                 Choice::Scheduled,
                 "Geplante Nachrichten",
@@ -207,7 +232,12 @@ impl Desktop {
         let Some(context) = self.snapshot.selected else {
             return;
         };
-        let Some(target) = self.content_ui.composer_menu.session.open(context) else {
+        let thread = (self.overlay == Some(Overlay::Thread))
+            .then_some(self.thread_parent)
+            .flatten()
+            .filter(|(parent, _)| *parent == context)
+            .map(|(_, root)| root);
+        let Some(target) = self.content_ui.composer_menu.session.open(context, thread) else {
             return;
         };
         self.message_ui.menu.clear();
@@ -215,7 +245,11 @@ impl Desktop {
         self.content_ui.composer_menu.geometry.borrow_mut().target = Some(target);
         self.content_ui.composer_menu.return_focus = self
             .control_focus
-            .current(&"attach".into())
+            .current(&if target.thread.is_some() {
+                "thread-attach".into()
+            } else {
+                "attach".into()
+            })
             .or_else(|| window.focused(cx));
         self.content_ui.composer_menu.pending_focus = true;
         self.hover_hints.cancel();
@@ -236,7 +270,11 @@ impl Desktop {
             if let Some(focus) = focus.filter(|focus| self.root_focus.contains(focus, window)) {
                 focus.focus(window);
             } else {
-                self.composer.focus_handle(cx).focus(window);
+                if target.is_some_and(|target| target.thread.is_some()) {
+                    self.thread_composer.focus_handle(cx).focus(window);
+                } else {
+                    self.composer.focus_handle(cx).focus(window);
+                }
             }
         }
         cx.notify();
@@ -259,7 +297,18 @@ impl Desktop {
         }
         self.dismiss_composer_menu(false, window, cx);
         // A picker/dialog must inherit the editor, never this retired popup.
-        self.composer.focus_handle(cx).focus(window);
+        if target.thread.is_some() {
+            self.thread_composer.focus_handle(cx).focus(window);
+        } else {
+            self.composer.focus_handle(cx).focus(window);
+        }
+        if target.thread.is_some() && choice == Choice::Silent {
+            let mut compose = self.thread_drafts.target(target.context);
+            compose.silent = !compose.silent;
+            let _ = self.thread_drafts.set_target(target.context, compose);
+            cx.notify();
+            return;
+        }
         let action = match choice {
             Choice::File => LocalAction::Message(Action::Command(MessageAction::PickUpload)),
             Choice::CloudFile => {
@@ -315,6 +364,12 @@ impl Desktop {
                     .session
                     .accepts(target, self.snapshot.selected)
                 || !self.composer_menu_context_current()
+                || target.thread
+                    != (self.overlay == Some(Overlay::Thread))
+                        .then_some(self.thread_parent)
+                        .flatten()
+                        .filter(|(context, _)| Some(*context) == self.snapshot.selected)
+                        .map(|(_, root)| root)
                 || self.message_ui.menu.target().is_some()
                 || !window.is_window_active()
                 || self.update_restart_pending
@@ -324,7 +379,10 @@ impl Desktop {
                 || self.onboarding_open
                 || self.account_removal.confirming()
                 || self.navigation_open
-                || !matches!(self.overlay, None | Some(Overlay::CallChat))
+                || !matches!(
+                    self.overlay,
+                    None | Some(Overlay::CallChat | Overlay::Thread)
+                )
                 || moved_focus
             {
                 self.dismiss_composer_menu(false, window, cx);
@@ -350,7 +408,11 @@ impl Desktop {
         let width = self
             .sp(260.)
             .min((window.viewport_size().width - px(24.)).max(px(1.)));
-        let silent = self.drafts.target(target.context).silent;
+        let silent = if target.thread.is_some() {
+            self.thread_drafts.target(target.context).silent
+        } else {
+            self.drafts.target(target.context).silent
+        };
         let body = self
             .context_menu_surface()
             .id(scoped_id(
@@ -658,17 +720,17 @@ mod tests {
     #[test]
     fn reopened_and_replaced_room_reject_old_popup_callbacks() {
         let mut session = Session::default();
-        let old = session.open(room(1)).unwrap();
+        let old = session.open(room(1), None).unwrap();
         assert!(session.accepts(old, Some(room(1))));
         assert!(!session.accepts(old, Some(room(2))));
         session.target = None;
         assert!(!session.accepts(old, Some(room(1))));
-        let new = session.open(room(1)).unwrap();
+        let new = session.open(room(1), None).unwrap();
         assert_ne!(old, new);
         assert!(!session.accepts(old, Some(room(1))));
         assert!(session.accepts(new, Some(room(1))));
         session.generation = u64::MAX;
-        assert!(session.open(room(2)).is_none());
+        assert!(session.open(room(2), None).is_none());
     }
     #[test]
     fn popup_prefers_above_and_stays_inside_every_viewport_edge() {

@@ -112,6 +112,7 @@ pub struct Room {
     pub favorite: Option<bool>,
     pub archived: Option<bool>,
     pub unread: Option<u64>,
+    /// Zero represents Talk's explicit first-message unread sentinel (-2).
     pub last_read: Option<u64>,
     pub common_read: Option<u64>,
     pub last_activity: Option<u64>,
@@ -172,7 +173,14 @@ impl Room {
             favorite: v.get("isFavorite").and_then(Value::as_bool),
             archived: v.get("isArchived").and_then(Value::as_bool),
             unread: integer(v.get("unreadMessages")),
-            last_read: integer(v.get("lastReadMessage")),
+            last_read: if v
+                .get("lastReadMessage")
+                .is_some_and(|value| value.as_i64() == Some(-2) || value.as_str() == Some("-2"))
+            {
+                Some(0)
+            } else {
+                integer(v.get("lastReadMessage"))
+            },
             common_read: integer(v.get("lastCommonReadMessage")),
             last_activity: integer(v.get("lastActivity")),
             has_call: v.get("hasCall").and_then(Value::as_bool),
@@ -273,7 +281,7 @@ impl Message {
         if !v.is_object() {
             return Err(ErrorKind::Malformed);
         }
-        let result = Self {
+        let mut result = Self {
             token: string(v.get("token"), 30)?.ok_or(ErrorKind::Malformed)?,
             id: integer(v.get("id")).ok_or(ErrorKind::Malformed)?,
             kind: string(v.get("messageType"), 128)?,
@@ -335,12 +343,23 @@ impl Message {
             },
         };
         RoomToken::parse(&result.token)?;
-        if result
-            .parent
-            .as_ref()
-            .is_some_and(|p| p.token.as_deref().is_some_and(|t| t != result.token))
+        if let Some(parent) = result.parent.as_mut()
+            && let Some(token) = parent
+                .token
+                .as_deref()
+                .filter(|token| *token != result.token)
         {
-            return Err(ErrorKind::WrongScope);
+            // Talk 24/25 expands a private-reply parent to the original room.
+            // Only accept the explicit matching private-reply metadata; the
+            // foreign token remains protocol-private and conveys no navigation authority.
+            RoomToken::parse(token)?;
+            let metadata = &v["parent"]["metaData"];
+            let source_id = integer(metadata.get("replyToMessageId")).filter(|id| *id > 0);
+            if metadata["replyToConversationToken"].as_str() != Some(token) || source_id.is_none() {
+                return Err(ErrorKind::WrongScope);
+            }
+            parent.external = true;
+            parent.source_id = source_id;
         }
         if result.id == 0 {
             return Err(ErrorKind::Malformed);
@@ -644,6 +663,18 @@ mod message_tests {
             let decoded = Room::decode(&room).unwrap();
             assert_eq!(decoded.last_read, expected);
             assert_eq!(decoded.common_read, expected);
+        }
+    }
+
+    #[test]
+    fn first_unread_sentinel_survives_typed_room_decoding() {
+        let mut room = json!({"token":"testroom", "displayName":"Fixture"});
+        for value in [json!(-2), json!("-2")] {
+            room["lastReadMessage"] = value.clone();
+            room["lastCommonReadMessage"] = value;
+            let decoded = Room::decode(&room).unwrap();
+            assert_eq!(decoded.last_read, Some(0));
+            assert_eq!(decoded.common_read, None);
         }
     }
 

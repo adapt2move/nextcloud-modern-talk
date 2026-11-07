@@ -108,13 +108,13 @@ impl Desktop {
                     |content| content.child(self.call_dock(cx)),
                 )
                 .child(div().tab_group().tab_index(1).flex_1().min_h_0().child(
-                    if self.destination == super::SidebarDestination::Inbox {
-                        self.inbox(cx)
-                    } else {
-                        self.conversation(
+                    match self.destination {
+                        super::SidebarDestination::Inbox => self.inbox(cx),
+                        super::SidebarDestination::Threads => self.threads_page(cx),
+                        _ => self.conversation(
                             window.viewport_size().height < self.sp(160.) + px(210.),
                             cx,
-                        )
+                        ),
                     },
                 ))
         });
@@ -137,6 +137,9 @@ impl Desktop {
         } else {
             layout.children(content)
         };
+        let layout = layout.when(self.thread_is_docked(window), |d| {
+            d.child(self.thread_pane(window, cx))
+        });
         layout.when(
             self.snapshot.call.as_ref().is_some_and(|c| {
                 c.stage == talk_core::ui::presentation::CallStage::Incoming
@@ -351,7 +354,27 @@ impl Desktop {
                                 .opacity(0.)
                                 .group_hover("conversation-header", |s| s.opacity(1.))
                                 .focus(|s| s.opacity(1.)),
-                            ),
+                            )
+                            .when(self.can_start_thread(), |title| {
+                                title.child(
+                                    self.icon_button(
+                                        "new-thread",
+                                        ("chat", "Neuen Thread beginnen"),
+                                        ButtonStyle::Quiet,
+                                        Availability::when(
+                                            self.message_ui.editing.is_none()
+                                                && !self.has_staged_attachments()
+                                                && !self.drafts.pending(row.context),
+                                            "Schließe zuerst die aktuelle Bearbeitung oder den Dateientwurf.",
+                                        ),
+                                        LocalAction::NewThread(row.context),
+                                        cx,
+                                    )
+                                    .opacity(0.)
+                                    .group_hover("conversation-header", |s| s.opacity(1.))
+                                    .focus(|s| s.opacity(1.)),
+                                )
+                            }),
                     )
                     .child(
                         self.hint(&status_line)
@@ -520,6 +543,8 @@ impl Desktop {
             .child(composer.tab_group().tab_index(1));
         let drop_context = row.context;
         let drop_enabled = self.composer_available()
+            && self.overlay.is_none()
+            && !self.drafts.target(row.context).new_thread
             && !self.background_inert
             && self.snapshot.content == ContentState::Ready
             && row.send == Decision::Allowed
@@ -584,22 +609,60 @@ impl Desktop {
         compact: bool,
         cx: &Context<Self>,
     ) -> Div {
+        self.shared_composer(row, compact, false, cx)
+    }
+    pub(super) fn thread_composer_view(&self, cx: &Context<Self>) -> Div {
+        self.selected()
+            .map_or_else(div, |row| self.shared_composer(row, false, true, cx))
+    }
+    fn shared_composer(
+        &self,
+        row: &ConversationView,
+        compact: bool,
+        thread: bool,
+        cx: &Context<Self>,
+    ) -> Div {
         let t = self.theme;
         if let Some(voice) = self
             .content_ui
             .voice
-            .filter(|voice| voice.context == row.context)
+            .filter(|voice| !thread && voice.context == row.context)
         {
             return self.voice_composer(voice, compact, cx);
         }
+        let input = if thread {
+            &self.thread_composer
+        } else {
+            &self.composer
+        };
+        let attach_id = if thread { "thread-attach" } else { "attach" };
+        let emoji_id = if thread {
+            "thread-emoji-picker"
+        } else {
+            "emoji-picker"
+        };
+        let send_id = if thread { "thread-send" } else { "send" };
         let connection_failure = self.account_connection_failure(row.context.account);
         let ready = super::state::composer_send_decision(&self.snapshot, row) == Decision::Allowed;
-        let pending = self.drafts.pending(row.context);
-        let attached = self.has_staged_attachments();
-        let unloaded = self.message_ui.composer_load_failed == Some(row.context);
-        let emoji_availability = self.emoji_availability(cx).above_composer();
-        let options_availability = Availability::available().above_composer();
-        let send_availability = if pending && !self.drafts.uncertain(row.context) {
+        let pending = if thread {
+            self.thread_drafts.pending(row.context) || self.thread_edit_pending()
+        } else {
+            self.drafts.pending(row.context)
+        };
+        let uncertain = if thread {
+            self.thread_drafts.uncertain(row.context)
+        } else {
+            self.drafts.uncertain(row.context)
+        };
+        let attached = !thread && self.has_staged_attachments();
+        let unloaded = !thread && self.message_ui.composer_load_failed == Some(row.context);
+        let emoji_availability = self.emoji_availability_for(thread, cx).above_composer();
+        let options_availability = Availability::when(
+            self.composer_available(),
+            "Öffne zuerst das Nachrichtenfeld.",
+        )
+        .above_composer();
+        let send_availability = if pending && !uncertain {
             Availability::pending()
         } else {
             Availability::when(
@@ -607,10 +670,17 @@ impl Desktop {
                     && !pending
                     && !unloaded
                     && (!attached || self.can_send_attachments(cx))
-                    && self.composer.read(cx).submitted_value().is_some(),
+                    && (thread
+                        || !self.drafts.target(row.context).new_thread
+                        || self.can_start_thread())
+                    && if thread {
+                        self.thread_send_available(cx)
+                    } else {
+                        input.read(cx).submitted_value().is_some()
+                    },
                 if attached && !self.can_send_attachments(cx) {
                     "Diese Dateioption ist derzeit nicht verfügbar."
-                } else if self.drafts.uncertain(row.context) {
+                } else if uncertain {
                     "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich."
                 } else {
                     "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten."
@@ -619,7 +689,8 @@ impl Desktop {
         }
         .above_composer();
         div()
-            .track_focus(&self.composer_focus)
+            .when(!thread, |d| d.track_focus(&self.composer_focus))
+            .when(thread, |d| d.track_focus(&self.thread_composer_focus))
             .flex_none()
             .px(if compact { px(12.) } else { px(24.) })
             .pb_4()
@@ -627,25 +698,33 @@ impl Desktop {
             .flex()
             .flex_col()
             .gap_2()
-            .child(self.typing_slot(row.context))
-            .children(self.composer_context(cx))
+            .when(!thread, |d| d.child(self.typing_slot(row.context)))
+            .children(if thread {
+                self.thread_composer_context(cx)
+            } else {
+                self.composer_context(cx)
+            })
             .child(
                 div()
                     .min_h(px(96.))
                     .relative()
-                    .child(self.field_ring(self.composer.focus_handle(cx), 10.))
+                    .child(self.field_ring(input.focus_handle(cx), 10.))
                     .rounded(px(10.))
                     .border_1()
-                    .border_color(if self.composer.read(cx).rejected {
+                    .border_color(if input.read(cx).rejected {
                         t.danger
                     } else {
                         t.input_border
                     })
                     .on_mouse_down(
                         gpui::MouseButton::Left,
-                        cx.listener(|this, _, window, cx| {
+                        cx.listener(move |this, _, window, cx| {
                             if this.composer_available() {
-                                this.composer.focus_handle(cx).focus(window);
+                                if thread {
+                                    this.thread_composer.focus_handle(cx).focus(window);
+                                } else {
+                                    this.composer.focus_handle(cx).focus(window);
+                                }
                                 window.prevent_default();
                                 cx.stop_propagation();
                             }
@@ -655,34 +734,34 @@ impl Desktop {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .when(!unloaded, |d| d.child(self.composer.clone()))
+                    .when(!unloaded, |d| d.child(input.clone()))
                     .when(unloaded, |d| {
                         d.child(self.hint(self.l(crate::presentation::input::RICH_REJECTION)))
                     })
                     .when(
-                        self.feedback_visible()
+                        self.composer_feedback_visible(row.context, thread)
                             && self.feedback.is_some_and(|f| {
                                 f.context == Some(row.context)
                                     || (f.context.is_none() && self.snapshot.call.is_none())
                             })
                             && self.composer_available(),
-                        |d| d.child(self.feedback_view(cx)),
+                        |d| d.child(self.feedback_view_on(thread.then_some(Overlay::Thread), cx)),
                     )
                     .when(!self.background_inert, |d| {
                         d.child(self.reason_tip(
-                            "attach".into(),
+                            attach_id.into(),
                             options_availability,
                             Some("Weitere Optionen"),
                             cx,
                         ))
                         .child(self.reason_tip(
-                            "emoji-picker".into(),
+                            emoji_id.into(),
                             emoji_availability,
                             Some("Emoji auswählen"),
                             cx,
                         ))
                         .child(self.reason_tip(
-                            "send".into(),
+                            send_id.into(),
                             send_availability,
                             Some("Senden"),
                             cx,
@@ -701,7 +780,7 @@ impl Desktop {
                                     .gap_1()
                                     .child(
                                         self.icon_button(
-                                            "attach",
+                                            attach_id,
                                             ("plus", "Weitere Optionen"),
                                             // The open + menu keeps its trigger visibly pressed.
                                             if self.content_ui.menu {
@@ -713,14 +792,23 @@ impl Desktop {
                                             LocalAction::Content(super::content::Action::Menu),
                                             cx,
                                         )
-                                        .child(self.composer_menu_anchor(row.context)),
+                                        .when(
+                                            !thread,
+                                            |button| {
+                                                button.child(self.composer_menu_anchor(row.context))
+                                            },
+                                        ),
                                     )
                                     .child(self.icon_button(
-                                        "emoji-picker",
+                                        emoji_id,
                                         ("smile", "Emoji auswählen"),
                                         ButtonStyle::Quiet,
                                         emoji_availability,
-                                        LocalAction::EmojiPicker(row.context),
+                                        if thread {
+                                            LocalAction::ThreadEmojiPicker(row.context)
+                                        } else {
+                                            LocalAction::EmojiPicker(row.context)
+                                        },
                                         cx,
                                     )),
                             )
@@ -730,15 +818,17 @@ impl Desktop {
                                     .items_center()
                                     .gap_3()
                                     .when(
-                                        self.composer.read(cx).content.is_empty()
+                                        input.read(cx).content.is_empty()
                                             && !attached
+                                            && !thread
+                                            && !self.drafts.target(row.context).new_thread
                                             && self.message_feature_enabled(MessageFeature::Voice),
                                         |d| {
                                             d.child(self.icon_button(
-                                                "voice-start",
+                                                if thread { "thread-voice-start" } else { "voice-start" },
                                                 ("mic", "Sprachnachricht aufnehmen"),
                                                 ButtonStyle::Quiet,
-                                                ready.into(),
+                                                if thread { Availability::when(false, "Anhänge in Threads sind noch nicht verfügbar.") } else { ready.into() },
                                                 LocalAction::Content(
                                                     super::content::Action::VoiceStart(row.context),
                                                 ),
@@ -747,11 +837,15 @@ impl Desktop {
                                         },
                                     )
                                     .child(self.icon_button(
-                                        "send",
+                                        send_id,
                                         ("arrow-up", "Senden"),
                                         ButtonStyle::Primary,
                                         send_availability,
-                                        LocalAction::Send,
+                                        if thread {
+                                            LocalAction::SendThread
+                                        } else {
+                                            LocalAction::Send
+                                        },
                                         cx,
                                     )),
                             ),
@@ -761,15 +855,20 @@ impl Desktop {
                 d.child(self.hint(self.l(error)))
             })
             .children(
-                connection_failure
+                (!thread)
+                    .then_some(connection_failure)
+                    .flatten()
                     .and_then(|failure| self.connection_failure_footer(row.context, failure, cx)),
             )
-            .children(self.offline_footer(row.context, cx))
-            .when(self.composer.read(cx).rejected, |d| {
+            .children(if thread {
+                None
+            } else {
+                self.offline_footer(row.context, cx)
+            })
+            .when(input.read(cx).rejected, |d| {
                 d.child(
                     div().text_color(t.danger).text_size(self.sp(12.)).child(
-                        self.l(self
-                            .composer
+                        self.l(input
                             .read(cx)
                             .rejection
                             .unwrap_or("Der Text ist zu lang. Dein Entwurf bleibt erhalten.")),
@@ -777,11 +876,14 @@ impl Desktop {
                 )
             })
     }
-    fn emoji_availability(&self, cx: &Context<Self>) -> Availability {
+    fn emoji_availability_for(&self, thread: bool, cx: &Context<Self>) -> Availability {
         let supported = cfg!(target_os = "macos") || self.settings_port.emoji_picker_available();
         let composing = self.input_composing(cx);
         Availability::when(
-            supported && self.composer_available() && !composing,
+            supported
+                && self.composer_available()
+                && !composing
+                && (!thread || self.overlay == Some(super::Overlay::Thread)),
             if composing {
                 "Beende zuerst die laufende Texteingabe."
             } else if !supported {
@@ -796,10 +898,21 @@ impl Desktop {
             ""
         })
     }
-    pub(super) fn show_composer_emoji(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn show_composer_emoji(
+        &mut self,
+        thread: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let editor = if thread {
+            &self.thread_composer
+        } else {
+            &self.composer
+        };
         if !self.composer_available()
             || self.input_composing(cx)
-            || !self.composer.read(cx).interactive
+            || !editor.read(cx).interactive
+            || thread && self.overlay != Some(super::Overlay::Thread)
             || self.emoji_picker_pending.is_some()
         {
             return;
@@ -816,7 +929,7 @@ impl Desktop {
         self.emoji_picker_generation = generation;
         // Focus alone leaves the exact selection, marked text, history and draft
         // untouched. Wait one frame for the native text handler to own focus.
-        self.composer.focus_handle(cx).focus(window);
+        editor.focus_handle(cx).focus(window);
         self.emoji_picker_pending = Some((context, generation));
         let view = cx.weak_entity();
         window.on_next_frame(move |window, cx| {
@@ -825,6 +938,7 @@ impl Desktop {
                     return;
                 }
                 this.emoji_picker_pending = None;
+                let editor = if thread { &this.thread_composer } else { &this.composer };
                 if this.snapshot.selected != Some(context)
                     || this.projection_blocked
                     || !window.is_window_active()
@@ -832,8 +946,9 @@ impl Desktop {
                     || this.snapshot.content == ContentState::Denied
                     || this.selected().is_none_or(|row| row.send == Decision::Denied)
                     || this.input_composing(cx)
-                    || !this.composer.read(cx).interactive
-                    || !this.composer.focus_handle(cx).is_focused(window)
+                    || thread && this.overlay != Some(super::Overlay::Thread)
+                    || !editor.read(cx).interactive
+                    || !editor.focus_handle(cx).is_focused(window)
                 {
                     return;
                 }

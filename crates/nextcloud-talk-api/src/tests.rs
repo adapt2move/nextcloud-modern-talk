@@ -9,6 +9,49 @@ use tokio::{
     net::TcpListener,
 };
 
+#[test]
+fn marking_the_first_message_unread_uses_talks_explicit_sentinel() {
+    let room = RoomToken::parse("room1234").unwrap();
+    let (method, route, _, form, _, mutation) =
+        plan(&Request::MarkUnreadFromStart { room }).unwrap();
+    assert_eq!(method, Method::POST);
+    assert!(route.ends_with("/chat/room1234/read"));
+    assert_eq!(form, vec![("lastReadMessage", "-2".into())]);
+    assert!(mutation);
+}
+
+#[tokio::test]
+async fn empty_unread_forward_page_is_not_a_redirect() {
+    let server = Server::start(vec![(304, String::new(), Duration::ZERO)]).await;
+    let (mut client, clock) = client(&server);
+    let response = client
+        .request(
+            &context(&clock),
+            Request::Chat {
+                room: RoomToken::parse("room1234").unwrap(),
+                command: chat::Command::UnreadAfter { after: Some(42) },
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(response, Reply::History { messages, last_given: None, .. } if messages.is_empty())
+    );
+}
+
+#[test]
+fn subscribed_threads_are_account_scoped_and_paged() {
+    let (method, route, query, _, _, mutation) =
+        plan(&Request::SubscribedThreads { offset: 50 }).unwrap();
+    assert_eq!(method, Method::GET);
+    assert_eq!(
+        route,
+        "ocs/v2.php/apps/spreed/api/v1/chat/subscribed-threads"
+    );
+    assert_eq!(query, vec![("limit", "50".into()), ("offset", "50".into())]);
+    assert!(!mutation);
+}
+
 #[tokio::test]
 async fn notification_204_is_scoped_unsupported_and_empty_lists_remain_successful() {
     let account = || reply(json!({"id":"synthetic-user","display-name":"Fixture"}));

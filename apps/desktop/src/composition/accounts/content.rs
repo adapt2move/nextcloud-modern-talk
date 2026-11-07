@@ -2604,6 +2604,7 @@ mod tests {
                 replyable: Some(true),
                 parent: None,
                 thread: None,
+                thread_replies: None,
                 reactions: Page::empty(),
                 rich: Page::empty(),
                 system: None,

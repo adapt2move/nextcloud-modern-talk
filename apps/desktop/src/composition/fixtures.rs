@@ -88,6 +88,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-reactions",
     "chat-reactions-pending",
     "chat-reactions-denied",
+    "reaction-authors",
     "loading-conversations",
     "chat-server-denied",
     "chat-server-unavailable",
@@ -103,6 +104,15 @@ pub const SCENARIOS: &[&str] = &[
     "chat-ux-call",
     "chat-edit",
     "thread-error",
+    "thread-list",
+    "thread-options",
+    "thread-offline",
+    "thread-paged",
+    "thread-compose",
+    "private-reply",
+    "sidebar-unread",
+    "unread-divider",
+    "unread-jump",
     "chat-content",
     "chat-cloud-files",
     "chat-cloud-files-offline",
@@ -277,6 +287,113 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("private-reply") {
+        let mut state = snapshot(Some("chat-ux"));
+        let direct = context(3);
+        populate(&mut state, direct);
+        state.message_panel = Some(talk_core::ui::messaging::MessagePanel::new(direct));
+        return state;
+    }
+    if scenario == Some("thread-paged") {
+        let mut state = snapshot(Some("thread"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.thread_older = Some(40);
+            panel.thread_has_newer = true;
+        }
+        return state;
+    }
+    if matches!(scenario, Some("unread-divider" | "unread-jump")) {
+        let mut state = snapshot(Some("chat-grouped"));
+        let marker = if scenario == Some("unread-divider") {
+            3
+        } else {
+            1
+        };
+        state.conversations = page(state.conversations.as_slice().iter().cloned().map(
+            |mut room| {
+                if Some(room.context) == state.selected {
+                    room.unread = 3;
+                    room.last_read_message = Some(marker);
+                    room.unread_direct_mention = Some(scenario == Some("unread-divider"));
+                }
+                room
+            },
+        ));
+        if scenario == Some("unread-divider") {
+            state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+                if row.local_id == 4 {
+                    row.metadata.unread_after = Some(marker);
+                }
+                row
+            }));
+        }
+        return state;
+    }
+    if scenario == Some("reaction-authors") {
+        let mut state = snapshot(Some("chat-reactions"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.reaction_authors = page([talk_core::ui::messaging::ReactionAuthors {
+                message: 4,
+                emoji: text("👍"),
+                authors: page([
+                    text("Mara Fischer"),
+                    text("Jonas Weber"),
+                    text("Alex Sommer"),
+                ]),
+            }]);
+        }
+        return state;
+    }
+    if scenario == Some("thread-compose") {
+        let mut state = snapshot(Some("chat-edit"));
+        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+            row.metadata.rich = Page::empty();
+            row.attachments = Page::empty();
+            row.reply_count = 0;
+            row
+        }));
+        return state;
+    }
+    if scenario == Some("sidebar-unread") {
+        let mut state = snapshot(Some("chat-ux"));
+        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+            row.metadata.rich = Page::empty();
+            row.attachments = Page::empty();
+            row.reply_count = 0;
+            row
+        }));
+        return state;
+    }
+    if scenario == Some("thread-list") {
+        let mut state = snapshot(Some("thread"));
+        if let Some(context) = state.selected {
+            state.conversations = page(state.conversations.as_slice().iter().cloned().map(
+                |mut room| {
+                    if room.context == context {
+                        room.unread = 2;
+                        room.last_read_message = Some(1);
+                    }
+                    room
+                },
+            ));
+        }
+        return state;
+    }
+    if scenario == Some("thread-options") {
+        return snapshot(Some("thread"));
+    }
+    if scenario == Some("thread-offline") {
+        let mut state = snapshot(Some("thread"));
+        state.content = ContentState::Offline;
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.queue_available = true;
+            panel.features = Page::empty();
+            if let Some(details) = panel.thread_details.as_mut() {
+                details.rename = Decision::Unknown;
+            }
+        }
+        return state;
+    }
     if matches!(
         scenario,
         Some("chat-typing" | "chat-typing-two" | "chat-typing-many")
@@ -492,6 +609,95 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }
         return state;
     }
+    if scenario == Some("thread") {
+        let mut state = snapshot(Some("chat-edit"));
+        if let Some(context) = state.selected {
+            state.threads.account = Some(context.account);
+            state.threads.support = talk_core::ui::presentation::FeatureSupport::Supported;
+            state.threads.content = ContentState::Ready;
+            state.threads.entries = page([talk_core::ui::presentation::ThreadView {
+                context,
+                root: 1,
+                title: text("Design review"),
+                replies: 2,
+                last_message: Some(41),
+            }]);
+        }
+        state.messages = page(
+            state
+                .messages
+                .as_slice()
+                .iter()
+                .cloned()
+                .map(|mut message| {
+                    message.reply_count = if message.local_id == 1 { 2 } else { 0 };
+                    if message.local_id == 1 {
+                        message.metadata.thread = Some(1);
+                        message.metadata.rich = Page::empty();
+                        message.attachments = Page::empty();
+                    }
+                    message
+                }),
+        );
+        let root = Some(1);
+        if let (Some(root), Some(panel)) = (root, state.message_panel.as_mut()) {
+            panel.thread_root = Some(root);
+            panel.thread_details = Some(talk_core::ui::messaging::ThreadDetails {
+                root,
+                title: text("Design review"),
+                notification_level: Some(0),
+                rename: Decision::Allowed,
+            });
+            for feature in [
+                talk_core::ui::messaging::MessageFeature::React,
+                talk_core::ui::messaging::MessageFeature::Mentions,
+            ] {
+                let _ = panel.features.try_push((
+                    feature,
+                    talk_core::ui::conversation::Availability {
+                        implemented: true,
+                        server: talk_core::ui::presentation::FeatureSupport::Supported,
+                        allowed: Decision::Allowed,
+                    },
+                ));
+            }
+            let mut reply = message(
+                40,
+                "Mara Fischer",
+                "MF",
+                "10:00",
+                "That works for me.",
+                false,
+            );
+            reply.metadata.thread = Some(root);
+            reply.metadata.author_key = Some(text("5:users:mara"));
+            reply.metadata.replyable = true;
+            reply.metadata.timestamp = 1_770_000_000;
+            let _ = reply
+                .metadata
+                .reactions
+                .try_push(talk_core::ui::messaging::Reaction {
+                    emoji: text("👍"),
+                    count: 2,
+                    own: true,
+                });
+            let mut second = message(
+                41,
+                "Alex Sommer",
+                "AS",
+                "10:02",
+                "I'll update the final details.",
+                true,
+            );
+            second.metadata.thread = Some(root);
+            second.metadata.author_key = Some(text("5:users:alex"));
+            second.metadata.replyable = true;
+            second.metadata.edit = Decision::Allowed;
+            second.metadata.timestamp = 1_770_000_120;
+            panel.thread_messages = page([reply, second]);
+        }
+        return state;
+    }
     if matches!(scenario, Some("chat-edit" | "thread-error")) {
         let mut state = snapshot(Some("chat-ux"));
         if let Some(panel) = state.message_panel.as_mut() {
@@ -693,6 +899,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         account_removal: None,
         active_account: None,
         conversations: Page::empty(),
+        threads: Default::default(),
         conversation_list: talk_core::ui::presentation::ConversationListState {
             content: ContentState::Unconfigured,
             complete: false,
@@ -892,6 +1099,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 archived: Some(id == 6),
                 archive: Decision::Unknown,
                 unread,
+                unread_direct_mention: Some(id == 1 && unread > 0),
+                last_read_message: (id == 1).then_some(1),
                 presence: if scenario == "chat-presence" && id == 3 {
                     Presence::Away
                 } else if kind == ConversationKind::Direct {
@@ -1310,6 +1519,7 @@ fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
     let mut rows = snapshot.messages.as_slice().to_vec();
     for row in &mut rows {
         row.metadata.replyable = true;
+        row.metadata.unread_after = row.local_id.checked_sub(1).filter(|id| *id > 0);
         if row.local_id == 2 {
             row.metadata.deleted = true;
         }
@@ -1326,6 +1536,8 @@ fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
             MessageFeature::Search,
             MessageFeature::Files,
             MessageFeature::Pins,
+            MessageFeature::MarkUnread,
+            MessageFeature::UnreadFrom,
         ]
         .map(|feature| {
             (
@@ -1500,12 +1712,20 @@ impl DevelopmentPort {
         Self {
             reaction_fixture: matches!(
                 scenario,
-                Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
+                Some(
+                    "chat-reactions"
+                        | "chat-reactions-pending"
+                        | "chat-reactions-denied"
+                        | "reaction-authors"
+                )
             )
             .then_some(scenario == Some("chat-reactions-pending")),
             reaction_diagnostics: 0,
             thread_fixture: match scenario {
-                Some("chat-edit") => Some(false),
+                Some(
+                    "chat-edit" | "thread" | "thread-list" | "thread-options" | "thread-offline"
+                    | "thread-paged",
+                ) => Some(false),
                 Some("thread-error") => Some(true),
                 _ => None,
             },
@@ -1515,7 +1735,19 @@ impl DevelopmentPort {
             chat_ux: matches!(
                 scenario,
                 Some(
-                    "chat-ux" | "chat-ux-call" | "chat-edit" | "thread-error" | "chat-send-pending"
+                    "chat-ux"
+                        | "chat-ux-call"
+                        | "chat-edit"
+                        | "thread"
+                        | "thread-error"
+                        | "thread-list"
+                        | "thread-options"
+                        | "thread-offline"
+                        | "thread-paged"
+                        | "chat-send-pending"
+                        | "unread-divider"
+                        | "unread-jump"
+                        | "reaction-authors"
                 )
             ),
             chat_motion: scenario == Some("chat-motion"),
@@ -1682,6 +1914,47 @@ impl NativeDesktopPort for DevelopmentPort {
             return Err(SubmitError::Busy);
         }
         match intent {
+            UiIntent::RefreshThreads(account) if self.snapshot.threads.account == Some(account) => {
+                self.snapshot.threads.content = ContentState::Ready;
+            }
+            UiIntent::PageThreads { account, offset }
+                if self.snapshot.threads.account == Some(account) =>
+            {
+                self.snapshot.threads.offset = offset;
+            }
+            UiIntent::MarkRoomUnread { context, .. }
+                if self.snapshot.active_account == Some(context.account) =>
+            {
+                self.snapshot.conversations = page(
+                    self.snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .cloned()
+                        .map(|mut room| {
+                            if room.context == context {
+                                room.unread = room.unread.max(1);
+                            }
+                            room
+                        }),
+                );
+            }
+            UiIntent::Message {
+                context,
+                action: talk_core::ui::messaging::MessageAction::ReactionAuthors { message, emoji },
+                ..
+            } if self.reaction_fixture.is_some() && self.snapshot.selected == Some(context) => {
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_mut()
+                    .ok_or(SubmitError::StaleScope)?;
+                panel.reaction_authors = page([talk_core::ui::messaging::ReactionAuthors {
+                    message,
+                    emoji,
+                    authors: page([text("Mara Fischer"), text("Alex Sommer")]),
+                }]);
+            }
             UiIntent::Message {
                 request,
                 context,
@@ -1988,6 +2261,52 @@ impl NativeDesktopPort for DevelopmentPort {
             UiIntent::ReopenBrowser(_) | UiIntent::ChooseStorage { .. } => {
                 return Err(SubmitError::Unavailable(UnavailableReason::Unconfigured));
             }
+            UiIntent::Message {
+                request,
+                context,
+                action: talk_core::ui::messaging::MessageAction::Send { body, target },
+            } if self.snapshot.content == ContentState::Offline
+                && self.thread_fixture.is_some() =>
+            {
+                if self.snapshot.selected != Some(context) || self.snapshot.submission.is_some() {
+                    return Err(SubmitError::Busy);
+                }
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_mut()
+                    .ok_or(SubmitError::StaleScope)?;
+                let root = target
+                    .thread
+                    .filter(|root| panel.thread_root == Some(*root))
+                    .ok_or(SubmitError::StaleScope)?;
+                let mut reply = message(42, "Alex Sommer", "AS", "10:03", body.as_str(), true);
+                reply.metadata.thread = Some(root);
+                reply.delivery = DeliveryState::Queued;
+                panel
+                    .thread_messages
+                    .try_push(reply)
+                    .map_err(|_| SubmitError::Busy)?;
+                self.snapshot.messages = page(
+                    self.snapshot
+                        .messages
+                        .as_slice()
+                        .iter()
+                        .cloned()
+                        .map(|mut message| {
+                            if message.local_id == root {
+                                message.reply_count = message.reply_count.saturating_add(1);
+                            }
+                            message
+                        }),
+                );
+                self.snapshot.submission = Some(SubmissionResult {
+                    request,
+                    context,
+                    result: Completion::Queued,
+                });
+                println!("UI_THREAD_FIXTURE offline_reply_queued=true no_backend=true");
+            }
             UiIntent::SendDraft {
                 request, context, ..
             }
@@ -2069,12 +2388,25 @@ impl NativeDesktopPort for DevelopmentPort {
                 if Some(context) != self.snapshot.selected {
                     return Err(SubmitError::StaleScope);
                 }
+                let offline = self.snapshot.content == ContentState::Offline;
                 let panel = self
                     .snapshot
                     .message_panel
                     .as_mut()
                     .ok_or(SubmitError::StaleScope)?;
                 match action {
+                    MessageAction::MarkUnread | MessageAction::MarkUnreadFrom(_) => {
+                        panel.result = Some((request, Completion::ServerAccepted));
+                        self.snapshot.conversations =
+                            page(self.snapshot.conversations.as_slice().iter().cloned().map(
+                                |mut row| {
+                                    if row.context == context {
+                                        row.unread = row.unread.max(1);
+                                    }
+                                    row
+                                },
+                            ));
+                    }
                     MessageAction::StageFiles(paths) => {
                         use talk_core::ui::messaging::{UploadState, UploadView};
                         let mut uploads = panel.uploads.as_slice().to_vec();
@@ -2153,6 +2485,8 @@ impl NativeDesktopPort for DevelopmentPort {
                     }
                     MessageAction::Thread(root) if self.thread_fixture.is_some() => {
                         panel.thread_root = Some(root);
+                        panel.thread_older = None;
+                        panel.thread_has_newer = false;
                         panel.thread_state = if self.thread_fixture == Some(true) {
                             talk_core::ui::conversation::RemoteState::Failed(
                                 request,
@@ -2172,6 +2506,72 @@ impl NativeDesktopPort for DevelopmentPort {
                         row.metadata.replyable = true;
                         row.metadata.thread = Some(root);
                         panel.thread_messages = page([row]);
+                    }
+                    MessageAction::ThreadOlder(root)
+                        if self.thread_fixture.is_some()
+                            && panel.thread_root == Some(root)
+                            && panel.thread_older.is_some() =>
+                    {
+                        let mut row = message(
+                            20,
+                            "Jonas Weber",
+                            "JW",
+                            "09:55",
+                            "Earlier fictional reply.",
+                            false,
+                        );
+                        row.metadata.thread = Some(root);
+                        panel.thread_messages = page([row]);
+                        panel.thread_older = None;
+                        panel.thread_has_newer = true;
+                        panel.thread_state = talk_core::ui::conversation::RemoteState::Idle;
+                    }
+                    MessageAction::ThreadInfo(root) if self.thread_fixture.is_some() => {
+                        panel.thread_details = Some(talk_core::ui::messaging::ThreadDetails {
+                            root,
+                            title: text("Design review"),
+                            notification_level: Some(0),
+                            rename: Decision::Allowed,
+                        });
+                    }
+                    MessageAction::RenameThread { root, title }
+                        if self.thread_fixture.is_some() =>
+                    {
+                        if let Some(details) = panel
+                            .thread_details
+                            .as_mut()
+                            .filter(|details| details.root == root)
+                        {
+                            details.title = title;
+                            panel.result = Some((
+                                request,
+                                if offline {
+                                    Completion::Queued
+                                } else {
+                                    Completion::ServerAccepted
+                                },
+                            ));
+                        }
+                    }
+                    MessageAction::ThreadNotifications { root, level }
+                        if self.thread_fixture.is_some() =>
+                    {
+                        if let Some(details) = panel
+                            .thread_details
+                            .as_mut()
+                            .filter(|details| details.root == root)
+                        {
+                            details.notification_level = Some(level);
+                            panel.thread_following_intent = Some(level != 3);
+                            panel.result = Some((
+                                request,
+                                if offline {
+                                    Completion::Queued
+                                } else {
+                                    Completion::ServerAccepted
+                                },
+                            ));
+                        }
                     }
                     MessageAction::Search(query) => {
                         let query = query.as_str().to_lowercase();
@@ -2212,6 +2612,22 @@ impl NativeDesktopPort for DevelopmentPort {
                             "UI_CHAT_UX locate room={} message={id}",
                             context.conversation.local
                         );
+                    }
+                    MessageAction::LocateUnreadAfter(marker) => {
+                        let id = self
+                            .snapshot
+                            .messages
+                            .as_slice()
+                            .iter()
+                            .filter(|row| row.local_id > marker && !row.metadata.pin_notice)
+                            .map(|row| row.local_id)
+                            .min()
+                            .ok_or(SubmitError::StaleScope)?;
+                        panel.context_load = Some(talk_core::ui::messaging::ContextLoad {
+                            target: marker,
+                            state: talk_core::ui::conversation::RemoteState::Idle,
+                        });
+                        panel.located = Some((request, id));
                     }
                     MessageAction::Files | MessageAction::Pins => {
                         println!("UI_CHAT_UX shared room={}", context.conversation.local);
@@ -2729,5 +3145,49 @@ mod tests {
         call.streams = talk_core::ui::Page::empty();
         assert!(call.screen_stage().is_none());
         assert!(call.camera_tile(participant).is_none());
+    }
+    #[test]
+    fn offline_thread_fixture_projects_the_locally_queued_reply() {
+        use talk_core::ui::messaging::{ComposeTarget, MessageAction};
+        let mut fixture = DevelopmentPort::new(Some("thread-offline"));
+        let context = fixture.snapshot.selected.unwrap();
+        let request = RequestId(70);
+        assert_eq!(
+            fixture.try_submit(UiIntent::Message {
+                request,
+                context,
+                action: MessageAction::Send {
+                    body: text("Offline reply"),
+                    target: ComposeTarget {
+                        thread: Some(1),
+                        ..Default::default()
+                    }
+                },
+            }),
+            Ok(())
+        );
+        let snapshot = fixture.take_snapshot().unwrap();
+        assert_eq!(snapshot.submission.unwrap().result, Completion::Queued);
+        let row = snapshot
+            .message_panel
+            .unwrap()
+            .thread_messages
+            .as_slice()
+            .last()
+            .unwrap()
+            .clone();
+        assert_eq!(row.body.as_str(), "Offline reply");
+        assert_eq!(row.metadata.thread, Some(1));
+        assert_eq!(row.delivery, DeliveryState::Queued);
+        assert_eq!(
+            snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .find(|row| row.local_id == 1)
+                .unwrap()
+                .reply_count,
+            3
+        );
     }
 }

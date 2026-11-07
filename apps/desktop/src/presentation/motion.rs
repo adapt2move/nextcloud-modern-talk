@@ -68,6 +68,14 @@ fn dialog_animation_id(layer: &'static str, surface: DialogSurface) -> ElementId
     gpui::SharedString::from(format!("{layer}-{surface:?}")).into()
 }
 
+fn dialog_panel_kind(surface: DialogSurface) -> reveal::Kind {
+    if surface == DialogSurface::Overlay(Overlay::Thread) {
+        reveal::Kind::ThreadPanel
+    } else {
+        reveal::Kind::Panel
+    }
+}
+
 pub(super) fn count_frame(counter: &Option<std::rc::Rc<std::cell::Cell<u64>>>) {
     if let Some(counter) = counter {
         counter.set(counter.get().saturating_add(1));
@@ -136,7 +144,7 @@ impl Desktop {
             !self.reduced_motion,
             self.motion_frame_counter(),
         )
-        .kind(reveal::Kind::Panel)
+        .kind(dialog_panel_kind(surface))
         .into_any_element()
     }
 
@@ -349,6 +357,18 @@ impl Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thread_entrance_uses_the_sideways_panel_motion() {
+        assert!(matches!(
+            dialog_panel_kind(DialogSurface::Overlay(Overlay::Thread)),
+            reveal::Kind::ThreadPanel
+        ));
+        assert!(matches!(
+            dialog_panel_kind(DialogSurface::Prejoin),
+            reveal::Kind::Panel
+        ));
+    }
 
     #[test]
     fn dialog_redraws_preserve_the_original_admission() {

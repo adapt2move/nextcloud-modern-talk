@@ -17,6 +17,58 @@ pub(super) struct DirectAttempt {
     uncertain: bool,
 }
 impl NextcloudClient {
+    pub(super) async fn create_private_reply(
+        &mut self,
+        c: &OperationContext,
+        operation: OperationId,
+        source: MessageId,
+        caps: &Capabilities,
+    ) -> Result<ProtocolReply, PortError> {
+        if !caps.has("private-reply") || !caps.has("chat-get-context") {
+            return Err(self.error(ErrorKind::Unsupported));
+        }
+        let room = self.room(c, source.conversation, caps).await?;
+        if !matches!(
+            room.kind,
+            talk_core::protocol::RoomKind::Group | talk_core::protocol::RoomKind::Public
+        ) || room.classified
+            || room.unknown_restrictions
+            || room.actions.read_messages != Decision::Allowed
+            || source.sequence == 0
+        {
+            return Err(self.error(ErrorKind::PermissionDenied));
+        }
+        let message = self.target(c, source).await?;
+        let actor = message
+            .actor_id
+            .as_deref()
+            .filter(|id| {
+                !id.trim().is_empty()
+                    && !id.chars().any(char::is_control)
+                    && *id != self.transport.user()
+            })
+            .filter(|_| message.actor_type.as_deref() == Some("users"))
+            .filter(|_| message.replyable == Some(true))
+            .ok_or_else(|| self.error(ErrorKind::PermissionDenied))?
+            .to_owned();
+        let now = self.transport.now();
+        let recipient = RecipientId {
+            scope: c.scope,
+            local: self.opaque()?,
+        };
+        // A directory selection and a message-derived identity cannot share
+        // authority. The existing direct-creation journal owns the mutation.
+        self.people.clear();
+        self.people.push(PersonBinding {
+            id: recipient,
+            actor_id: actor,
+            expires: Moment {
+                epoch: now.epoch,
+                millis: now.millis.saturating_add(120_000),
+            },
+        });
+        self.create_direct(c, operation, recipient, caps).await
+    }
     pub(super) async fn find_people(
         &mut self,
         c: &OperationContext,

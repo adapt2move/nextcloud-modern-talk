@@ -7,7 +7,7 @@ use talk_core::ids::{
     AccountId, AccountScope, ClockEpoch, ConversationId, HostId, OperationId, RuntimeGeneration,
 };
 use talk_core::lifecycle::Cancellation;
-use talk_core::policy::Moment;
+use talk_core::policy::{Decision, Moment};
 use talk_core::ports::{NextcloudPort, OperationContext, ProtocolReply, ProtocolRequest};
 use talk_core::protocol::conversation::{
     ConversationCommand as C, ConversationResult as CR, NotificationLevel, RecipientSource, Setting,
@@ -15,7 +15,7 @@ use talk_core::protocol::conversation::{
 use talk_core::protocol::messaging::{
     ComposeOptions, MessagingCommand as M, MessagingResult as MR,
 };
-use talk_core::protocol::{FeatureSupport, MessageId, MessageKind, Role, SendState};
+use talk_core::protocol::{FeatureSupport, MessageId, MessageKind, Role, RoomKind, SendState};
 fn scope() -> AccountScope {
     AccountScope {
         account: AccountId::from_local(700),
@@ -23,9 +23,12 @@ fn scope() -> AccountScope {
     }
 }
 fn context(r: &NetworkRuntime) -> OperationContext {
+    context_for(r, scope())
+}
+fn context_for(r: &NetworkRuntime, scope: AccountScope) -> OperationContext {
     let now = r.now();
     OperationContext {
-        scope: scope(),
+        scope,
         cancellation: Cancellation::default(),
         deadline: Moment {
             epoch: now.epoch,
@@ -57,6 +60,25 @@ fn canonical_accepted_id(result: MR, operation: OperationId) -> MessageId {
     };
     assert!(id.sequence > 0);
     id
+}
+async fn read_marker(
+    client: &mut NextcloudClient,
+    runtime: &NetworkRuntime,
+    id: ConversationId,
+) -> Option<u64> {
+    let ProtocolReply::Conversations(list) = client
+        .request(context(runtime), ProtocolRequest::ListConversations)
+        .await
+        .expect("conversation list")
+    else {
+        panic!("conversation list")
+    };
+    list.rooms
+        .as_slice()
+        .iter()
+        .find(|room| room.id == id)
+        .expect("test room")
+        .last_read_message
 }
 async fn m(
     c: &mut NextcloudClient,
@@ -136,6 +158,86 @@ async fn released_server_messaging_and_room_controls() {
         .await
         .unwrap();
     let id = client.fixture_conversation().unwrap();
+    let bob_scope = AccountScope {
+        account: AccountId::from_local(701),
+        runtime: RuntimeGeneration::from_local(1),
+    };
+    let mut bob = test_support::from_private_fixture(
+        &root.join("bob.json"),
+        bob_scope,
+        HostId::from_local(701),
+        runtime.clone(),
+    )
+    .expect("second private synthetic fixture");
+    bob.request(
+        context_for(&runtime, bob_scope),
+        ProtocolRequest::InspectAccount,
+    )
+    .await
+    .unwrap();
+    let bob_room = bob.fixture_conversation().unwrap();
+    let ProtocolReply::Messaging {
+        result: bob_message,
+        ..
+    } = bob
+        .request(
+            context_for(&runtime, bob_scope),
+            ProtocolRequest::Messaging {
+                conversation: bob_room,
+                operation: OperationId::from_local(201),
+                command: M::Send {
+                    text: text("A group message from Bob"),
+                    options: ComposeOptions::default(),
+                },
+            },
+        )
+        .await
+        .expect("send the second user's source message")
+    else {
+        panic!("second user's message")
+    };
+    println!("alpha-backend private-reply-source: pass");
+    let source = MessageId {
+        conversation: id,
+        sequence: canonical_accepted_id(bob_message, OperationId::from_local(201)).sequence,
+    };
+    let ProtocolReply::Conversation(direct) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::CreatePrivateReply {
+                operation: OperationId::from_local(202),
+                source,
+            },
+        )
+        .await
+        .expect("resolve the observed author to a direct conversation")
+    else {
+        panic!("private reply direct conversation")
+    };
+    assert_eq!(direct.kind, RoomKind::Direct);
+    let reply = m(
+        &mut client,
+        &runtime,
+        direct.id,
+        203,
+        "private-reply-send",
+        M::Send {
+            text: text("A private response"),
+            options: ComposeOptions {
+                private_reply: Some(Box::new(source)),
+                ..Default::default()
+            },
+        },
+    )
+    .await;
+    if let MR::Message(message) = reply {
+        assert!(
+            message.parent.is_some(),
+            "private reply keeps the copied parent"
+        );
+    } else {
+        panic!("private reply returned no canonical message");
+    }
     let CR::Details(details) =
         settings(&mut client, &runtime, id, 1, "settings-read", C::Read).await
     else {
@@ -367,6 +469,81 @@ async fn released_server_messaging_and_room_controls() {
     .await;
     let second = canonical_accepted_id(sent, OperationId::from_local(102));
     assert_eq!(second.conversation, id);
+    let marker_before = read_marker(&mut client, &runtime, id).await;
+    let MR::Messages {
+        messages: recent, ..
+    } = m(
+        &mut client,
+        &runtime,
+        id,
+        139,
+        "unread-latest-control",
+        M::History {
+            before: None,
+            thread: None,
+        },
+    )
+    .await
+    else {
+        panic!("history control")
+    };
+    assert!(
+        recent
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == first),
+        "history control omitted first fixture message"
+    );
+    let MR::Messages { messages, .. } = m(
+        &mut client,
+        &runtime,
+        id,
+        135,
+        "unread-from-start",
+        M::UnreadAfter(None),
+    )
+    .await
+    else {
+        panic!("unread page")
+    };
+    assert!(
+        messages
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id.sequence <= first.sequence),
+        "first unread page: count={}, min={:?}, max={:?}, fixture={}",
+        messages.as_slice().len(),
+        messages
+            .as_slice()
+            .iter()
+            .map(|row| row.message.id.sequence)
+            .min(),
+        messages
+            .as_slice()
+            .iter()
+            .map(|row| row.message.id.sequence)
+            .max(),
+        first.sequence,
+    );
+    let MR::Messages { messages, .. } = m(
+        &mut client,
+        &runtime,
+        id,
+        136,
+        "unread-after-marker",
+        M::UnreadAfter(Some(first)),
+    )
+    .await
+    else {
+        panic!("unread page")
+    };
+    assert!(
+        messages
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == second)
+    );
+    assert_eq!(read_marker(&mut client, &runtime, id).await, marker_before);
     m(
         &mut client,
         &runtime,
@@ -626,8 +803,30 @@ async fn released_server_messaging_and_room_controls() {
     .await;
     let thread = canonical_accepted_id(sent, OperationId::from_local(123));
     assert_eq!(thread.conversation, id);
+    let ProtocolReply::Conversations(_) = client
+        .request(context(&runtime), ProtocolRequest::ListConversations)
+        .await
+        .expect("bind account conversations before reading subscribed threads")
+    else {
+        panic!("conversation list")
+    };
+    let ProtocolReply::SubscribedThreads {
+        threads: subscribed,
+        ..
+    } = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::SubscribedThreads { offset: 0 },
+        )
+        .await
+        .expect("subscribed threads")
+    else {
+        panic!("subscribed thread list")
+    };
+    assert!(subscribed.as_slice().iter().any(|item| item.root == thread));
+    println!("alpha-backend subscribed-threads: pass");
     m(&mut client, &runtime, id, 124, "thread-list", M::Threads).await;
-    m(
+    let MR::Thread(details) = m(
         &mut client,
         &runtime,
         id,
@@ -635,7 +834,11 @@ async fn released_server_messaging_and_room_controls() {
         "thread-read",
         M::Thread(thread),
     )
-    .await;
+    .await
+    else {
+        panic!("thread detail")
+    };
+    assert_eq!(details.rename, Decision::Allowed);
     m(
         &mut client,
         &runtime,
@@ -648,7 +851,7 @@ async fn released_server_messaging_and_room_controls() {
         },
     )
     .await;
-    m(
+    let thread_reply = m(
         &mut client,
         &runtime,
         id,
@@ -663,6 +866,113 @@ async fn released_server_messaging_and_room_controls() {
         },
     )
     .await;
+    let thread_reply = canonical_accepted_id(thread_reply, OperationId::from_local(127));
+    let nested = m(
+        &mut client,
+        &runtime,
+        id,
+        133,
+        "thread-quoted-reply",
+        M::Send {
+            text: text("Quoted thread reply"),
+            options: ComposeOptions {
+                reply_to: Some(thread_reply),
+                thread: Some(thread),
+                ..ComposeOptions::default()
+            },
+        },
+    )
+    .await;
+    let nested = canonical_accepted_id(nested, OperationId::from_local(133));
+    let MR::Messages { messages, .. } = m(
+        &mut client,
+        &runtime,
+        id,
+        134,
+        "thread-quoted-history",
+        M::History {
+            before: None,
+            thread: Some(thread),
+        },
+    )
+    .await
+    else {
+        panic!("thread history")
+    };
+    assert!(messages.as_slice().iter().any(|message| {
+        message.message.id == nested
+            && message.thread == Some(thread)
+            && message
+                .parent
+                .as_ref()
+                .is_some_and(|parent| parent.id == thread_reply)
+    }));
+    let MR::Messages { messages, .. } = m(
+        &mut client,
+        &runtime,
+        id,
+        138,
+        "thread-older-page",
+        M::History {
+            before: Some(nested),
+            thread: Some(thread),
+        },
+    )
+    .await
+    else {
+        panic!("older thread page")
+    };
+    assert!(
+        messages
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == thread_reply)
+    );
+    assert!(
+        !messages
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == nested)
+    );
+    let MR::Messages { messages, .. } = m(
+        &mut client,
+        &runtime,
+        id,
+        140,
+        "thread-live-room-poll",
+        M::Poll {
+            after: thread,
+            thread: None,
+        },
+    )
+    .await
+    else {
+        panic!("thread live poll")
+    };
+    assert!(
+        messages
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == nested && message.thread == Some(thread))
+    );
+    let MR::Threads(threads) = m(
+        &mut client,
+        &runtime,
+        id,
+        141,
+        "thread-live-count",
+        M::Threads,
+    )
+    .await
+    else {
+        panic!("thread activity")
+    };
+    assert!(
+        threads
+            .as_slice()
+            .iter()
+            .any(|item| item.root == thread && item.replies >= 2)
+    );
     m(
         &mut client,
         &runtime,
@@ -684,6 +994,25 @@ async fn released_server_messaging_and_room_controls() {
         M::MarkRead(second),
     )
     .await;
+    m(
+        &mut client,
+        &runtime,
+        id,
+        132,
+        "mark-unread-from",
+        M::MarkUnreadFrom(first),
+    )
+    .await;
+    m(
+        &mut client,
+        &runtime,
+        id,
+        137,
+        "mark-unread-from-start",
+        M::MarkUnreadFromStart,
+    )
+    .await;
+    assert_eq!(read_marker(&mut client, &runtime, id).await, Some(0));
     m(&mut client, &runtime, id, 130, "mark-unread", M::MarkUnread).await;
     let MR::Message(deleted) = m(&mut client, &runtime, id, 131, "delete", M::Delete(second)).await
     else {
@@ -692,6 +1021,84 @@ async fn released_server_messaging_and_room_controls() {
     assert_eq!(deleted.message.id, second);
     assert_eq!(deleted.message.kind, MessageKind::Deleted);
     assert!(deleted.message.text.as_str().is_empty());
+    let bob_thread = MessageId {
+        conversation: bob_room,
+        sequence: thread.sequence,
+    };
+    let ProtocolReply::Messaging {
+        result: MR::Thread(other),
+        ..
+    } = bob
+        .request(
+            context_for(&runtime, bob_scope),
+            ProtocolRequest::Messaging {
+                conversation: bob_room,
+                operation: OperationId::from_local(211),
+                command: M::Thread(bob_thread),
+            },
+        )
+        .await
+        .expect("member observes another person's thread")
+    else {
+        panic!("member thread detail")
+    };
+    assert_eq!(other.rename, Decision::Denied);
+    let ProtocolReply::Messaging { result: own, .. } = bob
+        .request(
+            context_for(&runtime, bob_scope),
+            ProtocolRequest::Messaging {
+                conversation: bob_room,
+                operation: OperationId::from_local(212),
+                command: M::Send {
+                    text: text("A thread started by Bob"),
+                    options: ComposeOptions {
+                        thread_title: Some(text("Bob's topic")),
+                        ..ComposeOptions::default()
+                    },
+                },
+            },
+        )
+        .await
+        .expect("member starts a thread")
+    else {
+        panic!("member thread creation")
+    };
+    let own = canonical_accepted_id(own, OperationId::from_local(212));
+    let ProtocolReply::Messaging {
+        result: MR::Thread(own_detail),
+        ..
+    } = bob
+        .request(
+            context_for(&runtime, bob_scope),
+            ProtocolRequest::Messaging {
+                conversation: bob_room,
+                operation: OperationId::from_local(213),
+                command: M::Thread(own),
+            },
+        )
+        .await
+        .expect("member observes their thread")
+    else {
+        panic!("own thread detail")
+    };
+    assert_eq!(own_detail.rename, Decision::Allowed);
+    let MR::Thread(moderator_detail) = m(
+        &mut client,
+        &runtime,
+        id,
+        142,
+        "thread-moderator-permission",
+        M::Thread(MessageId {
+            conversation: id,
+            sequence: own.sequence,
+        }),
+    )
+    .await
+    else {
+        panic!("moderator thread detail")
+    };
+    assert_eq!(moderator_detail.rename, Decision::Allowed);
+    println!("alpha-backend thread-rename-authority: pass");
     let CR::Directory(recipients) = settings(
         &mut client,
         &runtime,

@@ -377,6 +377,15 @@ pub(super) fn room(
         },
         actions,
         unread_messages: integer(data.get("unreadMessages")).and_then(|n| u32::try_from(n).ok()),
+        unread_direct_mention: caps
+            .has("direct-mention-flag")
+            .then(|| data.get("unreadMentionDirect").and_then(Value::as_bool))
+            .flatten(),
+        last_read_message: if data.get("lastReadMessage").and_then(Value::as_i64) == Some(-2) {
+            Some(0)
+        } else {
+            integer(data.get("lastReadMessage"))
+        },
         last_activity: integer(data.get("lastActivity")),
         call_active: data.get("hasCall").and_then(Value::as_bool),
         sensitive: classified

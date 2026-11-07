@@ -2,11 +2,13 @@
 use super::conversation::{Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
 use super::{ClipboardImage, Decision, Page, Text, UnavailableReason};
+use crate::preferences::navigation::NavigationRoomKey;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MessageFeature {
     React,
     Reply,
+    PrivateReply,
     Edit,
     Delete,
     Threads,
@@ -21,12 +23,44 @@ pub enum MessageFeature {
     Voice,
     Typing,
     ReadReceipts,
+    MarkUnread,
+    UnreadFrom,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reaction {
     pub emoji: Text<64>,
     pub count: u32,
     pub own: bool,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReactionAuthors {
+    pub message: u128,
+    pub emoji: Text<64>,
+    pub authors: Page<Text<256>, 100>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReactionAuthorsLoad {
+    pub request: RequestId,
+    pub message: u128,
+    pub emoji: Text<64>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadDetails {
+    pub root: u128,
+    pub title: Text<256>,
+    pub notification_level: Option<i8>,
+    pub rename: Decision,
+}
+/// Recent room thread activity, scoped by the enclosing message panel.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadActivity {
+    pub root: u128,
+    pub replies: u16,
+    pub last_initials: Option<Text<16>>,
+    pub recent_initials: Page<Text<16>, 3>,
+    pub last_time: Option<Text<32>>,
+    pub expires: Option<u64>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RichObject {
@@ -41,6 +75,7 @@ pub struct RichObject {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reply {
     pub id: u128,
+    pub external: bool,
     pub author: Text<256>,
     pub text: Text<4096>,
     pub unavailable: bool,
@@ -87,6 +122,8 @@ pub struct MessageMetadata {
     /// adjacent hidden pin activity with observed server-page continuity.
     /// Derived by composition; durable content never restores this evidence.
     pub read_through: Option<u128>,
+    /// Exact adjacent predecessor, proven by a live server page in this runtime.
+    pub unread_after: Option<u128>,
     pub replyable: bool,
     pub parent: Option<Reply>,
     pub thread: Option<u128>,
@@ -111,6 +148,7 @@ impl Default for MessageMetadata {
             system_event: SystemEvent::Unknown,
             pin_notice: false,
             read_through: None,
+            unread_after: None,
             replyable: false,
             parent: None,
             thread: None,
@@ -229,6 +267,8 @@ pub struct MessagePanel {
     /// Local durable or session-memory admission, never a server permission grant.
     pub queue_available: bool,
     pub queued_actions: u32,
+    /// A pending room unread mutation keeps automatic read receipts suspended.
+    pub unread_queued: bool,
     /// Latest scoped outbox failure, identified independently from user request
     /// counters so a late rejection cannot complete another action.
     pub action_error: Option<(u64, MessageActionError)>,
@@ -250,12 +290,27 @@ pub struct MessagePanel {
     pub file_saved: Option<u64>,
     pub thread_root: Option<u128>,
     pub thread_state: RemoteState,
+    /// Independent root lookup when it lies outside the retained room history.
+    pub thread_root_state: RemoteState,
+    pub thread_root_message: Option<super::presentation::MessageView>,
     pub thread_messages: Page<super::presentation::MessageView, 50>,
+    /// Server cursor for the previous reply page; pages stay bounded.
+    pub thread_older: Option<u128>,
+    pub thread_has_newer: bool,
+    pub thread_activity: Page<ThreadActivity, 50>,
+    pub thread_details: Option<ThreadDetails>,
+    /// Prior observation for the single admitted optimistic thread change.
+    pub thread_change_prior: Option<(RequestId, ThreadDetails, Option<bool>)>,
+    /// Pending local subscription intent; this does not grant server authority.
+    pub thread_following_intent: Option<bool>,
+    pub thread_details_request: Option<RequestId>,
     pub context: ConversationRef,
     /// Foreground mutation state; targeted reads settle their own request slots.
     pub state: RemoteState,
     /// One admitted reaction mutation, cleared only by its correlated result.
     pub reaction_pending: Option<u128>,
+    pub reaction_authors: Page<ReactionAuthors, 16>,
+    pub reaction_authors_load: Option<ReactionAuthorsLoad>,
     pub history: RemoteState,
     pub older: Option<u128>,
     pub latest: Option<u128>,
@@ -280,6 +335,7 @@ impl MessagePanel {
             failed_drafts: Page::empty(),
             queue_available: false,
             queued_actions: 0,
+            unread_queued: false,
             action_error: None,
             pinned_messages: Page::empty(),
             pins_state: RemoteState::Idle,
@@ -298,10 +354,21 @@ impl MessagePanel {
             file_saved: None,
             thread_root: None,
             thread_state: RemoteState::Idle,
+            thread_root_state: RemoteState::Idle,
+            thread_root_message: None,
             thread_messages: Page::empty(),
+            thread_older: None,
+            thread_has_newer: false,
+            thread_activity: Page::empty(),
+            thread_details: None,
+            thread_change_prior: None,
+            thread_following_intent: None,
+            thread_details_request: None,
             context,
             state: RemoteState::Idle,
             reaction_pending: None,
+            reaction_authors: Page::empty(),
+            reaction_authors_load: None,
             history: RemoteState::Idle,
             older: None,
             latest: None,
@@ -331,8 +398,19 @@ impl MessagePanel {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ComposeTarget {
     pub reply_to: Option<u128>,
+    pub private_reply: Option<PrivateReplyTarget>,
     pub thread: Option<u128>,
+    /// Create a thread whose root is this new message.
+    pub new_thread: bool,
     pub silent: bool,
+}
+/// Displayed quote and durable lookup key; neither grants access to the source.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivateReplyTarget {
+    pub source: NavigationRoomKey,
+    pub message: u128,
+    pub author: Text<128>,
+    pub body: Text<512>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
@@ -366,6 +444,17 @@ pub enum MessageAction {
     DismissUpload,
     Files,
     Thread(u128),
+    ThreadOlder(u128),
+    ThreadRoot(u128),
+    ThreadInfo(u128),
+    RenameThread {
+        root: u128,
+        title: Text<256>,
+    },
+    ThreadNotifications {
+        root: u128,
+        level: i8,
+    },
     Older,
     Refresh,
     Context(u128),
@@ -383,8 +472,15 @@ pub enum MessageAction {
         emoji: Text<64>,
         add: bool,
     },
+    ReactionAuthors {
+        message: u128,
+        emoji: Text<64>,
+    },
     MarkRead(u128),
     MarkUnread,
+    MarkUnreadFrom(u128),
+    /// Locate the first visible message after the read marker; zero means start.
+    LocateUnreadAfter(u128),
     Typing(bool),
     Mentions(Text<256>),
     Search(Text<256>),

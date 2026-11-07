@@ -14,6 +14,8 @@ mod preview;
 mod reads;
 mod removal;
 mod startup;
+mod thread_change;
+mod threads;
 mod typing;
 mod update;
 use crate::diagnostics::{
@@ -72,6 +74,7 @@ enum Purpose {
     RestoreAutomatic(AccountId),
     Removal(RequestId, AccountId, removal::Step),
     Rooms(AccountScope),
+    Threads(AccountScope, u32),
     Mutation(RequestId, ConversationRef),
     Send(RequestId, ConversationRef, OperationId),
     Preferences(AccountScope, PreferenceRequest),
@@ -162,6 +165,7 @@ pub struct Accounts {
     attachment_owner: files::Owner,
     message_poll_at: Instant,
     message_poll_request: u64,
+    thread_refresh_due: Option<(AccountScope, u32, Instant)>,
 }
 impl Accounts {
     pub fn start(media: std::sync::Arc<talk_adapters::media::MediaService>) -> Rc<RefCell<Self>> {
@@ -211,6 +215,7 @@ impl Accounts {
             attachment_owner: files::Owner::default(),
             message_poll_at: Instant::now(),
             message_poll_request: 0,
+            thread_refresh_due: None,
         }))
     }
     pub fn shutdown(&mut self) {
@@ -332,6 +337,11 @@ impl Accounts {
             return;
         }
         self.snapshot.active_account = scope;
+        self.thread_refresh_due = None;
+        self.snapshot.threads = talk_core::ui::presentation::ThreadList {
+            account: scope,
+            ..Default::default()
+        };
         self.snapshot.create_panel = scope.map(talk_core::ui::conversation::CreatePanel::new);
         self.snapshot.conversations = scope
             .and_then(|s| self.background.account(s))
@@ -561,6 +571,7 @@ impl Accounts {
         self.tick_file_work();
         self.tick_background();
         self.tick_typing();
+        self.tick_thread_refresh(Instant::now());
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
@@ -790,6 +801,7 @@ impl Accounts {
             }
             Purpose::Removal(request, account, step) => self.complete_removal(request, account, step, result),
             Purpose::Rooms(scope) => self.complete_rooms(scope, result),
+            Purpose::Threads(scope, offset) => self.complete_threads(scope, offset, result),
             Purpose::Tags(scope) | Purpose::TagMutation(_, scope) => {
                 let completion = match result {
                     Ok(RuntimeReply::Protocol(ProtocolReply::Tags(tags))) if tags.scope == scope => {
@@ -1073,6 +1085,11 @@ impl Accounts {
         }
         match intent {
             UiIntent::Typing { context, active } => self.typing_activity(context, active)?,
+            UiIntent::RefreshThreads(scope) => self.refresh_threads(scope)?,
+            UiIntent::PageThreads { account, offset } => self.page_threads(account, offset)?,
+            UiIntent::MarkRoomUnread { request, context } => {
+                self.queue_room_unread(request, context)?;
+            }
             UiIntent::FinishFileExport { request, context } => {
                 self.finish_file_export(request, context)
             }
@@ -1557,7 +1574,10 @@ impl NativeDesktopPort for Port {
         }
         model.dirty = false;
         model.snapshot.revision = model.snapshot.revision.saturating_add(1);
-        Some(model.snapshot.clone())
+        let mut snapshot = model.snapshot.clone();
+        model.project_room_unread(&mut snapshot);
+        model.project_thread_list(&mut snapshot);
+        Some(snapshot)
     }
 }
 impl Accounts {
@@ -1675,6 +1695,8 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
             _ => ConversationKind::Unknown,
         },
         unread: r.unread_messages.unwrap_or(0),
+        unread_direct_mention: r.unread_direct_mention,
+        last_read_message: r.last_read_message.map(u128::from),
         favorite: r.favorite,
         tags: r.tag_ids.as_ref().map(|tags| {
             page(tags.as_slice().iter().map(|id| TagRef {

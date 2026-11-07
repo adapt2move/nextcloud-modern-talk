@@ -137,6 +137,8 @@ fn attachment_metadata_is_preserved_for_each_queued_share() {
     panel.features = page(features);
     model.stage_files(context, paths(&["one.png"])).unwrap();
     let target = ComposeTarget {
+        new_thread: false,
+        private_reply: None,
         reply_to: Some(7),
         thread: Some(8),
         silent: true,

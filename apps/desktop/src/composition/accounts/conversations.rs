@@ -32,6 +32,8 @@ pub(super) struct Metadata {
 fn metadata_identity(room: &protocol::Conversation) -> protocol::Conversation {
     let mut identity = room.clone();
     identity.unread_messages = None;
+    identity.unread_direct_mention = None;
+    identity.last_read_message = None;
     identity.last_activity = None;
     identity.call_active = None;
     identity.call_scope = None;

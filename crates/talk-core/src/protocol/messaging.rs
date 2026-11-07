@@ -25,6 +25,8 @@ pub struct RichObject {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReplyContext {
     pub id: MessageId,
+    /// An external private quote is display-only; its ID is not a local jump target.
+    pub external: bool,
     pub author: Text<256>,
     pub text: Text<4096>,
     pub unavailable: bool,
@@ -42,6 +44,8 @@ pub struct MessageDetails {
     pub replyable: Option<bool>,
     pub parent: Option<ReplyContext>,
     pub thread: Option<MessageId>,
+    /// Number of replies when the server identifies this message as a thread root.
+    pub thread_replies: Option<u32>,
     pub reactions: Page<Reaction, 64>,
     pub rich: Page<RichObject, 32>,
     pub system: Option<Text<128>>,
@@ -51,6 +55,8 @@ pub struct MessageDetails {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ComposeOptions {
     pub reply_to: Option<MessageId>,
+    /// Original message in another conversation for a private reply.
+    pub private_reply: Option<Box<MessageId>>,
     pub thread: Option<MessageId>,
     pub thread_title: Option<Text<256>>,
     pub silent: bool,
@@ -77,10 +83,20 @@ pub struct ScheduledMessage {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Thread {
     pub root: MessageId,
+    pub last_message: Option<MessageId>,
+    pub last_reply: Option<ThreadReplyActivity>,
     pub title: Text<256>,
     pub replies: u32,
     pub unread: Option<u32>,
     pub notification_level: Option<i8>,
+    /// Fresh room and root observation; unknown never grants a rename.
+    pub rename: Decision,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadReplyActivity {
+    pub author: Text<256>,
+    pub timestamp: u64,
+    pub expires: Option<u64>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchHit {
@@ -93,6 +109,7 @@ pub enum MessagingFeature {
     Read,
     Send,
     Reply,
+    PrivateReply,
     Edit,
     Delete,
     React,
@@ -108,6 +125,8 @@ pub enum MessagingFeature {
     Voice,
     Typing,
     ReadReceipts,
+    MarkUnread,
+    UnreadFrom,
     Translation,
     Summary,
 }
@@ -134,6 +153,8 @@ pub enum MessagingCommand {
         after: MessageId,
         thread: Option<MessageId>,
     },
+    /// First bounded forward page after the room read marker; None means start.
+    UnreadAfter(Option<MessageId>),
     Context(MessageId),
     /// Read-only recovery of one durable send correlation after restart. Absence
     /// in the bounded search is uncertain and never authorizes a second POST.
@@ -157,6 +178,10 @@ pub enum MessagingCommand {
         emoji: Text<64>,
     },
     MarkUnread,
+    /// Explicitly rewind to the observed predecessor of the selected message.
+    MarkUnreadFrom(MessageId),
+    /// Mark from the beginning when a live exhausted history proves the first row.
+    MarkUnreadFromStart,
     MarkRead(MessageId),
     Typing(bool),
     Mentions(Text<256>),

@@ -3,6 +3,323 @@ use talk_core::ids::{ConversationId, HostId, RuntimeGeneration};
 use talk_core::protocol::messaging::{MessageDetails, ReplyContext};
 use talk_core::protocol::{Message, MessageId, MessageKind};
 
+#[test]
+fn thread_metadata_mutation_fences_old_reads_and_does_not_persist_authority() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let info = admit(&mut cache, key, 1, Work::ThreadInfo(7));
+    let change = admit(&mut cache, key, 2, Work::ThreadQueued(7));
+    let result = |title: &str| {
+        MessagingResult::Thread(Box::new(protocol::messaging::Thread {
+            root: MessageId {
+                conversation: key.conversation,
+                sequence: 7,
+            },
+            last_message: None,
+            last_reply: None,
+            title: text(title),
+            replies: 0,
+            unread: None,
+            notification_level: Some(0),
+            rename: Decision::Allowed,
+        }))
+    };
+    assert!(cache.complete(
+        key,
+        change,
+        Work::ThreadQueued(7),
+        RequestId(2),
+        &Ok(result("After")),
+        false
+    ));
+    assert!(cache.complete(
+        key,
+        info,
+        Work::ThreadInfo(7),
+        RequestId(1),
+        &Ok(result("Before")),
+        false
+    ));
+    let mut panel = MessagePanel::new(key);
+    panel.thread_root = Some(7);
+    cache.get(key).unwrap().project(&mut panel);
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().title.as_str(),
+        "After"
+    );
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().rename,
+        Decision::Allowed
+    );
+    cache.get_mut(key).unwrap().thread_details[0].expires = Instant::now() - Duration::from_secs(1);
+    cache.get(key).unwrap().project(&mut panel);
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().rename,
+        Decision::Unknown
+    );
+    cache.remove(key);
+    cache.open(key);
+    let mut fresh = MessagePanel::new(key);
+    fresh.thread_root = Some(7);
+    cache.get(key).unwrap().project(&mut fresh);
+    assert!(fresh.thread_details.is_none());
+}
+
+#[test]
+fn offline_thread_capability_hint_keeps_support_but_never_an_expired_grant() {
+    use talk_core::ui::messaging::MessageFeature;
+    use talk_core::ui::presentation::FeatureSupport;
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let mut result = with_capabilities(messages(key, [], None), Decision::Allowed);
+    if let MessagingResult::Messages {
+        capabilities: Some(caps),
+        ..
+    } = &mut result
+    {
+        caps.actions = page([(
+            protocol::messaging::MessagingFeature::Threads,
+            protocol::conversation::ActionAvailability {
+                implemented: true,
+                server: protocol::FeatureSupport::Supported,
+                allowed: Decision::Allowed,
+            },
+        )]);
+    } else {
+        panic!("capabilities fixture");
+    }
+    complete(&mut cache, key, 1, Work::History, result);
+    let history = cache.get_mut(key).unwrap();
+    history.offline = true;
+    history.capabilities.as_mut().unwrap().0 = Instant::now() - Duration::from_secs(1);
+    let mut panel = MessagePanel::new(key);
+    cache.get(key).unwrap().project(&mut panel);
+    let value = panel.availability(MessageFeature::Threads);
+    assert!(value.implemented);
+    assert_eq!(value.server, FeatureSupport::Supported);
+    assert_eq!(value.allowed, Decision::Unknown);
+    assert_eq!(panel.file_limit, 0);
+    assert_eq!(panel.pin_change, Decision::Unknown);
+}
+
+#[test]
+fn cached_thread_count_roundtrips_without_restoring_authority() {
+    let key = context(1, 1, 1, 1);
+    let mut detail = message(key, 7, "Thread root");
+    detail.thread_replies = Some(4);
+    detail.thread = Some(detail.message.id);
+    let cached = cached_message(&message_view(&detail)).unwrap();
+    let restored = restored_message(&cached);
+    assert_eq!(restored.reply_count, 4);
+    assert_eq!(restored.metadata.thread, Some(7));
+    assert_eq!(restored.metadata.edit, Decision::Unknown);
+}
+
+#[test]
+fn thread_windows_survive_restart_and_expire_even_outside_the_room_timeline() {
+    use talk_core::ui::messaging::Reply;
+    use talk_core::ui::presentation::DeliveryState;
+
+    let original = context(1, 1, 1, 1);
+    let now = now_unix();
+    let mut cache = Cache::default();
+    cache.open(original);
+    complete(
+        &mut cache,
+        original,
+        1,
+        Work::History,
+        messages(original, [], None),
+    );
+    let root = message_view(&message(original, 7, "Root"));
+    let mut expired = message_view(&message(original, 8, "Expires"));
+    expired.metadata.thread = Some(7);
+    expired.metadata.expires_at = Some(now.saturating_add(60));
+    let mut reply = message_view(&message(original, 9, "Reply"));
+    reply.metadata.thread = Some(7);
+    reply.metadata.parent = Some(Reply {
+        id: 8,
+        external: false,
+        author: text("Synthetic user"),
+        text: text("Expires"),
+        unavailable: false,
+    });
+    let mut pending = message_view(&message(original, 10, "Not confirmed"));
+    pending.delivery = DeliveryState::Pending;
+    cache.remember_thread(original, 7, page([expired, reply, pending]), Some(root));
+    let stable = NavigationRoomKey::new("r1:00000000000000000000000000000001").unwrap();
+    let durable = cache.durable(original, stable, now).unwrap();
+    assert_eq!(durable.threads.as_slice()[0].replies.as_slice().len(), 2);
+
+    let restored = context(1, 2, 0, 1);
+    let mut cache = Cache::default();
+    cache.restore(restored, &durable);
+    let thread = cache.get(restored).unwrap();
+    assert_eq!(thread.thread_root(7).unwrap().body.as_str(), "Root");
+    assert_eq!(thread.thread(7).unwrap().as_slice().len(), 2);
+    let mut panel = MessagePanel::new(restored);
+    thread.project(&mut panel);
+    assert_eq!(
+        panel.thread_activity.as_slice()[0]
+            .recent_initials
+            .as_slice()
+            .len(),
+        1
+    );
+    assert!(panel.thread_activity.as_slice()[0].last_time.is_some());
+    assert_eq!(
+        thread.thread(7).unwrap().as_slice()[0].metadata.edit,
+        Decision::Unknown
+    );
+    cache.expire(now.saturating_add(60));
+    let rows = cache.get(restored).unwrap().thread(7).unwrap().as_slice();
+    assert_eq!(rows.len(), 1);
+    let parent = rows[0].metadata.parent.as_ref().unwrap();
+    assert!(parent.unavailable && parent.text.as_str().is_empty());
+}
+
+#[test]
+fn deletion_redacts_closed_thread_copies_and_quoted_parents() {
+    use talk_core::ui::messaging::Reply;
+    let room = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(room);
+    complete(&mut cache, room, 1, Work::History, messages(room, [], None));
+    let mut deleted = message_view(&message(room, 8, "Private content"));
+    deleted.metadata.thread = Some(7);
+    let mut reply = message_view(&message(room, 9, "Later"));
+    reply.metadata.thread = Some(7);
+    reply.metadata.parent = Some(Reply {
+        id: 8,
+        external: false,
+        author: text("Synthetic user"),
+        text: text("Private content"),
+        unavailable: false,
+    });
+    cache.remember_thread(room, 7, page([deleted, reply]), None);
+    let mut event = message(room, 8, "ignored");
+    event.message.kind = MessageKind::Deleted;
+    complete(
+        &mut cache,
+        room,
+        2,
+        Work::Poll,
+        messages(room, [event], Some(9)),
+    );
+    let rows = cache.get(room).unwrap().thread(7).unwrap().as_slice();
+    assert!(rows[0].metadata.deleted && rows[0].body.as_str().is_empty());
+    let parent = rows[1].metadata.parent.as_ref().unwrap();
+    assert!(parent.unavailable && parent.text.as_str().is_empty());
+}
+
+#[test]
+fn recent_thread_activity_is_scoped_versioned_and_expires() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    complete(
+        &mut model.history,
+        key,
+        1,
+        Work::History,
+        messages(key, [message(key, 7, "Root")], Some(7)),
+    );
+    let summary = |conversation, replies, expires| {
+        MessagingResult::Threads(page([protocol::messaging::Thread {
+            root: MessageId {
+                conversation,
+                sequence: 7,
+            },
+            last_message: Some(MessageId {
+                conversation,
+                sequence: 8,
+            }),
+            last_reply: Some(protocol::messaging::ThreadReplyActivity {
+                author: text("Alex Brown"),
+                timestamp: 1,
+                expires,
+            }),
+            title: text("Topic"),
+            replies,
+            unread: None,
+            notification_level: None,
+            rename: Decision::Unknown,
+        }]))
+    };
+    let old = admit(&mut model.history, key, 2, Work::ThreadActivity);
+    let fresh = admit(&mut model.history, key, 3, Work::ThreadActivity);
+    model.apply_message(
+        RequestId(3),
+        key,
+        fresh,
+        Work::ThreadActivity,
+        reply(key, fresh, summary(key.conversation, 3, None)),
+    );
+    model.apply_message(
+        RequestId(2),
+        key,
+        old,
+        Work::ThreadActivity,
+        reply(key, old, summary(key.conversation, 1, None)),
+    );
+    assert_eq!(model.snapshot.messages.as_slice()[0].reply_count, 3);
+    let activity = &model
+        .snapshot
+        .message_panel
+        .as_ref()
+        .unwrap()
+        .thread_activity
+        .as_slice()[0];
+    assert_eq!(activity.last_initials.as_ref().unwrap().as_str(), "AB");
+
+    let wrong = admit(&mut model.history, key, 4, Work::ThreadActivity);
+    let foreign = context(1, 1, 1, 2);
+    model.apply_message(
+        RequestId(4),
+        key,
+        wrong,
+        Work::ThreadActivity,
+        reply(key, wrong, summary(foreign.conversation, 50, None)),
+    );
+    assert_eq!(model.snapshot.messages.as_slice()[0].reply_count, 3);
+
+    let expired = admit(&mut model.history, key, 5, Work::ThreadActivity);
+    model.apply_message(
+        RequestId(5),
+        key,
+        expired,
+        Work::ThreadActivity,
+        reply(key, expired, summary(key.conversation, 4, Some(1))),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(model.snapshot.messages.as_slice()[0].reply_count, 4);
+    assert!(panel.thread_activity.as_slice()[0].last_initials.is_none());
+    assert!(panel.thread_activity.as_slice()[0].last_time.is_none());
+}
+
+#[test]
+fn mark_unread_predecessor_requires_observed_adjacency() {
+    let key = context(1, 1, 1, 1);
+    let mut history = History::new(key);
+    history.messages = page([
+        message_view(&message(key, 10, "first")),
+        message_view(&message(key, 20, "second")),
+    ]);
+    assert_eq!(history.predecessor(20), None);
+    history.observe_read_page(&[(10, false), (20, false)], None);
+    assert_eq!(history.predecessor(20), Some(10));
+    assert_eq!(history.predecessor(10), None);
+    history.read_edges.clear();
+    assert_eq!(
+        history.visible_messages().as_slice()[1]
+            .metadata
+            .unread_after,
+        None
+    );
+}
+
 fn system_message(key: ConversationRef, id: u64, tag: Option<&str>) -> MessageDetails {
     let mut row = message(
         key,
@@ -1105,6 +1422,7 @@ fn message(context: ConversationRef, id: u64, body: &str) -> MessageDetails {
         replyable: Some(true),
         parent: None,
         thread: None,
+        thread_replies: None,
         reactions: Page::empty(),
         rich: Page::empty(),
         system: None,
@@ -1172,7 +1490,11 @@ fn admit_target(
             panel.thread_root = Some(7);
             panel.thread_state = RemoteState::Loading(RequestId(serial));
         }
-        Work::Context(target) => {
+        Work::ThreadOlder(root) => {
+            panel.thread_root = Some(root);
+            panel.thread_state = RemoteState::Loading(RequestId(serial));
+        }
+        Work::Context(target) | Work::UnreadContext(target) => {
             panel.context_load = Some(talk_core::ui::messaging::ContextLoad {
                 target,
                 state: RemoteState::Loading(RequestId(serial)),
@@ -1182,6 +1504,158 @@ fn admit_target(
         _ => panic!("targeted read required"),
     }
     operation
+}
+
+#[test]
+fn older_thread_pages_are_scoped_and_do_not_replace_the_cached_latest_window() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    let latest = message_view(&message(key, 90, "Latest reply"));
+    model
+        .history
+        .remember_thread(key, 7, page([latest.clone()]), None);
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_messages = page([latest]);
+    panel.thread_older = Some(90);
+    let operation = admit_target(&mut model, key, 2, Work::ThreadOlder(7));
+    model.apply_message(
+        RequestId(2),
+        key,
+        operation,
+        Work::ThreadOlder(7),
+        reply(
+            key,
+            operation,
+            messages(key, [message(key, 40, "Older reply")], Some(40)),
+        ),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.thread_messages.as_slice()[0].local_id, 40);
+    assert_eq!(panel.thread_older, Some(40));
+    assert!(panel.thread_has_newer);
+    assert_eq!(
+        model
+            .history
+            .get(key)
+            .unwrap()
+            .thread(7)
+            .unwrap()
+            .as_slice()[0]
+            .local_id,
+        90
+    );
+    let stale = admit_target(&mut model, key, 3, Work::ThreadOlder(7));
+    model.snapshot.message_panel.as_mut().unwrap().thread_root = Some(8);
+    model.apply_message(
+        RequestId(3),
+        key,
+        stale,
+        Work::ThreadOlder(7),
+        reply(
+            key,
+            stale,
+            messages(key, [message(key, 30, "Stale page")], Some(30)),
+        ),
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .thread_messages
+            .as_slice()[0]
+            .local_id,
+        40
+    );
+}
+
+#[test]
+fn locating_unread_uses_first_visible_scoped_row_without_rewinding_live_cursor() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    complete(
+        &mut model.history,
+        key,
+        1,
+        Work::History,
+        messages(key, [message(key, 80, "Newer window")], Some(80)),
+    );
+    model.project_history(key);
+    let operation = admit_target(&mut model, key, 2, Work::UnreadContext(10));
+    model.history.poll_admitted(key, operation, 10);
+    model.apply_message(
+        RequestId(2),
+        key,
+        operation,
+        Work::UnreadContext(10),
+        reply(
+            key,
+            operation,
+            messages(
+                key,
+                [
+                    message(key, 15, "Second unread"),
+                    message(key, 11, "First unread"),
+                ],
+                Some(15),
+            ),
+        ),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.located, Some((RequestId(2), 11)));
+    assert_eq!(
+        panel.context_load.as_ref().unwrap().state,
+        RemoteState::Idle
+    );
+    let history = model.history.get(key).unwrap();
+    assert_eq!(history.latest, Some(80));
+    assert_eq!(history.predecessor(11), None);
+}
+
+#[test]
+fn first_unread_requires_a_live_exhausted_page_for_the_same_oldest_row() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(
+            key,
+            [message(key, 7, "First"), message(key, 8, "Next")],
+            Some(7),
+        ),
+    );
+    assert_eq!(cache.get(key).unwrap().predecessor(7), None);
+    let stale = admit(&mut cache, key, 2, Work::Older);
+    cache.older_admitted(key, stale, 8);
+    assert!(cache.complete(
+        key,
+        stale,
+        Work::Older,
+        RequestId(2),
+        &Ok(messages(key, [], None)),
+        false
+    ));
+    assert_eq!(cache.get(key).unwrap().predecessor(7), None);
+    let current = admit(&mut cache, key, 3, Work::Older);
+    cache.older_admitted(key, current, 7);
+    assert!(cache.complete(
+        key,
+        current,
+        Work::Older,
+        RequestId(3),
+        &Ok(messages(key, [], None)),
+        false
+    ));
+    assert_eq!(cache.get(key).unwrap().predecessor(7), Some(0));
+    assert_eq!(cache.get(key).unwrap().predecessor(8), Some(7));
 }
 
 fn reply(
@@ -2218,6 +2692,7 @@ fn expired_content_and_parent_excerpts_are_removed_before_restoring_history() {
     let mut child = message(key, 2, "Reply");
     child.parent = Some(ReplyContext {
         id: parent.message.id,
+        external: false,
         author: text("User"),
         text: text("Expiring secret"),
         unavailable: false,
@@ -2831,7 +3306,13 @@ fn older_reads_cannot_replace_newer_composer_capabilities_and_expired_sources_st
         false
     ));
     cache.get(key).unwrap().project(&mut panel);
-    assert!(panel.features.as_slice().is_empty());
+    let reaction = panel.availability(talk_core::ui::messaging::MessageFeature::React);
+    assert_eq!(reaction.allowed, Decision::Unknown);
+    assert_eq!(
+        reaction.server,
+        talk_core::ui::presentation::FeatureSupport::Supported
+    );
+    assert!(!reaction.enabled());
     assert_eq!(panel.file_limit, 0);
     cache.remove(key);
     cache.open(key);

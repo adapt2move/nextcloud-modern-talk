@@ -644,7 +644,9 @@ impl Accounts {
             .as_ref()
             .filter(|panel| panel.context == context)
             .ok_or(SubmitError::StaleScope)?;
-        if ((!caption.as_str().is_empty() || target.silent) && !panel.media_caption)
+        if target.new_thread
+            || target.private_reply.is_some()
+            || ((!caption.as_str().is_empty() || target.silent) && !panel.media_caption)
             || (target.reply_to.is_some() && !panel.availability(MessageFeature::Reply).enabled())
             || (target.thread.is_some() && !panel.availability(MessageFeature::Threads).enabled())
         {
@@ -661,6 +663,7 @@ impl Accounts {
             })
         };
         let options = protocol::messaging::ComposeOptions {
+            private_reply: None,
             reply_to: target.reply_to.map(message).transpose()?,
             thread: target.thread.map(message).transpose()?,
             thread_title: None,

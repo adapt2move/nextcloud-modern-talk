@@ -66,6 +66,10 @@ impl AppCredential {
 /// Semantic operations only. There is no authenticated URL, method, header or form API.
 /// Readback/reconciliation policy and application permission decisions belong to the caller.
 pub enum Request {
+    /// Account-wide subscribed threads, paged independently of any room.
+    SubscribedThreads {
+        offset: u32,
+    },
     Chat {
         room: RoomToken,
         command: chat::Command,
@@ -95,6 +99,10 @@ pub enum Request {
     MarkRead {
         room: RoomToken,
         message: u64,
+    },
+    /// Talk's explicit first-message unread sentinel, not a message ID.
+    MarkUnreadFromStart {
+        room: RoomToken,
     },
     CreateGroup {
         name: String,
@@ -490,7 +498,9 @@ impl Client {
             request,
             Request::History { .. }
                 | Request::Chat {
-                    command: chat::Command::History { .. } | chat::Command::Poll { .. },
+                    command: chat::Command::History { .. }
+                        | chat::Command::Poll { .. }
+                        | chat::Command::UnreadAfter { .. },
                     ..
                 }
         ) {
@@ -577,6 +587,19 @@ impl Client {
                     || message.reference.as_ref() != Some(&attempt.reference)
                     || message.actor_type.as_deref() != Some("users")
                     || message.actor_id.as_deref() != Some(self.transport.user())
+                {
+                    return Err(self.error(ErrorKind::Uncertain));
+                }
+                if let Request::Chat {
+                    command: chat::Command::Send { options, .. },
+                    ..
+                } = &request
+                    && let Some(source) = options.reply_to_token.as_ref()
+                    && !message.parent.as_ref().is_some_and(|parent| {
+                        parent.external
+                            && parent.token.as_deref() == Some(source.as_str())
+                            && parent.source_id == options.reply_to
+                    })
                 {
                     return Err(self.error(ErrorKind::Uncertain));
                 }
@@ -755,6 +778,13 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
         format!("ocs/v2.php/apps/spreed/api/v4/tags/{}{suffix}", id.as_str())
     };
     let (method, route, query, form, kind) = match request {
+        Request::SubscribedThreads { offset } => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v1/chat/subscribed-threads".into(),
+            vec![("limit", "50".into()), ("offset", offset.to_string())],
+            vec![],
+            Kind::Chat(chat::ResponseKind::Threads),
+        ),
         Request::Chat { room, command } => return chat::plan(room, command),
         Request::Conversation { room, command } => return conversation::plan(room, command),
         Request::Account => (
@@ -864,6 +894,13 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
                 Kind::Ack,
             )
         }
+        Request::MarkUnreadFromStart { room: t } => (
+            Method::POST,
+            room("v1/chat", t, "/read"),
+            vec![],
+            vec![("lastReadMessage", "-2".into())],
+            Kind::Ack,
+        ),
         Request::CreateGroup { name } => {
             bounded(name, 256)?;
             if name.trim().is_empty() {

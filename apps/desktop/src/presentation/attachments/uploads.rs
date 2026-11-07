@@ -68,7 +68,9 @@ impl Desktop {
             && self.message_ui.editing.is_none()
             && self.snapshot.selected.is_some_and(|context| {
                 let target = self.drafts.target(context);
-                !self.drafts.pending(context)
+                !target.new_thread
+                    && target.private_reply.is_none()
+                    && !self.drafts.pending(context)
                     && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
                         ((!target.silent && self.composer.read(cx).content.is_empty())
                             || panel.media_caption)

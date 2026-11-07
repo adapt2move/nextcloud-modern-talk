@@ -223,6 +223,22 @@ fn malformed_or_cross_room_parent_cannot_smuggle_context() {
         models::Message::decode(&m).err().unwrap(),
         ErrorKind::WrongScope
     );
+    m["parent"]["metaData"] = json!({
+        "replyToConversationToken": "otherroom",
+        "replyToMessageId": 2
+    });
+    assert!(
+        models::Message::decode(&m)
+            .unwrap()
+            .parent
+            .unwrap()
+            .external
+    );
+    m["parent"]["metaData"]["replyToMessageId"] = json!(0);
+    assert_eq!(
+        models::Message::decode(&m).err().unwrap(),
+        ErrorKind::WrongScope
+    );
     m["parent"]["token"] = json!("testroom");
     m["parent"]["parent"] = message(1, "");
     assert_eq!(

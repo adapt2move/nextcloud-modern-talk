@@ -6,7 +6,9 @@
 //! reply tickets: an old completion cannot recreate a removed cache entry.
 use super::messaging::{Work, merge, message_view};
 use super::*;
-use talk_adapters::identity::{CacheHistory, CachedMessage, CachedReaction, CachedReply};
+use talk_adapters::identity::{
+    CacheHistory, CachedMessage, CachedReaction, CachedReply, CachedThread,
+};
 use talk_core::preferences::navigation::NavigationRoomKey;
 use talk_core::protocol::messaging::MessagingResult;
 use talk_core::ui::presentation::MessageView;
@@ -30,6 +32,7 @@ struct Flight {
     version: Version,
     started: Instant,
     poll_after: Option<u128>,
+    older_before: Option<u128>,
     tail_repair: bool,
 }
 
@@ -37,6 +40,18 @@ struct ReactionSnapshot {
     message: u128,
     version: Version,
     reactions: Page<protocol::messaging::Reaction, 64>,
+}
+
+struct ThreadObservation {
+    details: talk_core::ui::messaging::ThreadDetails,
+    version: Version,
+    expires: Instant,
+}
+
+struct OpenThread {
+    root: u128,
+    rows: Page<MessageView, 50>,
+    root_message: Option<MessageView>,
 }
 
 pub(super) struct History {
@@ -56,6 +71,8 @@ pub(super) struct History {
     // At most 99 adjacent pairs in the retained 100-row page. Unlike mutation
     // versions, these preserve observed pagination continuity across polls.
     read_edges: Vec<(u128, u128)>,
+    // Proof from an exhausted live older page. Never restored from disk.
+    first_message: Option<u128>,
     // One proven hidden continuation beyond an older retained window. This
     // stores IDs only, never another message page, and is not restored from disk.
     read_tail: Option<(u128, u128)>,
@@ -68,6 +85,16 @@ pub(super) struct History {
     // Only while an older admitted read can overwrite a confirmed mutation.
     // This also protects thread/pin rows outside the main 100-message page.
     reaction_snapshots: Vec<ReactionSnapshot>,
+    // Four recently opened threads per scoped room; no permission is cached.
+    threads: Vec<(u128, Page<MessageView, 50>, Option<MessageView>)>,
+    // Canonical current page, including older pages that are not the cached tail.
+    // Optimistic rows are projected only after this bounded baseline is restored.
+    open_thread: Option<OpenThread>,
+    // Current-runtime observations only; disk never restores rename authority.
+    thread_details: Vec<ThreadObservation>,
+    thread_activity: Page<talk_core::ui::messaging::ThreadActivity, 50>,
+    thread_activity_version: Version,
+    thread_activity_requested: Option<Instant>,
     capabilities: Option<(Instant, Version, protocol::messaging::MessagingCapabilities)>,
     // Same room/runtime lifetime as history; at most 50 canonical pin excerpts.
     // A confirmed write fences all already-admitted pin reads, just like edits.
@@ -94,10 +121,17 @@ impl History {
             connectivity_version: Version(0, false),
             versions: Vec::new(),
             read_edges: Vec::new(),
+            first_message: None,
             read_tail: None,
             tail_probe: None,
             metadata_probe: None,
             reaction_snapshots: Vec::new(),
+            threads: Vec::new(),
+            open_thread: None,
+            thread_details: Vec::new(),
+            thread_activity: Page::empty(),
+            thread_activity_version: Version(0, false),
+            thread_activity_requested: None,
             capabilities: None,
             pins: Page::empty(),
             pins_version: Version(0, false),
@@ -111,6 +145,20 @@ impl History {
         panel.older = self.older;
         panel.latest = self.latest;
         panel.common_read = self.common_read;
+        self.project_open_thread(panel);
+        if panel.thread_change_prior.is_none()
+            && let Some(observed) = panel.thread_root.and_then(|root| {
+                self.thread_details
+                    .iter()
+                    .find(|item| item.details.root == root)
+            })
+        {
+            let mut details = observed.details.clone();
+            if Instant::now() >= observed.expires && details.rename == Decision::Allowed {
+                details.rename = Decision::Unknown;
+            }
+            panel.thread_details = Some(details);
+        }
         // Presentation may reuse a recently observed limit/features snapshot;
         // every mutation still revalidates its room in the protocol owner.
         panel.features = Page::empty();
@@ -120,11 +168,118 @@ impl History {
         panel.pinned_messages = self.pins.clone();
         panel.pins_state = self.pins_state;
         panel.pins_loaded = self.pins_loaded;
-        if let Some((expires, _, capabilities)) = &self.capabilities
-            && Instant::now() < *expires
-        {
-            super::messaging::project_capabilities(panel, capabilities);
+        let now = now_unix();
+        let mut activities = self.thread_activity.as_slice().to_vec();
+        for (root, rows, cached_root) in &self.threads {
+            if activities.iter().any(|activity| activity.root == *root) {
+                continue;
+            }
+            let last = rows.as_slice().iter().rev().find(|row| {
+                row.local_id != *root
+                    && !row.metadata.deleted
+                    && !row
+                        .metadata
+                        .expires_at
+                        .is_some_and(|at| at > 0 && at <= now)
+            });
+            let root_count = cached_root
+                .as_ref()
+                .or_else(|| {
+                    self.messages
+                        .as_slice()
+                        .iter()
+                        .find(|message| message.local_id == *root)
+                })
+                .map_or(0, |message| message.reply_count);
+            let loaded = rows
+                .as_slice()
+                .iter()
+                .filter(|row| row.local_id != *root)
+                .count();
+            if activities.len() >= 50 {
+                activities.pop();
+            }
+            activities.push(talk_core::ui::messaging::ThreadActivity {
+                root: *root,
+                replies: root_count.max(u16::try_from(loaded).unwrap_or(u16::MAX)),
+                last_initials: last.map(|message| message.initials.clone()),
+                recent_initials: Page::empty(),
+                last_time: last.map(|message| message.time_label.clone()),
+                expires: last.and_then(|message| message.metadata.expires_at),
+            });
         }
+        panel.thread_activity = page(activities.into_iter().map(|mut activity| {
+            if activity.expires.is_some_and(|at| at > 0 && at <= now) {
+                activity.last_initials = None;
+                activity.last_time = None;
+            }
+            let mut recent = Vec::new();
+            if let Some(initials) = &activity.last_initials {
+                recent.push(initials.clone());
+            }
+            if let Some(rows) = self.thread(activity.root) {
+                for reply in rows.as_slice().iter().rev().filter(|reply| {
+                    reply.local_id != activity.root
+                        && !reply.metadata.deleted
+                        && !reply
+                            .metadata
+                            .expires_at
+                            .is_some_and(|at| at > 0 && at <= now)
+                }) {
+                    if !recent.contains(&reply.initials) {
+                        recent.push(reply.initials.clone());
+                    }
+                    if recent.len() == 3 {
+                        break;
+                    }
+                }
+            }
+            activity.recent_initials = page(recent);
+            activity
+        }));
+        if let Some((expires, _, capabilities)) = &self.capabilities {
+            if Instant::now() < *expires {
+                super::messaging::project_capabilities(panel, capabilities);
+            } else {
+                // The last capability bit is only a local staging hint.
+                // Discard grants; dispatch always obtains current server policy.
+                let mut prior = MessagePanel::new(self.context);
+                super::messaging::project_capabilities(&mut prior, capabilities);
+                use talk_core::ui::messaging::MessageFeature;
+                for feature in [
+                    MessageFeature::Threads,
+                    MessageFeature::Reply,
+                    MessageFeature::Edit,
+                    MessageFeature::React,
+                ] {
+                    let mut value = prior.availability(feature);
+                    if value.allowed == Decision::Allowed {
+                        value.allowed = Decision::Unknown;
+                    }
+                    if value.implemented
+                        && value.server != talk_core::ui::presentation::FeatureSupport::Unknown
+                    {
+                        let _ = panel.features.try_push((feature, value));
+                    }
+                }
+            }
+        }
+    }
+    pub(super) fn project_open_thread(&self, panel: &mut MessagePanel) {
+        if let Some(thread) = self
+            .open_thread
+            .as_ref()
+            .filter(|thread| panel.thread_root == Some(thread.root))
+        {
+            panel.thread_messages = thread.rows.clone();
+            panel.thread_root_message = thread.root_message.clone();
+        }
+    }
+    pub(super) fn open_thread_root(&self, root: u128) -> Option<&MessageView> {
+        self.open_thread
+            .as_ref()
+            .filter(|thread| thread.root == root)
+            .and_then(|thread| thread.root_message.as_ref())
     }
     pub(super) fn visible_messages(&self) -> Page<MessageView, 100> {
         page(
@@ -134,11 +289,68 @@ impl History {
                 .filter(|message| !message.metadata.pin_notice)
                 .map(|message| {
                     let mut visible = message.clone();
+                    if let Some(activity) = self
+                        .thread_activity
+                        .as_slice()
+                        .iter()
+                        .find(|activity| activity.root == message.local_id)
+                        && !message.metadata.deleted
+                    {
+                        visible.reply_count = activity.replies;
+                    } else if let Some(rows) = self.thread(message.local_id)
+                        && !message.metadata.deleted
+                    {
+                        let loaded = rows
+                            .as_slice()
+                            .iter()
+                            .filter(|row| row.local_id != message.local_id)
+                            .count();
+                        visible.reply_count = visible
+                            .reply_count
+                            .max(u16::try_from(loaded).unwrap_or(u16::MAX));
+                    }
                     let target = self.read_through_pin_notices(message.local_id);
                     visible.metadata.read_through = (target != message.local_id).then_some(target);
+                    visible.metadata.unread_after = self.predecessor(message.local_id);
                     visible
                 }),
         )
+    }
+
+    pub(super) fn thread(&self, root: u128) -> Option<&Page<MessageView, 50>> {
+        self.threads
+            .iter()
+            .find(|(id, _, _)| *id == root)
+            .map(|(_, rows, _)| rows)
+    }
+
+    pub(super) fn thread_root(&self, root: u128) -> Option<&MessageView> {
+        self.threads
+            .iter()
+            .find(|(id, _, _)| *id == root)
+            .and_then(|(_, _, message)| message.as_ref())
+    }
+
+    pub(super) fn needs_thread_activity(&self, now: Instant) -> bool {
+        self.thread_activity_requested
+            .is_none_or(|at| now.saturating_duration_since(at) >= Duration::from_secs(15))
+    }
+
+    /// Only a live page's adjacent IDs can identify the server's preceding
+    /// message. Cached pages and independently merged gaps confer no proof.
+    pub(super) fn predecessor(&self, id: u128) -> Option<u128> {
+        self.read_edges
+            .iter()
+            .find_map(|(previous, next)| (*next == id && *previous > 0).then_some(*previous))
+            .or_else(|| {
+                (self.first_message == Some(id)
+                    && self
+                        .messages
+                        .as_slice()
+                        .first()
+                        .is_some_and(|row| row.local_id == id))
+                .then_some(0)
+            })
     }
 
     /// Invisible pin activity carries no additional user content. A deliberate
@@ -333,42 +545,102 @@ impl History {
         }
     }
     fn expire(&mut self, now: u64) {
-        self.pins = page(
-            self.pins
-                .as_slice()
-                .iter()
-                .filter(|m| !m.metadata.expires_at.is_some_and(|at| at > 0 && at <= now))
-                .cloned(),
-        );
         let expired: Vec<_> = self
             .messages
             .as_slice()
             .iter()
+            .chain(self.pins.as_slice())
+            .chain(
+                self.threads
+                    .iter()
+                    .flat_map(|(_, rows, root)| rows.as_slice().iter().chain(root.iter())),
+            )
+            .chain(self.open_thread.iter().flat_map(|thread| {
+                thread
+                    .rows
+                    .as_slice()
+                    .iter()
+                    .chain(thread.root_message.iter())
+            }))
             .filter(|m| m.metadata.expires_at.is_some_and(|at| at > 0 && at <= now))
             .map(|m| m.local_id)
             .collect();
         if expired.is_empty() {
             return;
         }
-        self.messages = page(self.messages.as_slice().iter().filter_map(|message| {
+        let retain = |message: &MessageView| {
             if expired.contains(&message.local_id) {
                 return None;
             }
             let mut message = message.clone();
             if let Some(parent) = message.metadata.parent.as_mut()
+                && !parent.external
                 && expired.contains(&parent.id)
             {
                 parent.unavailable = true;
                 parent.text = text("");
             }
             Some(message)
-        }));
+        };
+        self.messages = page(self.messages.as_slice().iter().filter_map(retain));
+        self.pins = page(self.pins.as_slice().iter().filter_map(retain));
+        for (_, rows, root) in &mut self.threads {
+            *rows = page(rows.as_slice().iter().filter_map(retain));
+            *root = root.as_ref().and_then(retain);
+        }
+        if let Some(thread) = self.open_thread.as_mut() {
+            thread.rows = page(thread.rows.as_slice().iter().filter_map(retain));
+            thread.root_message = thread.root_message.as_ref().and_then(retain);
+        }
         self.versions.retain(|(id, _)| !expired.contains(id));
         self.read_edges
             .retain(|(from, to)| !expired.contains(from) && !expired.contains(to));
         self.read_tail = self
             .read_tail
             .filter(|(anchor, _)| !expired.contains(anchor));
+    }
+
+    /// Deletions are terminal observations. Scrub every retained thread copy,
+    /// including closed panes that do not currently receive row reconciliation.
+    fn redact_threads(&mut self, deleted: &[u128]) {
+        if deleted.is_empty() {
+            return;
+        }
+        let redact = |message: &mut MessageView| {
+            if deleted.contains(&message.local_id) {
+                message.body = text("");
+                message.attachments = Page::empty();
+                message.metadata.deleted = true;
+                message.metadata.reactions = Page::empty();
+                message.metadata.rich = Page::empty();
+                message.metadata.replyable = false;
+            }
+            if let Some(parent) = message.metadata.parent.as_mut()
+                && !parent.external
+                && deleted.contains(&parent.id)
+            {
+                parent.unavailable = true;
+                parent.text = text("");
+            }
+        };
+        for (_, rows, root) in &mut self.threads {
+            *rows = page(rows.as_slice().iter().cloned().map(|mut message| {
+                redact(&mut message);
+                message
+            }));
+            if let Some(root) = root {
+                redact(root);
+            }
+        }
+        if let Some(thread) = self.open_thread.as_mut() {
+            thread.rows = page(thread.rows.as_slice().iter().cloned().map(|mut message| {
+                redact(&mut message);
+                message
+            }));
+            if let Some(root) = thread.root_message.as_mut() {
+                redact(root);
+            }
+        }
     }
 }
 
@@ -379,8 +651,88 @@ pub(super) struct Cache {
     last_admission: u64,
 }
 impl Cache {
+    pub(super) fn ensure_open_thread(&mut self, context: ConversationRef, panel: &MessagePanel) {
+        let Some(room) = self.get_mut(context) else {
+            return;
+        };
+        let Some(root) = panel.thread_root else {
+            room.open_thread = None;
+            return;
+        };
+        if room
+            .open_thread
+            .as_ref()
+            .is_some_and(|thread| thread.root == root)
+        {
+            return;
+        }
+        room.open_thread = Some(OpenThread {
+            root,
+            // Locally staged IDs occupy the upper half of u128; server IDs are
+            // u64. A reopened baseline must never adopt projected intents.
+            rows: page(
+                panel
+                    .thread_messages
+                    .as_slice()
+                    .iter()
+                    .filter(|row| row.local_id <= u128::from(u64::MAX))
+                    .cloned(),
+            ),
+            root_message: panel.thread_root_message.clone(),
+        });
+    }
+    pub(super) fn remember_open_thread(
+        &mut self,
+        context: ConversationRef,
+        root: u128,
+        rows: Page<MessageView, 50>,
+        root_message: Option<MessageView>,
+    ) {
+        if let Some(room) = self.get_mut(context)
+            && room
+                .open_thread
+                .as_ref()
+                .is_some_and(|thread| thread.root == root)
+        {
+            room.open_thread = Some(OpenThread {
+                root,
+                rows,
+                root_message,
+            });
+        }
+    }
+    pub(super) fn remember_thread(
+        &mut self,
+        context: ConversationRef,
+        root: u128,
+        rows: Page<MessageView, 50>,
+        root_message: Option<MessageView>,
+    ) {
+        let Some(room) = self.get_mut(context) else {
+            return;
+        };
+        let previous_root = room.thread_root(root).cloned();
+        room.threads.retain(|(id, _, _)| *id != root);
+        if room.threads.len() >= 4 {
+            room.threads.remove(0);
+        }
+        room.threads
+            .push((root, rows, root_message.or(previous_root)));
+    }
     /// Record the actual dispatched cursor, including a bounded hidden-tail
     /// repair. The flight must not infer it from a newer canonical event cursor.
+    pub(super) fn older_admitted(
+        &mut self,
+        context: ConversationRef,
+        operation: OperationId,
+        before: u128,
+    ) {
+        if let Some(flight) = self.flights.iter_mut().find(|flight| {
+            flight.context == context && flight.operation == operation && flight.work == Work::Older
+        }) {
+            flight.older_before = Some(before);
+        }
+    }
     pub(super) fn poll_admitted(
         &mut self,
         context: ConversationRef,
@@ -391,13 +743,17 @@ impl Cache {
             .get(context)
             .is_some_and(|room| room.latest.is_some_and(|latest| after < latest));
         let Some(flight) = self.flights.iter_mut().find(|flight| {
-            flight.context == context && flight.operation == operation && flight.work == Work::Poll
+            flight.context == context
+                && flight.operation == operation
+                && matches!(flight.work, Work::Poll | Work::UnreadContext(_))
         }) else {
             return;
         };
         flight.poll_after = Some(after);
-        flight.tail_repair = repair;
-        if let Some(room) = self.get_mut(context)
+        let is_poll = flight.work == Work::Poll;
+        flight.tail_repair = is_poll && repair;
+        if is_poll
+            && let Some(room) = self.get_mut(context)
             && room.latest.is_some_and(|latest| after < latest)
         {
             room.tail_probe = Some((after, Instant::now()));
@@ -531,6 +887,39 @@ impl Cache {
                     .filter(|id| *id > 0),
             ),
             pin_messages: page(room.pins.as_slice().iter().filter_map(cached_message)),
+            threads: page(
+                room.threads
+                    .iter()
+                    .filter_map(|(root, replies, root_message)| {
+                        let root = u64::try_from(*root).ok().filter(|root| *root > 0)?;
+                        let confirmed =
+                            |message: &MessageView| {
+                                matches!(message.delivery,
+                        talk_core::ui::presentation::DeliveryState::Received
+                        | talk_core::ui::presentation::DeliveryState::ServerAccepted)
+                            };
+                        Some(CachedThread {
+                            root,
+                            root_message: root_message
+                                .as_ref()
+                                .filter(|message| confirmed(message))
+                                .and_then(cached_message),
+                            replies: page(
+                                replies
+                                    .as_slice()
+                                    .iter()
+                                    .filter(|message| confirmed(message))
+                                    .filter_map(|message| {
+                                        let mut cached = cached_message(message)?;
+                                        if cached.id != root {
+                                            cached.thread = Some(root);
+                                        }
+                                        Some(cached)
+                                    }),
+                            ),
+                        })
+                    }),
+            ),
             pins_loaded: room.pins_loaded,
             older: room.older.and_then(|id| u64::try_from(id).ok()),
             latest: room.latest.and_then(|id| u64::try_from(id).ok()),
@@ -552,6 +941,18 @@ impl Cache {
             return;
         };
         room.messages = page(cached.messages.as_slice().iter().map(restored_message));
+        room.threads = cached
+            .threads
+            .as_slice()
+            .iter()
+            .map(|thread| {
+                (
+                    u128::from(thread.root),
+                    page(thread.replies.as_slice().iter().map(restored_message)),
+                    thread.root_message.as_ref().map(restored_message),
+                )
+            })
+            .collect();
         if room.pins_version.0 == 0 {
             room.pins = page(cached.pins.as_slice().iter().filter_map(|id| {
                 cached
@@ -625,6 +1026,7 @@ impl Cache {
             version: Version(serial, false),
             started,
             poll_after,
+            older_before: None,
             tail_repair: false,
         });
         if work == Work::Metadata
@@ -644,6 +1046,11 @@ impl Cache {
         {
             room.pins_state = RemoteState::Loading(request);
             room.pins_read_at = Some(Instant::now());
+        }
+        if work == Work::ThreadActivity
+            && let Some(room) = self.get_mut(context)
+        {
+            room.thread_activity_requested = Some(started);
         }
     }
     pub(super) fn admission_failed(
@@ -700,6 +1107,16 @@ impl Cache {
         let Some(room) = self.get_mut(context) else {
             return false;
         };
+        let deleted = match result {
+            Ok(MessagingResult::Message(message)) => vec![message.as_ref()],
+            Ok(MessagingResult::Messages { messages, .. }) => messages.as_slice().iter().collect(),
+            _ => Vec::new(),
+        }
+        .into_iter()
+        .filter(|message| message.message.kind == protocol::MessageKind::Deleted)
+        .map(|message| u128::from(message.message.id.sequence))
+        .collect::<Vec<_>>();
+        room.redact_threads(&deleted);
         if work == Work::Metadata
             && let Some((_, at)) = room.metadata_probe.as_mut()
         {
@@ -719,6 +1136,60 @@ impl Cache {
                     room.pins_state = RemoteState::Failed(request, *reason)
                 }
                 _ => room.pins_state = RemoteState::Uncertain(request),
+            }
+        }
+        if work == Work::ThreadActivity {
+            // Slow requests receive the same cooldown as immediate failures.
+            room.thread_activity_requested = Some(Instant::now());
+            if flight.version >= room.thread_activity_version
+                && let Ok(MessagingResult::Threads(threads)) = result
+            {
+                room.thread_activity = page(threads.as_slice().iter().map(|thread| {
+                    let last = thread.last_reply.as_ref();
+                    talk_core::ui::messaging::ThreadActivity {
+                        root: u128::from(thread.root.sequence),
+                        replies: u16::try_from(thread.replies).unwrap_or(u16::MAX),
+                        last_initials: last.map(|last| initials(last.author.as_str())),
+                        recent_initials: Page::empty(),
+                        last_time: last
+                            .map(|last| text(&super::messaging::time_label(last.timestamp))),
+                        expires: last.and_then(|last| last.expires),
+                    }
+                }));
+                room.thread_activity_version = flight.version;
+            }
+        }
+        if let Work::ThreadInfo(root) | Work::ThreadChange(root) | Work::ThreadQueued(root) = work
+            && let Ok(MessagingResult::Thread(thread)) = result
+            && thread.root.conversation == context.conversation
+            && u128::from(thread.root.sequence) == root
+        {
+            let version = if matches!(work, Work::ThreadChange(_) | Work::ThreadQueued(_)) {
+                mutation_version
+            } else {
+                flight.version
+            };
+            let old = room
+                .thread_details
+                .iter()
+                .position(|item| item.details.root == root);
+            if old.is_none_or(|index| room.thread_details[index].version <= version) {
+                if let Some(index) = old {
+                    room.thread_details.remove(index);
+                }
+                if room.thread_details.len() >= 4 {
+                    room.thread_details.remove(0);
+                }
+                room.thread_details.push(ThreadObservation {
+                    details: talk_core::ui::messaging::ThreadDetails {
+                        root,
+                        title: thread.title.clone(),
+                        notification_level: thread.notification_level,
+                        rename: thread.rename,
+                    },
+                    version,
+                    expires: flight.started + background::SOURCE_LIFETIME,
+                });
             }
         }
         if let Work::PinChange { message, pinned } = work
@@ -772,6 +1243,7 @@ impl Cache {
                 | Work::Older
                 | Work::Poll
                 | Work::Context(_)
+                | Work::UnreadContext(_)
                 | Work::Recovery
         );
         // Retained content and reachability are independent. Only a newer
@@ -810,6 +1282,15 @@ impl Cache {
                 ..
             }) if timeline => {
                 let was_loaded = room.loaded;
+                if work == Work::Older
+                    && messages.as_slice().is_empty()
+                    && cursor.is_none()
+                    && flight.older_before.is_some()
+                    && room.messages.as_slice().first().map(|row| row.local_id)
+                        == flight.older_before
+                {
+                    room.first_message = flight.older_before;
+                }
                 let incoming: Vec<_> = messages
                     .as_slice()
                     .iter()
@@ -840,7 +1321,7 @@ impl Cache {
                     flight.tail_repair
                         || hidden_poll
                         || work == Work::Older
-                        || matches!(work, Work::Context(id)
+                        || matches!(work, Work::Context(id) | Work::UnreadContext(id)
                         if room.messages.as_slice().first().is_some_and(|m| id < m.local_id)),
                 );
                 if !matches!(work, Work::Recovery | Work::Context(_)) {
@@ -851,7 +1332,7 @@ impl Cache {
                     || matches!(work, Work::Latest | Work::Prefetch) && room.latest.is_none()
                 {
                     room.older = cursor.map(|id| u128::from(id.sequence));
-                } else if matches!(work, Work::Context(_)) {
+                } else if matches!(work, Work::Context(_) | Work::UnreadContext(_)) {
                     room.older = room.messages.as_slice().first().map(|m| m.local_id);
                 }
                 // The forward cursor is an event cursor, not necessarily a
@@ -928,7 +1409,7 @@ impl Cache {
             }
             Err(completion)
                 if timeline
-                    && !matches!(work, Work::Context(_))
+                    && !matches!(work, Work::Context(_) | Work::UnreadContext(_))
                     && (work == Work::Older || flight.version >= room.connectivity_version)
                     && (!work.background()
                         || (room.state_owner.background() || room.state == RemoteState::Idle)
@@ -1008,6 +1489,7 @@ fn cached_message(message: &MessageView) -> Option<CachedMessage> {
         parent: message.metadata.parent.as_ref().and_then(|p| {
             Some(CachedReply {
                 id: u64::try_from(p.id).ok()?,
+                external: p.external,
                 author: p.author.clone(),
                 text: p.text.clone(),
                 unavailable: p.unavailable,
@@ -1017,6 +1499,7 @@ fn cached_message(message: &MessageView) -> Option<CachedMessage> {
             .metadata
             .thread
             .and_then(|id| u64::try_from(id).ok()),
+        thread_replies: message.reply_count,
         reactions: page(
             message
                 .metadata
@@ -1041,7 +1524,7 @@ fn restored_message(message: &CachedMessage) -> MessageView {
         own: message.own,
         delivery: talk_core::ui::presentation::DeliveryState::Received,
         attachments: Page::empty(),
-        reply_count: 0,
+        reply_count: message.thread_replies,
         metadata: talk_core::ui::messaging::MessageMetadata {
             rich: page(
                 message
@@ -1075,6 +1558,7 @@ fn restored_message(message: &CachedMessage) -> MessageView {
                 .as_ref()
                 .map(|p| talk_core::ui::messaging::Reply {
                     id: u128::from(p.id),
+                    external: p.external,
                     author: p.author.clone(),
                     text: p.text.clone(),
                     unavailable: p.unavailable,

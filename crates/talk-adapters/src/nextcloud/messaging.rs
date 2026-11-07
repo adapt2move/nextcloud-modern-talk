@@ -7,6 +7,30 @@ use talk_core::protocol::conversation::ActionAvailability;
 use talk_core::protocol::messaging::*;
 use talk_core::protocol::{FeatureSupport, Role, RoomKind};
 
+fn visible_unread_event(event: &api::models::Message, marker: u64, now: u64) -> bool {
+    let hidden = matches!(
+        event.system.as_deref(),
+        Some(
+            "reaction_deleted"
+                | "message_edited"
+                | "message_deleted"
+                | "reaction"
+                | "reaction_revoked"
+        )
+    );
+    let Some(row) = event.update.as_deref().or((!hidden).then_some(event)) else {
+        return false;
+    };
+    row.id > marker
+        && !row
+            .expires
+            .is_some_and(|expires| expires > 0 && expires <= now)
+        && !matches!(
+            row.system.as_deref(),
+            Some("message_pinned" | "message_unpinned")
+        )
+}
+
 pub(super) struct UploadName {
     conversation: ConversationId,
     path: String,
@@ -32,6 +56,7 @@ pub(super) fn is_mutation(c: &MessagingCommand) -> bool {
         MessagingCommand::Capabilities
             | MessagingCommand::History { .. }
             | MessagingCommand::Poll { .. }
+            | MessagingCommand::UnreadAfter(_)
             | MessagingCommand::Context(_)
             | MessagingCommand::ReconcileSend
             | MessagingCommand::ReactionAuthors { .. }
@@ -50,12 +75,17 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
     use MessagingCommand as C;
     use MessagingFeature as F;
     match c {
-        C::History { .. } | C::Poll { .. } | C::Context(_) | C::ReconcileSend => F::Read,
+        C::History { .. }
+        | C::Poll { .. }
+        | C::UnreadAfter(_)
+        | C::Context(_)
+        | C::ReconcileSend => F::Read,
         C::Send { .. } => F::Send,
         C::Edit { .. } => F::Edit,
         C::Delete(_) => F::Delete,
         C::React { .. } | C::ReactionAuthors { .. } => F::React,
-        C::MarkUnread => F::Read,
+        C::MarkUnread => F::MarkUnread,
+        C::MarkUnreadFrom(_) | C::MarkUnreadFromStart => F::UnreadFrom,
         C::MarkRead(_) => F::ReadReceipts,
         C::Typing(_) => F::Typing,
         C::Mentions(_) => F::Mentions,
@@ -86,6 +116,7 @@ fn support(f: MessagingFeature) -> &'static str {
     match f {
         F::Read | F::Send | F::Mentions => "chat-v2",
         F::Reply => "chat-replies",
+        F::PrivateReply => "private-reply",
         F::Edit => "edit-messages",
         F::Delete => "delete-messages",
         F::React => "react-permission",
@@ -100,6 +131,8 @@ fn support(f: MessagingFeature) -> &'static str {
         F::Voice => "voice-message-sharing",
         F::Typing => "typing-privacy",
         F::ReadReceipts => "chat-read-marker",
+        F::MarkUnread => "chat-unread",
+        F::UnreadFrom => "chat-read-last",
         F::Translation => "translation",
         F::Summary => "chat-summary",
     }
@@ -113,8 +146,18 @@ fn availability(
     use MessagingFeature as F;
     let allowed = if room.unknown_restrictions {
         Decision::Unknown
-    } else if matches!(f, F::Forward | F::Translation | F::Summary | F::Voice) && room.classified {
+    } else if matches!(
+        f,
+        F::Forward | F::PrivateReply | F::Translation | F::Summary | F::Voice
+    ) && room.classified
+    {
         Decision::Denied
+    } else if f == F::PrivateReply {
+        if matches!(room.kind, RoomKind::Group | RoomKind::Public) && caps.has("chat-get-context") {
+            room.actions.read_messages
+        } else {
+            Decision::Denied
+        }
     } else if f == F::React {
         if room.actions.read_messages == Decision::Allowed
             && wire::integer(data.get("permissions")).is_some_and(|p| p & 256 != 0)
@@ -323,6 +366,7 @@ impl NextcloudClient {
             F::Read,
             F::Send,
             F::Reply,
+            F::PrivateReply,
             F::Edit,
             F::Delete,
             F::React,
@@ -338,6 +382,8 @@ impl NextcloudClient {
             F::Voice,
             F::Typing,
             F::ReadReceipts,
+            F::MarkUnread,
+            F::UnreadFrom,
             F::Translation,
             F::Summary,
         ] {
@@ -456,6 +502,7 @@ impl NextcloudClient {
                     conversation: id,
                     sequence: p.id,
                 },
+                external: p.external,
                 author: if unavailable {
                     snippet("")
                 } else {
@@ -473,6 +520,9 @@ impl NextcloudClient {
             conversation: id,
             sequence,
         });
+        let thread_replies = message
+            .thread_replies
+            .and_then(|count| u32::try_from(count).ok());
         let replyable = message.replyable;
         let system = message
             .system
@@ -495,6 +545,7 @@ impl NextcloudClient {
             replyable,
             parent,
             thread,
+            thread_replies,
             reactions,
             rich,
             system,
@@ -550,6 +601,11 @@ impl NextcloudClient {
         data: &Value,
         caps: &Capabilities,
     ) -> Result<api::chat::ComposeOptions, PortError> {
+        if o.private_reply.is_some()
+            && (o.reply_to.is_some() || o.thread.is_some() || o.thread_title.is_some())
+        {
+            return Err(self.error(ErrorKind::Malformed));
+        }
         if o.silent {
             self.message_action(MessagingFeature::Silent, room, data, caps)?
         }
@@ -559,10 +615,55 @@ impl NextcloudClient {
         if let Some(parent) = o.reply_to {
             self.message_scope(parent, id)?;
             self.message_action(MessagingFeature::Reply, room, data, caps)?;
-            if self.target(c, parent).await?.replyable != Some(true) {
+            let target = self.target(c, parent).await?;
+            if target.replyable != Some(true) {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
+            if let Some(thread) = o.thread
+                && target.id != thread.sequence
+                && target.thread_id != Some(thread.sequence)
+            {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
         }
+        let private_token = if let Some(parent) = o.private_reply.as_deref().copied() {
+            if !caps.has("private-reply") || !caps.has("chat-get-context") {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            if parent.conversation.account != id.account
+                || parent.conversation == id
+                || parent.sequence == 0
+                || room.kind != RoomKind::Direct
+            {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
+            let source_data = self.room_data(c, parent.conversation).await?;
+            let source_room = wire::room(&source_data, parent.conversation, caps)
+                .map_err(|kind| self.error(kind))?;
+            if !matches!(source_room.kind, RoomKind::Group | RoomKind::Public)
+                || source_room.classified
+                || source_room.unknown_restrictions
+                || source_room.actions.read_messages != Decision::Allowed
+            {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            let original = self.target(c, parent).await?;
+            if original.replyable != Some(true)
+                || original.actor_type.as_deref() != Some("users")
+                || original
+                    .actor_id
+                    .as_deref()
+                    .is_none_or(|actor| actor.is_empty() || actor == self.transport.user())
+            {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            Some(
+                api::models::RoomToken::parse(self.check_room(parent.conversation)?)
+                    .map_err(|kind| self.error(transport::kind(kind)))?,
+            )
+        } else {
+            None
+        };
         if let Some(thread) = o.thread {
             self.message_scope(thread, id)?;
             let token = api::models::RoomToken::parse(self.check_room(id)?)
@@ -578,8 +679,18 @@ impl NextcloudClient {
                 .await?;
         }
         Ok(api::chat::ComposeOptions {
-            reply_to: o.reply_to.map(|m| m.sequence),
-            thread: o.thread.map(|m| m.sequence),
+            reply_to: o
+                .reply_to
+                .or(o.private_reply.as_deref().copied())
+                .map(|m| m.sequence),
+            reply_to_token: private_token,
+            // Talk derives the thread from the quoted parent and ignores the
+            // threadId parameter in that case. Validate the parent above, then
+            // send only replyTo so the pinned wire contract stays unambiguous.
+            thread: o
+                .thread
+                .filter(|_| o.reply_to.is_none())
+                .map(|m| m.sequence),
             thread_title: o.thread_title.as_ref().map(|s| s.as_str().into()),
             silent: o.silent,
         })
@@ -1143,6 +1254,35 @@ impl NextcloudClient {
                 None => Ok(R::Send(receipt)),
             };
         }
+        if let C::MarkUnreadFrom(message) = command {
+            self.message_scope(message, id)?;
+            let token = api::models::RoomToken::parse(self.check_room(id)?)
+                .map_err(|k| self.error(transport::kind(k)))?;
+            self.transport
+                .api_request(
+                    c,
+                    api::Request::MarkRead {
+                        room: token,
+                        message: message.sequence,
+                    },
+                )
+                .await?;
+            if let Some(binding) = self.rooms.iter_mut().find(|binding| binding.id == id) {
+                binding.read_through = Some(message.sequence);
+            }
+            return Ok(R::Changed);
+        }
+        if matches!(command, C::MarkUnreadFromStart) {
+            let token = api::models::RoomToken::parse(self.check_room(id)?)
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            self.transport
+                .api_request(c, api::Request::MarkUnreadFromStart { room: token })
+                .await?;
+            if let Some(binding) = self.rooms.iter_mut().find(|binding| binding.id == id) {
+                binding.read_through = Some(0);
+            }
+            return Ok(R::Changed);
+        }
         if let C::MarkRead(message) = command {
             self.message_scope(message, id)?;
             let observed = wire::integer(data.get("lastReadMessage"));
@@ -1188,6 +1328,13 @@ impl NextcloudClient {
             C::Poll { after, thread } => WireCommand::Poll {
                 after: self.message_scope(*after, id)?,
                 thread: thread.map(|m| self.message_scope(m, id)).transpose()?,
+            },
+            C::UnreadAfter(Some(after)) => WireCommand::UnreadAfter {
+                after: Some(self.message_scope(*after, id)?),
+            },
+            C::UnreadAfter(None) => WireCommand::History {
+                before: None,
+                thread: None,
             },
             C::Context(m) => WireCommand::Context(self.message_scope(*m, id)?),
             C::Edit { message, text } => {
@@ -1341,6 +1488,7 @@ impl NextcloudClient {
                     caption: caption.as_str().into(),
                     reference: send_reference(operation),
                     options: api::chat::ComposeOptions {
+                        reply_to_token: None,
                         reply_to: options
                             .reply_to
                             .map(|m| self.message_scope(m, id))
@@ -1430,6 +1578,93 @@ impl NextcloudClient {
             }
             r => r?,
         };
+        if matches!(command, C::UnreadAfter(None)) {
+            // Released Talk treats a future offset of zero as an empty poll.
+            // Find the start by walking backwards, retaining only the oldest
+            // visible page, and require an exhausted page before calling it first.
+            let mut before = None;
+            let mut oldest = None;
+            for index in 0..=4 {
+                let api::Reply::History {
+                    messages,
+                    last_given,
+                    ..
+                } = &response
+                else {
+                    return Err(self.error(ErrorKind::Malformed));
+                };
+                if messages.is_empty() && last_given.is_none() {
+                    response = oldest.unwrap_or(response);
+                    break;
+                }
+                let next = last_given
+                    .filter(|next| *next > 0 && before.is_none_or(|previous| *next < previous))
+                    .ok_or_else(|| self.error(ErrorKind::Malformed))?;
+                if index == 4 {
+                    return Err(self.error(ErrorKind::TooLarge));
+                }
+                if messages
+                    .iter()
+                    .any(|event| visible_unread_event(event, 0, now_unix()))
+                {
+                    oldest = Some(response);
+                }
+                before = Some(next);
+                response = self
+                    .transport
+                    .api_request(
+                        c,
+                        api::Request::Chat {
+                            room: api::models::RoomToken::parse(self.check_room(id)?)
+                                .map_err(|kind| self.error(transport::kind(kind)))?,
+                            command: WireCommand::History {
+                                before,
+                                thread: None,
+                            },
+                        },
+                    )
+                    .await?;
+            }
+        } else if let C::UnreadAfter(Some(after)) = &command {
+            // Edits, reactions and pin notices can occupy a whole forward page
+            // without producing a visible new row. Follow their server cursor,
+            // with the same deadline and a strict limit on additional reads.
+            let marker = after.sequence;
+            let mut cursor = marker;
+            for _ in 0..3 {
+                let api::Reply::History {
+                    messages,
+                    last_given,
+                    ..
+                } = &response
+                else {
+                    break;
+                };
+                let visible = messages
+                    .iter()
+                    .any(|event| visible_unread_event(event, marker, now_unix()));
+                let Some(next) = last_given.filter(|next| *next > cursor) else {
+                    break;
+                };
+                if visible {
+                    break;
+                }
+                cursor = next;
+                response = self
+                    .transport
+                    .api_request(
+                        c,
+                        api::Request::Chat {
+                            room: api::models::RoomToken::parse(self.check_room(id)?)
+                                .map_err(|kind| self.error(transport::kind(kind)))?,
+                            command: WireCommand::UnreadAfter {
+                                after: Some(cursor),
+                            },
+                        },
+                    )
+                    .await?;
+            }
+        }
         if let C::Reminder { message, timestamp } = &command {
             // POST/DELETE acknowledge the write without returning a reminder.
             // Read the created value once under the same deadline; never turn
@@ -1691,13 +1926,13 @@ impl NextcloudClient {
             api::Reply::Chat(WireResponse::Threads(values)) => {
                 let mut out = Page::empty();
                 for v in values {
-                    out.try_push(self.thread(v, id)?)
+                    out.try_push(self.thread(v, id, Some(&room))?)
                         .map_err(|_| self.error(ErrorKind::TooLarge))?
                 }
                 Ok(R::Threads(out))
             }
             api::Reply::Chat(WireResponse::Thread(v)) => {
-                Ok(R::Thread(Box::new(self.thread(v, id)?)))
+                Ok(R::Thread(Box::new(self.thread(v, id, Some(&room))?)))
             }
             api::Reply::Chat(WireResponse::Search { hits, cursor }) => {
                 let mut out = Page::empty();
@@ -1760,6 +1995,7 @@ impl NextcloudClient {
             send_at: s.send_at,
             options: ComposeOptions {
                 reply_to: s.options.reply_to.map(mid),
+                private_reply: None,
                 thread: s.options.thread.map(mid),
                 thread_title: s
                     .options
@@ -1771,16 +2007,91 @@ impl NextcloudClient {
             },
         })
     }
-    fn thread(&self, t: api::chat::Thread, id: ConversationId) -> Result<Thread, PortError> {
+    pub(super) async fn subscribed_threads(
+        &mut self,
+        context: &OperationContext,
+        offset: u32,
+    ) -> Result<(Page<Thread, 50>, bool), PortError> {
+        let reply = self
+            .transport
+            .api_request(context, api::Request::SubscribedThreads { offset })
+            .await?;
+        let api::Reply::Chat(WireResponse::Threads(threads)) = reply else {
+            return Err(self.error(ErrorKind::Malformed));
+        };
+        // Pagination follows the raw server page, even when some rooms are not
+        // in the bounded local room registry and must not enter the projection.
+        let has_next = threads.len() == 50;
+        let mut result = Page::empty();
+        for thread in threads {
+            // A server token alone does not grant room authority. Only use bindings
+            // established by the account's conversation owner.
+            let Some(id) = self
+                .rooms
+                .iter()
+                .find(|room| room.token == thread.token)
+                .map(|room| room.id)
+            else {
+                continue;
+            };
+            result
+                .try_push(self.thread(thread, id, None)?)
+                .map_err(|_| self.error(ErrorKind::TooLarge))?;
+        }
+        Ok((result, has_next))
+    }
+
+    fn thread(
+        &self,
+        t: api::chat::Thread,
+        id: ConversationId,
+        room: Option<&Conversation>,
+    ) -> Result<Thread, PortError> {
+        // Talk permits the root author or a non-guest moderator to rename, even
+        // after the root expires. ThreadController calls hasModeratorPermissions(false).
+        // The account feed has no current room authority, so it stays unknown.
+        let rename = match room {
+            None => Decision::Unknown,
+            Some(room) if room.unknown_restrictions => Decision::Unknown,
+            Some(room) if room.actions.read_messages != Decision::Allowed => {
+                room.actions.read_messages
+            }
+            Some(room) if matches!(room.role, Role::Owner | Role::Moderator) => Decision::Allowed,
+            Some(_) => match t.first_actor.as_ref() {
+                Some((kind, actor))
+                    if kind == "users" && actor.as_str() == self.transport.user() =>
+                {
+                    Decision::Allowed
+                }
+                Some(_) => Decision::Denied,
+                None => Decision::Unknown,
+            },
+        };
         Ok(Thread {
             root: MessageId {
                 conversation: id,
                 sequence: t.id,
             },
+            last_message: t.last_message.map(|sequence| MessageId {
+                conversation: id,
+                sequence,
+            }),
+            last_reply: t
+                .last_reply
+                .map(|last| {
+                    Ok(talk_core::protocol::messaging::ThreadReplyActivity {
+                        author: Text::new(&last.author)
+                            .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                        timestamp: last.timestamp,
+                        expires: last.expires,
+                    })
+                })
+                .transpose()?,
             title: Text::new(&t.title).map_err(|_| self.error(ErrorKind::TooLarge))?,
             replies: t.replies,
             unread: None,
             notification_level: t.notification_level.and_then(|n| i8::try_from(n).ok()),
+            rename,
         })
     }
 }

@@ -813,6 +813,17 @@ impl NextcloudClient {
         let caps = self.capabilities(context).await?;
         self.supported(&caps)?;
         match request {
+            ProtocolRequest::SubscribedThreads { offset } => {
+                if !caps.has("threads") {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                self.subscribed_threads(context, offset)
+                    .await
+                    .map(|(threads, has_next)| ProtocolReply::SubscribedThreads {
+                        threads,
+                        has_next,
+                    })
+            }
             ProtocolRequest::Content { operation, command } => Ok(ProtocolReply::Content {
                 operation,
                 result: self.content(context, operation, command, &caps).await?,
@@ -1005,6 +1016,10 @@ impl NextcloudClient {
                 self.create_direct_for_member(context, operation, member, &caps)
                     .await
             }
+            ProtocolRequest::CreatePrivateReply { operation, source } => {
+                self.create_private_reply(context, operation, source, &caps)
+                    .await
+            }
             ProtocolRequest::CreateGroup { name } => {
                 if self.creation_uncertain {
                     return Err(self.error(ErrorKind::Uncertain));
@@ -1168,6 +1183,7 @@ impl NextcloudPort for NextcloudClient {
                         | ProtocolRequest::CreateGroup { .. }
                         | ProtocolRequest::CreateDirect { .. }
                         | ProtocolRequest::CreateDirectForMember { .. }
+                        | ProtocolRequest::CreatePrivateReply { .. }
                         | ProtocolRequest::MarkRead(_)
                         | ProtocolRequest::LeaveConversation(_)
                         | ProtocolRequest::ActivateConversation(_)

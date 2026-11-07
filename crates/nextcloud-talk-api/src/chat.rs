@@ -11,6 +11,8 @@ use serde_json::Value;
 #[derive(Clone, Debug, Default)]
 pub struct ComposeOptions {
     pub reply_to: Option<u64>,
+    /// Source room for an explicitly authorized cross-conversation reply.
+    pub reply_to_token: Option<RoomToken>,
     pub thread: Option<u64>,
     pub thread_title: Option<String>,
     pub silent: bool,
@@ -24,6 +26,10 @@ pub enum Command {
     Poll {
         after: u64,
         thread: Option<u64>,
+    },
+    /// Finite, read-only forward page for locating the first unread message.
+    UnreadAfter {
+        after: Option<u64>,
     },
     Context(u64),
     Send {
@@ -112,6 +118,9 @@ pub enum Command {
 pub struct Parent {
     pub id: u64,
     pub token: Option<String>,
+    /// Server-identified private quote from another conversation.
+    pub external: bool,
+    pub source_id: Option<u64>,
     pub author: String,
     pub message: String,
     pub unavailable: bool,
@@ -130,6 +139,8 @@ impl Parent {
         Ok(Some(Self {
             id: number(v, "id")?,
             token: string(v.get("token"), 30)?,
+            external: false,
+            source_id: None,
             author: if unavailable {
                 String::new()
             } else {
@@ -252,7 +263,18 @@ pub struct Thread {
     pub token: String,
     pub title: String,
     pub replies: u32,
+    pub last_message: Option<u64>,
+    /// Actor identity from the validated root observation, when still available.
+    pub first_actor: Option<(String, String)>,
+    /// Validated, display-only activity from the server's `last` message.
+    pub last_reply: Option<ThreadReply>,
     pub notification_level: Option<u8>,
+}
+#[derive(Clone, Debug)]
+pub struct ThreadReply {
+    pub author: String,
+    pub timestamp: u64,
+    pub expires: Option<u64>,
 }
 #[derive(Clone, Debug)]
 pub struct AttachmentFolder {
@@ -337,6 +359,7 @@ fn schedule(v: &Value) -> Result<ScheduledMessage, ErrorKind> {
         send_at: number(v, "sendAt")?,
         options: ComposeOptions {
             reply_to: integer(v.get("parent").and_then(|p| p.get("id"))).filter(|n| *n > 0),
+            reply_to_token: None,
             thread: integer(v.get("threadId")).filter(|n| *n > 0),
             thread_title: string(v.get("threadTitle"), 256)?.filter(|s| !s.is_empty()),
             silent: v
@@ -350,15 +373,60 @@ fn thread(v: &Value) -> Result<Thread, ErrorKind> {
     let t = &v["thread"];
     let token = required(t, "roomToken", 30)?;
     RoomToken::parse(&token)?;
+    let id = number(t, "id")?;
+    // A thread ID is also a message ID and cannot be used in routes when zero.
+    positive(id)?;
+    let last_message = integer(t.get("lastMessageId")).filter(|n| *n > 0);
+    let first = v.get("first").filter(|first| {
+        first.is_object()
+            && first.get("token").and_then(Value::as_str) == Some(token.as_str())
+            && integer(first.get("id")) == Some(id)
+    });
+    let first_actor = if let Some(first) = first {
+        match (
+            string(first.get("actorType"), 64)?,
+            string(first.get("actorId"), 512)?,
+        ) {
+            (Some(kind), Some(actor)) if !kind.is_empty() && !actor.is_empty() => {
+                Some((kind, actor))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    // The nested message is optional, can have expired, and does not grant
+    // room authority. Accept display data only for this exact thread and room.
+    let last_reply = v.get("last").filter(|last| {
+        last.is_object()
+            && last.get("token").and_then(Value::as_str) == Some(token.as_str())
+            && integer(last.get("id")) == last_message
+            && last_message.is_some_and(|last| last > id)
+            && last.get("deleted").and_then(Value::as_bool) != Some(true)
+            && last.get("messageType").and_then(Value::as_str) != Some("comment_deleted")
+    });
+    let last_reply = last_reply
+        .map(|last| {
+            Ok(ThreadReply {
+                author: required(last, "actorDisplayName", 256)?,
+                timestamp: number(last, "timestamp")?,
+                expires: integer(last.get("expirationTimestamp")),
+            })
+        })
+        .transpose()?;
     Ok(Thread {
-        id: number(t, "id")?,
+        id,
         token,
         title: required(t, "title", 256)?,
         replies: u32::try_from(number(t, "numReplies")?).map_err(|_| ErrorKind::TooLarge)?,
+        last_message,
+        first_actor,
+        last_reply,
         notification_level: integer(v.get("attendee").and_then(|a| a.get("notificationLevel")))
             .and_then(|n| u8::try_from(n).ok()),
     })
 }
+
 fn renames(v: &Value) -> Result<Vec<(String, String)>, ErrorKind> {
     let entries = v.as_array().ok_or(ErrorKind::Malformed)?;
     if entries.len() > 100 {
@@ -490,15 +558,23 @@ fn text(value: &str, max: usize) -> Result<(), ErrorKind> {
         Ok(())
     }
 }
-fn options(o: &ComposeOptions, f: &mut Vec<(&'static str, String)>) -> Result<(), ErrorKind> {
+fn options(
+    o: &ComposeOptions,
+    f: &mut Vec<(&'static str, String)>,
+    private_reply: bool,
+) -> Result<(), ErrorKind> {
     if o.reply_to.is_some() && o.thread.is_some()
         || o.thread_title.is_some() && (o.reply_to.is_some() || o.thread.is_some())
+        || o.reply_to_token.is_some() && (!private_reply || o.reply_to.is_none())
     {
         return Err(ErrorKind::Malformed);
     }
     if let Some(id) = o.reply_to {
         positive(id)?;
         f.push(("replyTo", id.to_string()))
+    }
+    if let Some(token) = &o.reply_to_token {
+        f.push(("replyToToken", token.as_str().to_owned()));
     }
     if let Some(id) = o.thread {
         positive(id)?;
@@ -521,11 +597,16 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
     let mut f = Vec::new();
     let mut kind = Kind::Ack;
     match c {
-        C::History { thread, .. } | C::Poll { thread, .. } => {
-            let future = matches!(c, C::Poll { .. });
+        C::History { .. } | C::Poll { .. } | C::UnreadAfter { .. } => {
+            let future = matches!(c, C::Poll { .. } | C::UnreadAfter { .. });
             let cursor = match c {
                 C::Poll { after, .. } => Some(*after),
                 C::History { before, .. } => *before,
+                C::UnreadAfter { after } => Some(after.unwrap_or(0)),
+                _ => None,
+            };
+            let thread = match c {
+                C::History { thread, .. } | C::Poll { thread, .. } => *thread,
                 _ => None,
             };
             q.extend([
@@ -540,11 +621,13 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
                 ("timeout", "0".into()),
             ]);
             if let Some(id) = cursor {
-                positive(id)?;
+                if !matches!(c, C::UnreadAfter { .. }) {
+                    positive(id)?;
+                }
                 q.push(("lastKnownMessageId", id.to_string()))
             }
             if let Some(id) = thread {
-                positive(*id)?;
+                positive(id)?;
                 q.push(("threadId", id.to_string()))
             }
             kind = Kind::History;
@@ -567,7 +650,10 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
                 ("message", message.clone()),
                 ("referenceId", reference.clone()),
             ]);
-            options(o, &mut f)?;
+            if o.reply_to_token.as_ref() == Some(room) {
+                return Err(ErrorKind::Malformed);
+            }
+            options(o, &mut f, true)?;
             kind = Kind::Message
         }
         C::Edit {
@@ -706,7 +792,7 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
                 ("message", message.clone()),
                 ("sendAt", send_at.to_string()),
             ]);
-            options(o, &mut f)?;
+            options(o, &mut f, false)?;
             kind = Kind::Chat(K::Schedule)
         }
         C::EditScheduled {
@@ -903,5 +989,123 @@ mod mention_tests {
         assert_eq!(mentions[0].id, "federated/alice");
         assert_eq!(mentions[1].actor_id, "bob");
         assert_eq!(mentions[1].id, "bob");
+    }
+}
+
+#[cfg(test)]
+mod thread_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn unread_location_is_a_finite_forward_read_without_read_side_effects() {
+        let room = RoomToken::parse("room1234").unwrap();
+        for after in [None, Some(42)] {
+            let (method, _, query, _, _, mutation) =
+                plan(&room, &Command::UnreadAfter { after }).unwrap();
+            assert_eq!(method, Method::GET);
+            assert!(!mutation);
+            assert!(query.contains(&("lookIntoFuture", "1".into())));
+            assert!(query.contains(&("lastKnownMessageId", after.unwrap_or(0).to_string())));
+            assert!(query.contains(&("setReadMarker", "0".into())));
+            assert!(query.contains(&("markNotificationsAsRead", "0".into())));
+            assert!(query.contains(&("timeout", "0".into())));
+        }
+    }
+
+    #[test]
+    fn rejects_zero_thread_id_before_exposing_it_to_callers() {
+        let value = json!({"thread": {
+            "id": 0, "roomToken": "room1234", "title": "Topic", "numReplies": 1
+        }});
+        assert!(matches!(thread(&value), Err(ErrorKind::Malformed)));
+        let mut valid = value;
+        valid["thread"]["id"] = json!(42);
+        assert_eq!(thread(&valid).unwrap().id, 42);
+    }
+
+    #[test]
+    fn thread_root_actor_must_belong_to_the_expected_room_and_message() {
+        let mut value = json!({
+            "thread": {"id": 42, "roomToken": "room1234", "title": "Topic", "numReplies": 1},
+            "first": {"id": 42, "token": "room1234", "actorType": "users", "actorId": "alex"}
+        });
+        assert_eq!(
+            thread(&value).unwrap().first_actor,
+            Some(("users".into(), "alex".into()))
+        );
+        value["first"]["token"] = json!("room5678");
+        assert!(thread(&value).unwrap().first_actor.is_none());
+        value["first"]["token"] = json!("room1234");
+        value["first"]["id"] = json!(43);
+        assert!(thread(&value).unwrap().first_actor.is_none());
+        value["first"]["id"] = json!(42);
+        value["first"]["actorId"] = json!("x".repeat(513));
+        assert!(matches!(thread(&value), Err(ErrorKind::TooLarge)));
+    }
+
+    #[test]
+    fn subscribed_page_decodes_multiple_rooms_and_rejects_overflow() {
+        let item = |id, token| {
+            json!({"thread": {
+                "id": id, "roomToken": token, "title": "Topic", "numReplies": 2
+            }})
+        };
+        let data = json!([item(1, "room1234"), item(2, "room5678")]);
+        let crate::Reply::Chat(Response::Threads(threads)) =
+            decode(ResponseKind::Threads, &data).unwrap()
+        else {
+            panic!("threads")
+        };
+        assert_eq!(threads.len(), 2);
+        assert_ne!(threads[0].token, threads[1].token);
+        let overflow = Value::Array((1..=51).map(|id| item(id, "room1234")).collect());
+        assert!(matches!(
+            decode(ResponseKind::Threads, &overflow),
+            Err(ErrorKind::TooLarge)
+        ));
+    }
+
+    #[test]
+    fn thread_activity_requires_the_expected_room_and_reply() {
+        let mut value = json!({
+            "thread": {"id": 42, "roomToken": "room1234", "title": "Topic", "numReplies": 1, "lastMessageId": 43},
+            "last": {"id": 43, "token": "room1234", "actorDisplayName": "Alex", "timestamp": 123}
+        });
+        assert_eq!(thread(&value).unwrap().last_reply.unwrap().author, "Alex");
+        value["last"]["token"] = json!("room5678");
+        assert!(thread(&value).unwrap().last_reply.is_none());
+        value["last"]["token"] = json!("room1234");
+        value["last"]["id"] = json!(44);
+        assert!(thread(&value).unwrap().last_reply.is_none());
+        value["last"]["id"] = json!(43);
+        value["last"]["messageType"] = json!("comment_deleted");
+        assert!(thread(&value).unwrap().last_reply.is_none());
+    }
+
+    #[test]
+    fn private_reply_requires_a_distinct_source_and_parent() {
+        let destination = RoomToken::parse("direct123").unwrap();
+        let source = RoomToken::parse("group1234").unwrap();
+        let command = |reply_to, reply_to_token| Command::Send {
+            message: "Reply".into(),
+            reference: "fixture-ref".into(),
+            options: ComposeOptions {
+                reply_to,
+                reply_to_token,
+                ..Default::default()
+            },
+        };
+        let (_, _, _, form, _, _) = plan(&destination, &command(Some(42), Some(source))).unwrap();
+        assert!(form.contains(&("replyTo", "42".into())));
+        assert!(form.contains(&("replyToToken", "group1234".into())));
+        assert!(matches!(
+            plan(&destination, &command(None, Some(destination.clone()))),
+            Err(ErrorKind::Malformed)
+        ));
+        assert!(matches!(
+            plan(&destination, &command(Some(42), Some(destination.clone()))),
+            Err(ErrorKind::Malformed)
+        ));
     }
 }

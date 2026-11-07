@@ -10,9 +10,13 @@ mod onboarding;
 mod own_status;
 mod people;
 mod polls;
+mod private_reply;
+mod reaction_authors;
 mod recovery;
 mod resources;
+mod threads;
 mod typing;
+mod unread;
 mod updates;
 use super::Desktop;
 use talk_core::preferences::Locale;
@@ -30,12 +34,16 @@ pub fn text(locale: Locale, key: &str) -> &str {
         polls::MESSAGES,
         conversation::MESSAGES,
         resources::MESSAGES,
+        threads::MESSAGES,
+        unread::MESSAGES,
         recovery::MESSAGES,
         updates::MESSAGES,
         onboarding::MESSAGES,
         own_status::MESSAGES,
         people::MESSAGES,
         typing::MESSAGES,
+        reaction_authors::MESSAGES,
+        private_reply::MESSAGES,
     ] {
         if let Ok(index) = catalog.binary_search_by_key(&key, |row| row.0) {
             return if locale == Locale::Spanish {
@@ -90,6 +98,8 @@ mod tests {
     fn resource_keys_are_unique_and_translations_preserve_named_arguments() {
         for catalog in [
             resources::MESSAGES,
+            threads::MESSAGES,
+            unread::MESSAGES,
             recovery::MESSAGES,
             conversation::MESSAGES,
             call::MESSAGES,
@@ -103,6 +113,8 @@ mod tests {
             own_status::MESSAGES,
             people::MESSAGES,
             typing::MESSAGES,
+            reaction_authors::MESSAGES,
+            private_reply::MESSAGES,
         ] {
             let mut last = "";
             for &(key, en, es) in catalog {

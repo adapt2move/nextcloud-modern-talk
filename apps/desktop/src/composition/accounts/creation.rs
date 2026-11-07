@@ -8,6 +8,7 @@ pub(super) enum Work {
     Permissions,
     People,
     Create,
+    Private(ConversationRef),
 }
 impl Accounts {
     pub(super) fn create_action(
@@ -29,7 +30,10 @@ impl Accounts {
         }
         let write = matches!(
             action,
-            CreateAction::Group(_) | CreateAction::Direct(_) | CreateAction::DirectMember(_)
+            CreateAction::Group(_)
+                | CreateAction::Direct(_)
+                | CreateAction::DirectMember(_)
+                | CreateAction::PrivateReply { .. }
         );
         if write
             && self
@@ -124,6 +128,70 @@ impl Accounts {
                     Work::Create,
                 )
             }
+            CreateAction::PrivateReply { context, message } => {
+                if context.account != account || self.snapshot.selected != Some(context) {
+                    return Err(SubmitError::StaleScope);
+                }
+                let allowed = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                    panel.context == context
+                        && panel
+                            .availability(talk_core::ui::messaging::MessageFeature::PrivateReply)
+                            .enabled()
+                }) && self.snapshot.conversations.as_slice().iter().any(|room| {
+                    room.context == context
+                        && room.navigation_key.is_some()
+                        && room.draft_clipboard == Decision::Allowed
+                }) && self
+                    .snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .chain(
+                        self.snapshot
+                            .message_panel
+                            .as_ref()
+                            .filter(|p| p.context == context)
+                            .into_iter()
+                            .flat_map(|p| p.thread_messages.as_slice()),
+                    )
+                    .any(|row| {
+                        row.local_id == message
+                            && !row.own
+                            && !row.metadata.deleted
+                            && !row.metadata.system
+                            && row.metadata.replyable
+                            && row
+                                .metadata
+                                .author_key
+                                .as_ref()
+                                .is_some_and(|key| key.as_str().starts_with("5:users:"))
+                    });
+                if !allowed {
+                    return Err(SubmitError::Unavailable(
+                        UnavailableReason::PermissionDenied,
+                    ));
+                }
+                let sequence = u64::try_from(message)
+                    .ok()
+                    .filter(|id| *id > 0)
+                    .ok_or(SubmitError::StaleScope)?;
+                let operation = self
+                    .connection
+                    .as_ref()
+                    .map_err(|e| submit_error(*e))?
+                    .new_operation_id(account)
+                    .map_err(submit_error)?;
+                (
+                    ProtocolRequest::CreatePrivateReply {
+                        operation,
+                        source: protocol::MessageId {
+                            conversation: context.conversation,
+                            sequence,
+                        },
+                    },
+                    Work::Private(context),
+                )
+            }
         };
         self.request(account, command, Purpose::Create(request, account, work))?;
         let panel = self
@@ -180,7 +248,8 @@ impl Accounts {
                 }
             }
             Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(room)))
-                if room.id.account == account.account && matches!(work, Work::Create) =>
+                if room.id.account == account.account
+                    && matches!(work, Work::Create | Work::Private(_)) =>
             {
                 let row = conversation(&room, account);
                 created = Some(row.context);
@@ -206,7 +275,12 @@ impl Accounts {
         if let Some(room) = created_room {
             self.observe_created_room(account, room);
         }
-        if let Some(context) = created {
+        if let Some(context) = created
+            && match work {
+                Work::Private(source) => self.snapshot.selected == Some(source),
+                _ => true,
+            }
+        {
             let _ = self.open(context);
         }
         self.touch();
@@ -214,7 +288,7 @@ impl Accounts {
 }
 fn begin_creation(panel: &mut CreatePanel, request: RequestId, work: Work) {
     panel.result = None;
-    panel.state = if matches!(work, Work::Create) {
+    panel.state = if matches!(work, Work::Create | Work::Private(_)) {
         RemoteState::Saving(request)
     } else {
         RemoteState::Loading(request)
@@ -243,10 +317,10 @@ fn finish_creation(
         Completion::Failed(reason) => RemoteState::Failed(request, reason),
         Completion::Uncertain => RemoteState::Uncertain(request),
     };
-    if matches!(work, Work::Create) {
+    if matches!(work, Work::Create | Work::Private(_)) {
         panel.uncertain = completion == Completion::Uncertain;
     }
-    if matches!(work, Work::Create | Work::People) {
+    if matches!(work, Work::Create | Work::Private(_) | Work::People) {
         panel.result = Some(CreationResult {
             request,
             completion,

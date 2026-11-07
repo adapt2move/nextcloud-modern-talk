@@ -36,13 +36,21 @@ def exercise(scenario, env, xid, out, label, large=False):
             for field in ('left','top','width','height'):r[field]=str(int(r[field])//2)
         return path, words, normalized(' '.join(r['text'] for r in words))
 
-    def expect(name, required=(), absent=()):
+    def expect(name, required=(), absent=(), footer_height=120, include_footer_words=False):
         path, words, text = observe()
         text += normalized(run(["tesseract",str(path),"stdout","--psm","6"],env).stdout)
         width,height=map(int,run(["identify","-format","%w %h",str(path)],env).stdout.split())
         ocr_path=out/f"{label}-ocr-footer.png"
-        run(["convert",str(path),"-crop",f"{width}x120+0+{height-120}","+repage","-resize","300%","-colorspace","gray","-auto-level",str(ocr_path)],env)
+        footer_height = min(footer_height, height)
+        run(["convert",str(path),"-crop",f"{width}x{footer_height}+0+{height-footer_height}","+repage","-resize","300%","-colorspace","gray","-auto-level",str(ocr_path)],env)
         text += normalized(run(["tesseract",str(ocr_path),"stdout","--psm","6"],env).stdout)
+        if include_footer_words:
+            tsv = run(["tesseract",str(ocr_path),"stdout","--psm","6","tsv"],env).stdout
+            for word in csv.DictReader(io.StringIO(tsv), delimiter='\t'):
+                if word.get('text', '').strip():
+                    word['left'] = str(int(word['left']) // 3)
+                    word['top'] = str(int(word['top']) // 3 + height - footer_height)
+                    words.append(word)
         ocr_path.unlink()
         for term in required:
             # At small sizes Tesseract sometimes reads the highlighted German
@@ -321,6 +329,90 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('escape closes settings and restores draft', ['DRAFTALPHA'], ['Einstellungen'])
         type_text('X')
         expect('modal returns focus to invoking composer', ['DRAFTALPHAX'])
+    elif scenario == 'thread':
+        words = expect('thread pane uses shared message and composer surfaces',
+                       ['Design review', '2 Antworten', 'Mara Fischer', 'Im Thread antworten'])
+        run(['xdotool', 'mousemove', '--window', xid, '1050', '407'], env)
+        expect('thread hover keeps reply text readable', ["I'll update the final details."])
+        run(['xdotool', 'mousemove', '--window', xid, '1204', '400', 'click', '1'], env)
+        words = expect('reply to own thread message opens a quote', ['Alex Sommer'])
+        if not any(normalized(word['text']) == 'alex' and int(word['left']) > 900
+                   and int(word['top']) > 590 for word in words):
+            raise AssertionError('The own-message quote did not appear beside the thread composer')
+        run(['xdotool', 'mousemove', '--window', xid, '1218', '635', 'click', '1'], env)
+        _, words, _ = observe()
+        if any(normalized(word['text']) == 'alex' and int(word['left']) > 900
+               and int(word['top']) > 590 for word in words):
+            raise AssertionError('The own-message quote did not close')
+        checks.append({'check': 'own-message quote can be dismissed', 'result': 'pass'})
+        before = next(int(word['left']) for word in words
+                      if normalized(word['text']).startswith('design')
+                      and int(word['top']) < 120 and int(word['left']) > 700)
+        run(['xdotool', 'mousemove', '--window', xid, '883', '400', 'mousedown', '1'], env)
+        run(['xdotool', 'mousemove', '--sync', '--window', xid, '870', '400'], env)
+        time.sleep(.3)
+        run(['xdotool', 'mousemove', '--sync', '--window', xid, '800', '400', 'mouseup', '1'], env)
+        time.sleep(1.5)
+        words = expect('thread resize keeps its content visible', ['Design review', '2 Antworten'])
+        after = next(int(word['left']) for word in words
+                     if normalized(word['text']).startswith('design')
+                     and int(word['top']) < 120 and int(word['left']) > 700)
+        if before - after < 30:
+            raise AssertionError('Dragging the left edge did not resize the thread pane')
+        checks.append({'check': 'thread pane resizes by dragging its left edge', 'result': 'pass'})
+        run(['xdotool', 'mousemove', '--window', xid, '802', '400', 'click', '1'], env)
+        key('Right')
+        words = expect('thread resize handle accepts keyboard input', ['Design review', '2 Antworten'])
+        keyboard = next(int(word['left']) for word in words
+                        if normalized(word['text']).startswith('design')
+                        and int(word['top']) < 120 and int(word['left']) > 700)
+        if keyboard - after < 20:
+            raise AssertionError('The focused thread resize handle did not respond to Right')
+        key('Left')
+        click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1010,700))
+        type_text('THREADDRAFT')
+        time.sleep(1.5)
+        expect('thread composer accepts text', ['THREADDRAFT'])
+        key('Return')
+        words = expect('thread Enter retains the draft after a rejected submission', ['THREADDRAFT', 'Nicht gesendet'], footer_height=200, include_footer_words=True)
+        if not any(normalized(word['text']) == 'nicht' and int(word['left']) >= after - 10 for word in words):
+            raise AssertionError('Thread submission feedback did not appear beside its composer')
+        if any(normalized(word['text']) == 'nicht' and int(word['left']) < after - 10 for word in words):
+            raise AssertionError('Thread submission feedback appeared in the main composer')
+        log = (out / f'{label}.log').read_text()
+        if not re.search(r'UI_CHAT_UX send room=\d+ bytes=11 .*thread=Some\(1\)', log):
+            raise AssertionError('Enter did not submit the draft to the scoped thread')
+        checks.append({'check': 'thread Enter submits the scoped draft', 'result': 'pass'})
+        key('Escape')
+        expect('Escape closes the thread pane and returns to the room',
+               ['Designteam'], ['Design review', 'THREADDRAFT'])
+    elif scenario == 'thread-options':
+        expect('thread options expose subscription and rename controls',
+               ['Thread nicht mehr folgen', 'Alle Antworten', 'Nur Erwähnungen', 'Thread umbenennen'])
+        click('umbenennen', xmin=800, ymin=100)
+        expect('thread rename opens an editable title', ['Design review', 'Speichern'])
+    elif scenario == 'thread-offline':
+        expect('previously observed thread options are available offline',
+               ['Thread nicht mehr folgen', 'Thread umbenennen'])
+        click('umbenennen', xmin=800, ymin=100)
+        key('ctrl+a')
+        type_text('Release Notes')
+        click('Speichern', xmin=800, ymin=100)
+        expect('offline rename updates the thread heading immediately', ['Release Notes'])
+        click('folgen', xmin=800, ymin=100)
+        expect('offline unfollow updates the visible subscription action',
+               ['Thread folgen'], ['Thread nicht mehr folgen'])
+        click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1010,700))
+        type_text('OFFLINEREPLY')
+        key('Return')
+        time.sleep(1.5)
+        run(['xdotool', 'mousemove', '--window', xid, '1100', '550', 'click', '--repeat', '5', '5'], env)
+        expect('offline thread reply and count update immediately', ['OFFLINEREPLY', '3 Antworten'])
+        log = (out / f'{label}.log').read_text()
+        if not re.search(r'UI_CHAT_UX send room=\d+ bytes=12 .*thread=Some\(1\)', log):
+            raise AssertionError('Offline Enter did not submit the draft to the scoped thread')
+        if 'UI_THREAD_FIXTURE offline_reply_queued=true' not in log:
+            raise AssertionError('The fixture did not acknowledge local thread staging')
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])

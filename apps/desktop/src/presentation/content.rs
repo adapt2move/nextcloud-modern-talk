@@ -1796,6 +1796,9 @@ impl Desktop {
                 self.content_ui.voice_error = None;
                 self.content_ui.voice_auto_send = None;
                 if self.composer_available()
+                    && self.overlay != Some(Overlay::Thread)
+                    && !self.drafts.target(context).new_thread
+                    && self.drafts.target(context).private_reply.is_none()
                     && Some(context) == self.snapshot.selected
                     && self.composer.read(cx).content.is_empty()
                     && !self.has_staged_attachments()

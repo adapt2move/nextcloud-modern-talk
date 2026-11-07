@@ -106,6 +106,10 @@ pub enum ProtocolRequest {
     PollIncomingCalls,
     /// Read-only account-wide Notifications observation; never a chat/read-marker poll.
     PollMessageNotifications,
+    /// One bounded account-wide page; conversation IDs remain account scoped.
+    SubscribedThreads {
+        offset: u32,
+    },
     /// Drain the admitted account's bounded live mailbox; hints only request fresh reads.
     PollLiveEvents,
     WatchTyping(ConversationId),
@@ -180,6 +184,12 @@ pub enum ProtocolRequest {
         operation: OperationId,
         member: crate::protocol::conversation::MemberId,
     },
+    /// Create or open the direct conversation of an observed message's author.
+    /// The adapter resolves and rechecks the author; the view supplies no user ID.
+    CreatePrivateReply {
+        operation: OperationId,
+        source: MessageId,
+    },
     LeaveConversation(ConversationId),
     ActivateConversation(ConversationId),
     DeactivateConversation(ConversationId),
@@ -204,6 +214,11 @@ pub enum ProtocolReply {
     },
     IncomingCalls(crate::calls::IncomingCalls),
     MessageNotifications(crate::protocol::MessageNotifications),
+    SubscribedThreads {
+        threads: crate::bounded::Page<crate::protocol::messaging::Thread, 50>,
+        /// Based on the server page before unbound rooms are excluded.
+        has_next: bool,
+    },
     LiveEvents(crate::protocol::AccountLiveEvents),
     Typing(crate::protocol::TypingObservation),
     TypingAccepted,

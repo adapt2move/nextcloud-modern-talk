@@ -172,6 +172,7 @@ mod tests {
             account_removal: None,
             active_account: Some(context.account),
             conversations: Page::empty(),
+            threads: Default::default(),
             conversation_list: ConversationListState {
                 content: ContentState::Ready,
                 complete: true,

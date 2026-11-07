@@ -1,8 +1,8 @@
 {
   "source_sha256": "779a04a9c14f041c4a5a19f4a9ca8fcd59a2a938284990a1de219b7cfb4a70cb",
   "counts": {
-    "implemented": 93,
-    "missing": 56,
+    "implemented": 94,
+    "missing": 55,
     "not-client": 23,
     "partial": 19
   },
@@ -329,15 +329,15 @@
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}",
       "status": "partial",
       "api": "Request::Chat / chat::Command::Send",
-      "scope": "Reply/thread/silent/reference supported; object/share metadata uses separate operations. No guest actorDisplayName override."
+      "scope": "Reply/thread/silent/reference supported; typed source room token can be supplied for a private reply. For a quoted reply in a thread the adapter validates the parent belongs to that thread and sends replyTo alone; Talk derives the thread from its topmost parent. Object/share metadata uses separate operations. No guest actorDisplayName override. Source: spreed stable34 and stable35 lib/Controller/ChatController.php sendMessage/resolveReplyTo and lib/Chat/ChatManager.php sendMessage."
     },
     {
       "operation_id": "chat-receive-messages",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}",
       "status": "partial",
-      "api": "Request::Chat / chat::Command::History / Poll",
-      "scope": "Bounded history/context and finite future polling with safe read/privacy defaults. No destructive chat long-poll owner."
+      "api": "Request::Chat / chat::Command::History / Poll / UnreadAfter",
+      "scope": "Bounded history/context and finite future reads with safe read/privacy defaults. UnreadAfter uses a nonnegative lastKnownMessageId, lookIntoFuture=1 and timeout=0. The adapter handles the first-unread sentinel with a bounded backward history scan because released Talk returns an empty future poll for zero. No destructive chat long-poll owner. Source: spreed stable34 and stable35 lib/Controller/ChatController.php receiveMessages."
     },
     {
       "operation_id": "chat-clear-history",
@@ -464,8 +464,8 @@
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/read",
       "status": "implemented",
-      "api": "Request::MarkRead",
-      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+      "api": "Request::MarkRead / Request::MarkUnreadFromStart",
+      "scope": "Read marker and explicit first-message unread sentinel (-2); application proves history boundaries and checks capability separately. Source: spreed stable34 and stable35 lib/Controller/ChatController.php setReadMarker and lib/Chat/ChatManager.php UNREAD_FIRST_MESSAGE."
     },
     {
       "operation_id": "chat-mark-unread",
@@ -1305,9 +1305,9 @@
       "operation_id": "thread-get-subscribed-threads",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/subscribed-threads",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::SubscribedThreads",
+      "scope": "Account-wide read; limit 50 and explicit offset. Caller checks the threads capability and maps each validated room token to its account scope. Source: spreed stable35 lib/Controller/ThreadController.php getSubscribedThreads."
     },
     {
       "operation_id": "thread-get-thread",
@@ -1323,7 +1323,7 @@
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/threads/{threadId}",
       "status": "implemented",
       "api": "Request::Chat / chat::Command::RenameThread",
-      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+      "scope": "Bounded typed protocol operation; fresh room and root observations gate the author or non-guest moderator. Source: spreed stable34/stable35 lib/Controller/ThreadController.php renameThread."
     },
     {
       "operation_id": "thread-set-notification-level",

@@ -53,7 +53,8 @@ async fn history_recovers_after_gateway_failures_without_losing_the_session() {
     for (index, (mode, expected)) in [
         ("healthy", None),
         ("500", Some(ErrorKind::ServerUnavailable)),
-        ("403", Some(ErrorKind::PermissionDenied)),
+        // An HTML gateway denial is not an OCS room-permission decision.
+        ("403", Some(ErrorKind::ServerAccessDenied)),
         ("offline", Some(ErrorKind::Transport)),
     ]
     .into_iter()
@@ -98,15 +99,25 @@ async fn history_recovers_after_gateway_failures_without_losing_the_session() {
             )
             .await
             .unwrap();
-        let ProtocolReply::Messaging {
-            result: MessagingResult::Send(receipt),
-            ..
-        } = reply
-        else {
-            panic!("typed send receipt");
+        let ProtocolReply::Messaging { result, .. } = reply else {
+            panic!("typed send result");
         };
-        let SendState::ServerAccepted(message) = receipt.state else {
-            panic!("server acceptance");
+        let message = match result {
+            MessagingResult::Message(message) => {
+                assert!(message.own);
+                assert_eq!(
+                    message.message.own_operation,
+                    Some(OperationId::from_local(200 + index as u128))
+                );
+                message.message.id
+            }
+            MessagingResult::Send(receipt) => {
+                let SendState::ServerAccepted(message) = receipt.state else {
+                    panic!("server acceptance");
+                };
+                message
+            }
+            _ => panic!("typed send receipt"),
         };
         accepted.push(message);
         let reply = client

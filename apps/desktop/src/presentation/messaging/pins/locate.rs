@@ -145,6 +145,7 @@ impl Desktop {
             .as_slice()
             .get(target.item_ix)
             .map(|message| (context, message.local_id));
+        self.highlight_started = self.highlighted_message.map(|_| Instant::now());
         true
     }
 

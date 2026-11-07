@@ -254,6 +254,13 @@ pub struct Drafts {
     targets: Vec<(ConversationRef, talk_core::ui::messaging::ComposeTarget)>,
 }
 impl Drafts {
+    /// Separate request namespace for the concurrently mounted thread editor.
+    pub fn thread_editor() -> Self {
+        Self {
+            next_request: 1_u64 << 63,
+            ..Self::default()
+        }
+    }
     /// Cached contexts carry no dispatch authority. Only an explicit stable
     /// room key can move their local text to a newly projected context.
     pub fn rebind_cached(&mut self, previous: &PresentationSnapshot, next: &PresentationSnapshot) {
@@ -461,7 +468,11 @@ impl Drafts {
         if draft.text.as_str().trim().is_empty() {
             return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
         }
-        let request = RequestId(self.next_request.checked_add(1).ok_or(SubmitError::Busy)?);
+        let next = self.next_request.checked_add(1).ok_or(SubmitError::Busy)?;
+        if (next ^ self.next_request) & (1_u64 << 63) != 0 {
+            return Err(SubmitError::Busy);
+        }
+        let request = RequestId(next);
         // Busy is non-admission: neither the text nor the pending state changes.
         port.try_submit(UiIntent::Message {
             request,
@@ -556,7 +567,10 @@ impl Drafts {
                 // Never erase text the user changed while the operation was in flight.
                 if draft.pending_may_clear && draft.text == *submitted {
                     draft.text = Text::new("").expect("empty bounded text");
-                    if draft.target.reply_to.is_some() {
+                    if draft.target.reply_to.is_some()
+                        || draft.target.private_reply.is_some()
+                        || draft.target.new_thread
+                    {
                         completed_reply = Some((draft.context, draft.target.clone()));
                     }
                 }
@@ -583,6 +597,8 @@ impl Drafts {
                 // A quote belongs to one submission. Keep the current thread
                 // and delivery option, without retiring a newer reply target.
                 target.reply_to = None;
+                target.private_reply = None;
+                target.new_thread = false;
                 self.set_target(context, target);
             }
         }
@@ -592,6 +608,18 @@ impl Drafts {
 
 /// Defensive renderer validation. Producers still own full permission/lifecycle decisions.
 pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
+    if snapshot
+        .threads
+        .account
+        .is_some_and(|account| Some(account) != snapshot.active_account)
+        || snapshot.threads.entries.as_slice().iter().any(|thread| {
+            Some(thread.context.account) != snapshot.threads.account
+                || !thread.context.is_consistent()
+                || thread.root == 0
+        })
+    {
+        return false;
+    }
     if snapshot.create_panel.as_ref().is_some_and(|panel| {
         Some(panel.account) != snapshot.active_account
             || panel
@@ -715,7 +743,10 @@ fn same_draft_target(
     a: &talk_core::ui::messaging::ComposeTarget,
     b: &talk_core::ui::messaging::ComposeTarget,
 ) -> bool {
-    a.reply_to == b.reply_to && a.thread == b.thread
+    a.reply_to == b.reply_to
+        && a.thread == b.thread
+        && a.private_reply.as_ref().map(|p| (&p.source, p.message))
+            == b.private_reply.as_ref().map(|p| (&p.source, p.message))
 }
 
 pub(super) fn cached_draft_context(
@@ -779,6 +810,8 @@ pub(super) mod tests {
             updated_label: Text::new("").unwrap(),
             kind: ConversationKind::Group,
             unread: 0,
+            unread_direct_mention: None,
+            last_read_message: None,
             favorite: None,
             tags: None,
             organization: Default::default(),
@@ -825,6 +858,7 @@ pub(super) mod tests {
             account_removal: None,
             active_account: Some(context.account),
             conversations: test_page([row]),
+            threads: Default::default(),
             conversation_list: ConversationListState {
                 content: ContentState::Ready,
                 complete: true,
@@ -1670,6 +1704,35 @@ pub(super) mod tests {
         }
     }
     #[test]
+    fn creating_a_thread_reuses_the_draft_and_clears_only_after_its_admission() {
+        use talk_core::ui::messaging::ComposeTarget;
+        let c = context(1);
+        let mut drafts = Drafts::default();
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        drafts.save(c, "A new discussion").unwrap();
+        assert!(drafts.set_target(
+            c,
+            ComposeTarget {
+                new_thread: true,
+                ..Default::default()
+            }
+        ));
+        assert_eq!(drafts.text(c), "A new discussion");
+        drafts.save(c, "A new discussion").unwrap();
+        let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+        assert!(drafts.target(c).new_thread);
+        assert!(drafts.complete(SubmissionResult {
+            request,
+            context: c,
+            result: Completion::Queued
+        }));
+        assert!(!drafts.target(c).new_thread);
+        assert!(drafts.text(c).is_empty());
+    }
+    #[test]
     fn only_correlated_confirmation_clears_unchanged_text() {
         let mut drafts = Drafts::default();
         let c = context(1);
@@ -1833,6 +1896,8 @@ pub(super) mod tests {
             updated_label: Text::new("").unwrap(),
             kind: ConversationKind::Direct,
             unread: 0,
+            unread_direct_mention: None,
+            last_read_message: None,
             favorite: None,
             organization: Default::default(),
             archived: None,

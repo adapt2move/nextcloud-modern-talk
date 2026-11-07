@@ -225,7 +225,9 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("call-recording-confirm") => Some(Overlay::ConfirmRecording),
         Some("files") => Some(Overlay::Files),
         Some("chat-cloud-files" | "chat-cloud-files-offline") => Some(Overlay::CloudFiles),
-        Some("thread") => Some(Overlay::Thread),
+        Some("thread" | "thread-options" | "thread-offline" | "thread-paged") => {
+            Some(Overlay::Thread)
+        }
         Some("search") => Some(Overlay::Search),
         Some("create34" | "create35") => Some(Overlay::Create),
         Some("poll-dialog" | "poll-drafts") => Some(Overlay::CreatePoll),
@@ -320,7 +322,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             }
         }
             cx.new(|cx|{
-                let mut desktop=Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
+                let mut desktop=Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),threads_fixture:options.scenario.as_deref()==Some("thread-list"),thread_options_fixture:matches!(options.scenario.as_deref(),Some("thread-options"|"thread-offline")),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
                 if disconnected_fixture { desktop.configure_content_scenario(options.scenario.as_deref(), cx); }
                 desktop
             })

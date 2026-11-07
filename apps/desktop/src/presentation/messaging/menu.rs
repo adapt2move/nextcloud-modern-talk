@@ -20,6 +20,9 @@ pub(crate) enum Choice {
     Unpin,
     Remind,
     Forward,
+    PrivateReply,
+    MarkUnread,
+    MarkUnreadFrom,
     Thread,
     Back,
 }
@@ -38,6 +41,9 @@ pub(crate) enum Source {
     Actions,
     Reactions,
     Badges,
+    ThreadActions,
+    ThreadReactions,
+    ThreadBadges,
 }
 impl Source {
     pub(super) fn key(self) -> &'static str {
@@ -45,7 +51,19 @@ impl Source {
             Self::Actions => "message-menu",
             Self::Reactions => "message-reactions",
             Self::Badges => "message-reactions-badges",
+            Self::ThreadActions => "thread-message-menu",
+            Self::ThreadReactions => "thread-message-reactions",
+            Self::ThreadBadges => "thread-message-reactions-badges",
         }
+    }
+    fn is_thread(self) -> bool {
+        matches!(
+            self,
+            Self::ThreadActions | Self::ThreadReactions | Self::ThreadBadges
+        )
+    }
+    fn is_actions(self) -> bool {
+        matches!(self, Self::Actions | Self::ThreadActions)
     }
 }
 
@@ -160,6 +178,9 @@ impl Choice {
             Self::Pin | Self::Unpin => "pin",
             Self::Remind => "clock",
             Self::Forward => "arrow-right",
+            Self::PrivateReply => "reply",
+            Self::MarkUnread => "inbox",
+            Self::MarkUnreadFrom => "inbox",
             Self::Thread => "chat",
             Self::Back => "arrow-left",
         }
@@ -175,6 +196,9 @@ impl Choice {
             Self::Unpin => 10,
             Self::Remind => 5,
             Self::Forward => 6,
+            Self::PrivateReply => 13,
+            Self::MarkUnread => 11,
+            Self::MarkUnreadFrom => 12,
             Self::Thread => 8,
             Self::Back => 9,
         }
@@ -192,6 +216,11 @@ impl Desktop {
         {
             return None;
         }
+        if self.message_ui.menu.source.is_thread() {
+            return self
+                .thread_row(target.context, target.message)
+                .filter(|message| message_actions_allowed(message));
+        }
         self.snapshot
             .messages
             .as_slice()
@@ -208,14 +237,19 @@ impl Desktop {
                 && (!panel.state.pending() || self.local_message_intents())
         });
         let feature = |feature| idle && self.message_feature_enabled(feature);
+        let thread = self.message_ui.menu.source.is_thread();
         let edit = message_mutation_allowed(
             message,
             MessageFeature::Edit,
             feature(MessageFeature::Edit),
             self.local_message_intents(),
-        ) && !self.drafts.pending(target.context)
-            && self.message_ui.pending_edit.is_none()
-            && self.message_ui.editing.is_none();
+        ) && if thread {
+            !self.thread_drafts.pending(target.context) && self.message_ui.thread_edit.is_none()
+        } else {
+            !self.drafts.pending(target.context)
+                && self.message_ui.pending_edit.is_none()
+                && self.message_ui.editing.is_none()
+        };
         let delete = message_mutation_allowed(
             message,
             MessageFeature::Delete,
@@ -280,11 +314,42 @@ impl Desktop {
                         "Weiterleiten ist derzeit nicht verfügbar.",
                     ),
                 ];
-                if message.metadata.replyable {
+                if thread {
+                    items.truncate(3);
+                    return items;
+                }
+                if self.private_reply_available(message) {
+                    items.push(Item::new(
+                        Choice::PrivateReply,
+                        "Privat antworten",
+                        idle && self.message_ui.private_reply_pending.is_none(),
+                        "",
+                    ));
+                }
+                if self.message_feature_enabled(MessageFeature::MarkUnread) {
+                    items.push(Item::new(
+                        Choice::MarkUnread,
+                        "Gespräch als ungelesen markieren",
+                        idle,
+                        "",
+                    ));
+                }
+                if self.message_feature_enabled(MessageFeature::UnreadFrom) {
+                    items.push(Item::new(
+                        Choice::MarkUnreadFrom,
+                        "Ab hier ungelesen",
+                        idle && message.metadata.unread_after.is_some(),
+                        "Die vorherige Nachricht ist noch nicht geladen.",
+                    ));
+                }
+                if message.metadata.thread.is_some() || message.reply_count > 0 {
                     items.push(Item::new(
                         Choice::Thread,
                         "Thread öffnen",
-                        feature(MessageFeature::Threads),
+                        idle && self.can_open_thread(
+                            target.context,
+                            message.metadata.thread.unwrap_or(message.local_id),
+                        ),
                         "Threads sind derzeit nicht verfügbar.",
                     ));
                 }
@@ -348,6 +413,15 @@ impl Desktop {
     ) {
         self.open_message_popup(context, message, Source::Actions, window, cx);
     }
+    pub(super) fn toggle_thread_message_menu(
+        &mut self,
+        context: ConversationRef,
+        message: u128,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_message_popup(context, message, Source::ThreadActions, window, cx);
+    }
 
     pub(super) fn toggle_reaction_palette(
         &mut self,
@@ -357,7 +431,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if source == Source::Actions || !self.reaction_available(message).is_enabled() {
+        if source.is_actions() || !self.reaction_available(message).is_enabled() {
             return;
         }
         self.open_message_popup(context, message, source, window, cx);
@@ -377,12 +451,17 @@ impl Desktop {
         }
         if Some(context) != self.snapshot.selected
             || self.snapshot.content != ContentState::Ready && !self.local_message_intents()
-            || !self
-                .snapshot
-                .messages
-                .as_slice()
-                .iter()
-                .any(|row| row.local_id == message && message_actions_allowed(row))
+            || if source.is_thread() {
+                self.thread_row(context, message)
+                    .is_none_or(|row| !message_actions_allowed(row))
+            } else {
+                !self
+                    .snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .any(|row| row.local_id == message && message_actions_allowed(row))
+            }
         {
             return;
         }
@@ -391,7 +470,7 @@ impl Desktop {
             return;
         };
         self.message_ui.menu.source = source;
-        self.message_ui.menu.session.mode = if source == Source::Actions {
+        self.message_ui.menu.session.mode = if source.is_actions() {
             Mode::Actions
         } else {
             Mode::Reactions
@@ -467,6 +546,7 @@ impl Desktop {
             }
             Choice::Back => self.message_ui.menu.session.mode = Mode::Actions,
             _ => {
+                let thread_menu = self.message_ui.menu.source.is_thread();
                 let thread = self
                     .current_menu_message(target)
                     .and_then(|row| row.metadata.thread)
@@ -477,7 +557,15 @@ impl Desktop {
                     cx,
                 );
                 match choice {
-                    Choice::Edit => self.message_action(Action::Edit(target.message), window, cx),
+                    Choice::Edit => self.message_action(
+                        if thread_menu {
+                            Action::ThreadEdit(target.message)
+                        } else {
+                            Action::Edit(target.message)
+                        },
+                        window,
+                        cx,
+                    ),
                     Choice::ConfirmDelete => {
                         self.submit_message(MessageAction::Delete(target.message));
                     }
@@ -494,6 +582,15 @@ impl Desktop {
                     }
                     Choice::Thread => {
                         self.handle(LocalAction::Thread(target.context, thread), window, cx)
+                    }
+                    Choice::PrivateReply => {
+                        self.message_action(Action::PrivateReply(target.message), window, cx)
+                    }
+                    Choice::MarkUnread => {
+                        self.submit_message(MessageAction::MarkUnread);
+                    }
+                    Choice::MarkUnreadFrom => {
+                        self.submit_message(MessageAction::MarkUnreadFrom(target.message));
                     }
                     _ => {}
                 }
