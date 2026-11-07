@@ -1678,6 +1678,7 @@ impl Accounts {
                             root: u128::from(thread.root.sequence),
                             title: thread.title,
                             notification_level: thread.notification_level,
+                            rename: thread.rename,
                         });
                     }
                     wire::MessagingResult::ReactionAuthors(_)

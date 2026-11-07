@@ -260,6 +260,8 @@ pub struct Thread {
     pub title: String,
     pub replies: u32,
     pub last_message: Option<u64>,
+    /// Actor identity from the validated root observation, when still available.
+    pub first_actor: Option<(String, String)>,
     /// Validated, display-only activity from the server's `last` message.
     pub last_reply: Option<ThreadReply>,
     pub notification_level: Option<u8>,
@@ -371,6 +373,24 @@ fn thread(v: &Value) -> Result<Thread, ErrorKind> {
     // A thread ID is also a message ID and cannot be used in routes when zero.
     positive(id)?;
     let last_message = integer(t.get("lastMessageId")).filter(|n| *n > 0);
+    let first = v.get("first").filter(|first| {
+        first.is_object()
+            && first.get("token").and_then(Value::as_str) == Some(token.as_str())
+            && integer(first.get("id")) == Some(id)
+    });
+    let first_actor = if let Some(first) = first {
+        match (
+            string(first.get("actorType"), 64)?,
+            string(first.get("actorId"), 512)?,
+        ) {
+            (Some(kind), Some(actor)) if !kind.is_empty() && !actor.is_empty() => {
+                Some((kind, actor))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
     // The nested message is optional, can have expired, and does not grant
     // room authority. Accept display data only for this exact thread and room.
     let last_reply = v.get("last").filter(|last| {
@@ -396,6 +416,7 @@ fn thread(v: &Value) -> Result<Thread, ErrorKind> {
         title: required(t, "title", 256)?,
         replies: u32::try_from(number(t, "numReplies")?).map_err(|_| ErrorKind::TooLarge)?,
         last_message,
+        first_actor,
         last_reply,
         notification_level: integer(v.get("attendee").and_then(|a| a.get("notificationLevel")))
             .and_then(|n| u8::try_from(n).ok()),
@@ -948,6 +969,26 @@ mod thread_tests {
         let mut valid = value;
         valid["thread"]["id"] = json!(42);
         assert_eq!(thread(&valid).unwrap().id, 42);
+    }
+
+    #[test]
+    fn thread_root_actor_must_belong_to_the_expected_room_and_message() {
+        let mut value = json!({
+            "thread": {"id": 42, "roomToken": "room1234", "title": "Topic", "numReplies": 1},
+            "first": {"id": 42, "token": "room1234", "actorType": "users", "actorId": "alex"}
+        });
+        assert_eq!(
+            thread(&value).unwrap().first_actor,
+            Some(("users".into(), "alex".into()))
+        );
+        value["first"]["token"] = json!("room5678");
+        assert!(thread(&value).unwrap().first_actor.is_none());
+        value["first"]["token"] = json!("room1234");
+        value["first"]["id"] = json!(43);
+        assert!(thread(&value).unwrap().first_actor.is_none());
+        value["first"]["id"] = json!(42);
+        value["first"]["actorId"] = json!("x".repeat(513));
+        assert!(matches!(thread(&value), Err(ErrorKind::TooLarge)));
     }
 
     #[test]

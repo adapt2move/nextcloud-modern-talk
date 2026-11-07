@@ -7,7 +7,7 @@ use talk_core::ids::{
     AccountId, AccountScope, ClockEpoch, ConversationId, HostId, OperationId, RuntimeGeneration,
 };
 use talk_core::lifecycle::Cancellation;
-use talk_core::policy::Moment;
+use talk_core::policy::{Decision, Moment};
 use talk_core::ports::{NextcloudPort, OperationContext, ProtocolReply, ProtocolRequest};
 use talk_core::protocol::conversation::{
     ConversationCommand as C, ConversationResult as CR, NotificationLevel, RecipientSource, Setting,
@@ -826,7 +826,7 @@ async fn released_server_messaging_and_room_controls() {
     assert!(subscribed.as_slice().iter().any(|item| item.root == thread));
     println!("alpha-backend subscribed-threads: pass");
     m(&mut client, &runtime, id, 124, "thread-list", M::Threads).await;
-    m(
+    let MR::Thread(details) = m(
         &mut client,
         &runtime,
         id,
@@ -834,7 +834,11 @@ async fn released_server_messaging_and_room_controls() {
         "thread-read",
         M::Thread(thread),
     )
-    .await;
+    .await
+    else {
+        panic!("thread detail")
+    };
+    assert_eq!(details.rename, Decision::Allowed);
     m(
         &mut client,
         &runtime,
@@ -1017,6 +1021,84 @@ async fn released_server_messaging_and_room_controls() {
     assert_eq!(deleted.message.id, second);
     assert_eq!(deleted.message.kind, MessageKind::Deleted);
     assert!(deleted.message.text.as_str().is_empty());
+    let bob_thread = MessageId {
+        conversation: bob_room,
+        sequence: thread.sequence,
+    };
+    let ProtocolReply::Messaging {
+        result: MR::Thread(other),
+        ..
+    } = bob
+        .request(
+            context_for(&runtime, bob_scope),
+            ProtocolRequest::Messaging {
+                conversation: bob_room,
+                operation: OperationId::from_local(211),
+                command: M::Thread(bob_thread),
+            },
+        )
+        .await
+        .expect("member observes another person's thread")
+    else {
+        panic!("member thread detail")
+    };
+    assert_eq!(other.rename, Decision::Denied);
+    let ProtocolReply::Messaging { result: own, .. } = bob
+        .request(
+            context_for(&runtime, bob_scope),
+            ProtocolRequest::Messaging {
+                conversation: bob_room,
+                operation: OperationId::from_local(212),
+                command: M::Send {
+                    text: text("A thread started by Bob"),
+                    options: ComposeOptions {
+                        thread_title: Some(text("Bob's topic")),
+                        ..ComposeOptions::default()
+                    },
+                },
+            },
+        )
+        .await
+        .expect("member starts a thread")
+    else {
+        panic!("member thread creation")
+    };
+    let own = canonical_accepted_id(own, OperationId::from_local(212));
+    let ProtocolReply::Messaging {
+        result: MR::Thread(own_detail),
+        ..
+    } = bob
+        .request(
+            context_for(&runtime, bob_scope),
+            ProtocolRequest::Messaging {
+                conversation: bob_room,
+                operation: OperationId::from_local(213),
+                command: M::Thread(own),
+            },
+        )
+        .await
+        .expect("member observes their thread")
+    else {
+        panic!("own thread detail")
+    };
+    assert_eq!(own_detail.rename, Decision::Allowed);
+    let MR::Thread(moderator_detail) = m(
+        &mut client,
+        &runtime,
+        id,
+        142,
+        "thread-moderator-permission",
+        M::Thread(MessageId {
+            conversation: id,
+            sequence: own.sequence,
+        }),
+    )
+    .await
+    else {
+        panic!("moderator thread detail")
+    };
+    assert_eq!(moderator_detail.rename, Decision::Allowed);
+    println!("alpha-backend thread-rename-authority: pass");
     let CR::Directory(recipients) = settings(
         &mut client,
         &runtime,

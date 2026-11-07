@@ -49,6 +49,7 @@ pub struct ThreadDetails {
     pub root: u128,
     pub title: Text<256>,
     pub notification_level: Option<i8>,
+    pub rename: Decision,
 }
 /// Recent room thread activity, scoped by the enclosing message panel.
 #[derive(Clone, Debug, Eq, PartialEq)]

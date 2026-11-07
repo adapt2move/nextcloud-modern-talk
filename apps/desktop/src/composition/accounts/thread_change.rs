@@ -70,6 +70,7 @@ mod tests {
             root: 7,
             title: Text::new("Before").unwrap(),
             notification_level: Some(0),
+            rename: talk_core::ui::Decision::Allowed,
         });
         panel.thread_details_request = Some(RequestId(1));
         panel.state = RemoteState::Saving(RequestId(2));

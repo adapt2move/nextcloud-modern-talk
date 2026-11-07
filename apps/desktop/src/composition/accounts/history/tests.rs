@@ -144,6 +144,7 @@ fn recent_thread_activity_is_scoped_versioned_and_expires() {
             replies,
             unread: None,
             notification_level: None,
+            rename: Decision::Unknown,
         }]))
     };
     let old = admit(&mut model.history, key, 2, Work::ThreadActivity);

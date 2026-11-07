@@ -1729,13 +1729,13 @@ impl NextcloudClient {
             api::Reply::Chat(WireResponse::Threads(values)) => {
                 let mut out = Page::empty();
                 for v in values {
-                    out.try_push(self.thread(v, id)?)
+                    out.try_push(self.thread(v, id, Some(&room))?)
                         .map_err(|_| self.error(ErrorKind::TooLarge))?
                 }
                 Ok(R::Threads(out))
             }
             api::Reply::Chat(WireResponse::Thread(v)) => {
-                Ok(R::Thread(Box::new(self.thread(v, id)?)))
+                Ok(R::Thread(Box::new(self.thread(v, id, Some(&room))?)))
             }
             api::Reply::Chat(WireResponse::Search { hits, cursor }) => {
                 let mut out = Page::empty();
@@ -1838,13 +1838,38 @@ impl NextcloudClient {
                 continue;
             };
             result
-                .try_push(self.thread(thread, id)?)
+                .try_push(self.thread(thread, id, None)?)
                 .map_err(|_| self.error(ErrorKind::TooLarge))?;
         }
         Ok((result, has_next))
     }
 
-    fn thread(&self, t: api::chat::Thread, id: ConversationId) -> Result<Thread, PortError> {
+    fn thread(
+        &self,
+        t: api::chat::Thread,
+        id: ConversationId,
+        room: Option<&Conversation>,
+    ) -> Result<Thread, PortError> {
+        // Talk permits the root author or a non-guest moderator to rename, even
+        // after the root expires. ThreadController calls hasModeratorPermissions(false).
+        // The account feed has no current room authority, so it stays unknown.
+        let rename = match room {
+            None => Decision::Unknown,
+            Some(room) if room.unknown_restrictions => Decision::Unknown,
+            Some(room) if room.actions.read_messages != Decision::Allowed => {
+                room.actions.read_messages
+            }
+            Some(room) if matches!(room.role, Role::Owner | Role::Moderator) => Decision::Allowed,
+            Some(_) => match t.first_actor.as_ref() {
+                Some((kind, actor))
+                    if kind == "users" && actor.as_str() == self.transport.user() =>
+                {
+                    Decision::Allowed
+                }
+                Some(_) => Decision::Denied,
+                None => Decision::Unknown,
+            },
+        };
         Ok(Thread {
             root: MessageId {
                 conversation: id,
@@ -1869,6 +1894,7 @@ impl NextcloudClient {
             replies: t.replies,
             unread: None,
             notification_level: t.notification_level.and_then(|n| i8::try_from(n).ok()),
+            rename,
         })
     }
 }

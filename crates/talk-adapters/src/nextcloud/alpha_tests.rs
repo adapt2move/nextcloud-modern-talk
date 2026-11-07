@@ -103,6 +103,60 @@ async fn subscribed_threads_skip_unbound_rooms_without_ending_pagination() {
 }
 
 #[tokio::test]
+async fn thread_rename_authority_uses_fresh_role_and_scoped_root_actor() {
+    for (role, author, read_only, expected) in [
+        (3, Some("fixture_user"), true, Decision::Allowed),
+        (3, Some("someone_else"), false, Decision::Denied),
+        (3, None, false, Decision::Unknown),
+        (2, None, true, Decision::Allowed),
+        (6, Some("someone_else"), false, Decision::Denied),
+    ] {
+        let mut room_data = room();
+        room_data["participantType"] = json!(role);
+        room_data["readOnly"] = json!(u8::from(read_only));
+        let mut wire_thread = json!({
+            "thread": {"id": 42, "roomToken": "testroom", "title": "Topic", "numReplies": 2},
+            "attendee": {"notificationLevel": 1}
+        });
+        if let Some(author) = author {
+            wire_thread["first"] = json!({
+                "id": 42, "token": "testroom", "actorType": "users", "actorId": author
+            });
+        }
+        let server = Server::start(vec![
+            Reply::data(features(&["threads"])),
+            Reply::data(room_data),
+            Reply::data(wire_thread),
+        ])
+        .await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let ProtocolReply::Messaging { result, .. } = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Messaging {
+                    conversation,
+                    operation: OperationId::from_local(1),
+                    command: M::Thread(MessageId {
+                        conversation,
+                        sequence: 42,
+                    }),
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("thread")
+        };
+        let R::Thread(thread) = result else {
+            panic!("thread detail")
+        };
+        assert_eq!(thread.rename, expected);
+    }
+}
+
+#[tokio::test]
 async fn quoted_thread_reply_rejects_a_parent_from_another_thread_before_writing() {
     let mut parent = message(8);
     parent["threadId"] = json!(12);

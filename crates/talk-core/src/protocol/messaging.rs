@@ -88,6 +88,8 @@ pub struct Thread {
     pub replies: u32,
     pub unread: Option<u32>,
     pub notification_level: Option<i8>,
+    /// Fresh room and root observation; unknown never grants a rename.
+    pub rename: Decision,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ThreadReplyActivity {

@@ -298,14 +298,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         return state;
     }
     if scenario == Some("thread-options") {
-        let mut state = snapshot(Some("thread"));
-        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
-            if row.local_id == 1 {
-                row.metadata.edit = Decision::Allowed;
-            }
-            row
-        }));
-        return state;
+        return snapshot(Some("thread"));
     }
     if matches!(
         scenario,
@@ -486,6 +479,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 root,
                 title: text("Design review"),
                 notification_level: Some(0),
+                rename: Decision::Allowed,
             });
             for feature in [
                 talk_core::ui::messaging::MessageFeature::React,
@@ -2014,6 +2008,7 @@ impl NativeDesktopPort for DevelopmentPort {
                             root,
                             title: text("Design review"),
                             notification_level: Some(0),
+                            rename: Decision::Allowed,
                         });
                     }
                     MessageAction::RenameThread { root, title }

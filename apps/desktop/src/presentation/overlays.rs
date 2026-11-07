@@ -820,27 +820,7 @@ impl Desktop {
                 ),
             );
         }
-        let can_rename = self
-            .snapshot
-            .messages
-            .as_slice()
-            .iter()
-            .chain(
-                self.snapshot
-                    .message_panel
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|panel| {
-                        panel
-                            .thread_root_message
-                            .iter()
-                            .chain(panel.thread_messages.as_slice())
-                    }),
-            )
-            .any(|message| {
-                message.local_id == root
-                    && message.metadata.edit == talk_core::ui::Decision::Allowed
-            });
+        let can_rename = details.rename == talk_core::ui::Decision::Allowed;
         if can_rename {
             body = if self.thread_renaming {
                 body.child(

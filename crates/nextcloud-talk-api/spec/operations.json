@@ -1237,7 +1237,7 @@
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/threads/{threadId}",
       "status": "implemented",
       "api": "Request::Chat / chat::Command::RenameThread",
-      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+      "scope": "Bounded typed protocol operation; fresh room and root observations gate the author or non-guest moderator. Source: spreed stable34/stable35 lib/Controller/ThreadController.php renameThread."
     },
     {
       "operation_id": "thread-set-notification-level",
