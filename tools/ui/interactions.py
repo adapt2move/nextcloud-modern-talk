@@ -61,6 +61,15 @@ def exercise(scenario, env, xid, out, label, large=False):
                  '-colorspace','gray','-auto-level','-negate',str(ocr_path)],env)
             text += ' ' + normalized(run(['tesseract',str(ocr_path),'stdout','--psm','6'],env).stdout)
             ocr_path.unlink()
+        if any(normalized(term).replace(' ', '') not in text.replace(' ', '') for term in required):
+            # A wrapped sidebar hint can be interleaved with timeline text by
+            # whole-window OCR. Read the same visible column independently.
+            sidebar_path = out / f'{label}-ocr-sidebar.png'
+            run(['convert', str(path), '-crop', f'{min(width, 260)}x{height}+0+0',
+                 '+repage', '-resize', '300%', '-colorspace', 'gray', '-auto-level',
+                 str(sidebar_path)], env)
+            text += normalized(run(['tesseract', str(sidebar_path), 'stdout', '--psm', '6'], env).stdout)
+            sidebar_path.unlink()
         for term in required:
             # At small sizes Tesseract sometimes reads the highlighted German
             # selection count's final letters as "ahit". Keep the numeric count
