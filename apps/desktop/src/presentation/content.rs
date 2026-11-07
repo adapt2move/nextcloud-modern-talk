@@ -2833,7 +2833,7 @@ impl Desktop {
                 }
             }
         }
-        let mut secondary = div().flex().flex_wrap().items_center().gap_1();
+        let mut secondary = div().w_full().flex().flex_col().items_start().gap_1();
         if !poll.closed && poll.close.enabled() {
             if self.content_ui.confirm_close == Some(poll.id) {
                 secondary = secondary

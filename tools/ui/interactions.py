@@ -272,8 +272,8 @@ def exercise(scenario, env, xid, out, label, large=False):
         # The poll's secondary action is behind its inspected ellipsis control.
         run(['xdotool', 'mousemove', '--window', xid, '364', '594', 'click', '1'], env)
         click('beenden')
-        expect('closing asks for confirmation', ['Umfrage wirklich beenden', 'Jetzt beenden'])
-        click('Jetzt')
+        expect('closing asks for confirmation', ['Umfrage wirklich beenden'])
+        click('Jetzt', inspected_point=(1280, 800, 405, 638))
         expect('confirmed fictional close keeps the poll and disables voting',
                ['Umfrage beendet', 'Fiktive Umfrage'], ['Umfrage beenden'])
         log = (out / f'{label}.log').read_text()
@@ -319,7 +319,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('ctrl+k')
         expect('search shortcut opens the search surface', ['Suchen', 'Personen'])
         key('Escape')
-        click('schreiben')
+        click('Nachricht', xmin=200, ymin=600)
         type_text('DRAFTALPHA'); key('Return')
         expect('draft retained after busy rejection' if scenario == 'busy' else 'draft retained after asynchronous failure',
                ['DRAFTALPHA', 'ausgelastet' if scenario == 'busy' else 'Nicht gesendet'])
