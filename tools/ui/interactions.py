@@ -767,8 +767,9 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('Beitreten', xmin=140, ymin=250)
         expect('Join action expands the owned call', ['Teamk', 'Im Gespräch'], ['Nachricht an Produktteam'])
     elif scenario in ('gate-recording', 'gate-recording-direct'):
-        # The following points were inspected at this exact fixture size. The
-        # fixture log reports only the local room identity, never media data.
+        # Locate the switch from its visible label. At this fixture size the
+        # switch is 58 px left of "stimme"; verify its actual painted state.
+        # The fixture log reports only a local room identity, never media data.
         path, _, _ = observe()
         size = tuple(map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split()))
         if size != (1280, 800):
@@ -779,28 +780,73 @@ def exercise(scenario, env, xid, out, label, large=False):
         def point(x, y):
             run(['xdotool', 'mousemove', '--window', xid, str(x), str(y), 'click', '1'], env)
             time.sleep(.35)
-        point(660, 485)  # Initially disabled: no implicit consent.
+        def switch_state(expected):
+            path, words, _ = observe()
+            matches = [r for r in words if normalized(r['text']) == 'stimme']
+            if not matches:
+                raise AssertionError(f'Cannot locate the recording consent switch: {path.name}')
+            # The keyboard hint can repeat the label to the left of the row.
+            hit = max(matches, key=lambda word: int(word['left']))
+            x = int(hit['left']) - 58
+            y = int(hit['top']) + int(hit['height']) // 2
+            pixel = run(['convert', str(path), '-format', f'%[pixel:p{{{x - 10},{y}}}]', 'info:'], env).stdout
+            channels = re.search(r'(?:s?rgba?)\((\d+),(\d+),(\d+)', pixel)
+            if not channels:
+                raise AssertionError(f'Cannot read the recording switch: {pixel}')
+            red, green, blue = map(int, channels.groups())
+            on = blue > red + 30 and red < 160
+            off = min(red, green, blue) > 230
+            if (expected and not on) or (not expected and not off):
+                raise AssertionError(f'Recording switch was not {"on" if expected else "off"}: {pixel}')
+            return x, y
+        def click_disabled_consent():
+            x, y = switch_state(False)
+            path, _, _ = observe()
+            crop = out / f'{label}-ocr-disabled-consent.png'
+            run(['convert', str(path), '-crop', f'210x65+{x + 190}+{y + 52}', '+repage',
+                 '-resize', '400%', '-colorspace', 'gray', '-auto-level', str(crop)], env)
+            text = normalized(run(['tesseract', str(crop), 'stdout', '--psm', '6'], env).stdout)
+            crop.unlink()
+            if 'zustimmen' not in text:
+                raise AssertionError(f'Cannot locate the disabled consent action: {path.name}')
+            point(x + 294, y + 81)
+        def click_selected_action(accept):
+            x, y = switch_state(True)
+            path, _, _ = observe()
+            crop = out / f'{label}-ocr-consent-action.png'
+            left, width = (x + 190, 210) if accept else (x + 75, 130)
+            run(['convert', str(path), '-crop', f'{width}x55+{left}+{y + 20}', '+repage',
+                 '-resize', '400%', '-colorspace', 'gray', '-auto-level', str(crop)], env)
+            text = normalized(run(['tesseract', str(crop), 'stdout', '--psm', '6'], env).stdout)
+            crop.unlink()
+            if ('zustimmen' if accept else 'nicht') not in text:
+                raise AssertionError(f'Cannot locate the consent action: {path.name}')
+            point(x + (294 if accept else 140), y + 47)
+        click_disabled_consent()  # Initially disabled: no implicit consent.
         if consent_sent():
             raise AssertionError('Unselected recording consent was submitted')
-        point(468, 437)  # Select the switch, then use its keyboard path to clear it.
+        point(*switch_state(False))  # Select, then use the keyboard path to clear it.
+        switch_state(True)
         key('space'); time.sleep(.35)
-        point(660, 485)
+        click_disabled_consent()
         if consent_sent():
             raise AssertionError('Cleared recording consent was submitted')
-        point(468, 437)
+        point(*switch_state(False))
+        switch_state(True)
         key('Escape'); time.sleep(.35)
         click('prüfen')  # Reopen from the still-required gate.
-        point(660, 485)
+        click_disabled_consent()
         if consent_sent():
             raise AssertionError('Reopened consent retained an earlier selection')
-        point(468, 437)
+        point(*switch_state(False))
+        switch_state(True)
         if scenario == 'gate-recording-direct':
-            point(660, 485)
+            click_selected_action(True)
             if consent_sent() != 1:
                 raise AssertionError('Explicit direct-call consent was not submitted exactly once')
             expect('Explicit recording consent continues the direct call', ['Verbindung'], ['Zustimmung prüfen'])
         else:
-            point(580, 480)
+            click_selected_action(False)
             if consent_sent():
                 raise AssertionError('Declining submitted recording consent')
             expect('Declining recording consent leaves the call', ['Nachricht an Produktteam'])
