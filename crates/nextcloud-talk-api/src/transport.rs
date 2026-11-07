@@ -880,15 +880,12 @@ impl Transport {
             Ok((
                 Response {
                     status,
-                    notification_allowed: match response
-                        .headers()
-                        .get("X-Nextcloud-User-Status")
-                        .and_then(|h| h.to_str().ok())
-                    {
-                        Some("online" | "away" | "offline" | "invisible") => Some(true),
-                        Some("dnd") => Some(false),
-                        _ => None,
-                    },
+                    notification_allowed: notification_allowed(
+                        response
+                            .headers()
+                            .get("X-Nextcloud-User-Status")
+                            .and_then(|h| h.to_str().ok()),
+                    ),
                     data,
                     last_given,
                     common_read,
@@ -1092,9 +1089,28 @@ fn header_number(
         .transpose()
 }
 
+fn notification_allowed(status: Option<&str>) -> Option<bool> {
+    // Nextcloud's IUserStatus includes busy since 28; only DND suppresses
+    // notification display. Unknown or missing status cannot grant it.
+    match status {
+        Some("online" | "away" | "busy" | "offline" | "invisible") => Some(true),
+        Some("dnd") => Some(false),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn notification_status_distinguishes_busy_from_do_not_disturb() {
+        for status in ["online", "away", "busy", "offline", "invisible"] {
+            assert_eq!(notification_allowed(Some(status)), Some(true));
+        }
+        assert_eq!(notification_allowed(Some("dnd")), Some(false));
+        assert_eq!(notification_allowed(Some("unknown")), None);
+        assert_eq!(notification_allowed(None), None);
+    }
     #[test]
     fn unread_common_marker_is_unavailable_without_relaxing_message_cursors() {
         let mut headers = reqwest::header::HeaderMap::new();

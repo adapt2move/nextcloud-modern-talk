@@ -94,12 +94,18 @@ class RecoveryLab(Lab):
                                f"/ocs/v2.php/apps/spreed/api/v1/chat/{token}/{message}/context",
                                query={"limit": 25}, name="recovery.reminder-context")
         targets = [item for item in context if item.get("id") == message]
+        capabilities = self.request("lab_alice", "GET", "/ocs/v2.php/cloud/capabilities",
+                                    name="recovery.reminder-capabilities")
+        endpoints = capabilities.get("capabilities", {}).get("notifications", {}).get("ocs-endpoints", [])
+        status = headers["X-Nextcloud-User-Status"]
         self.current["reminder_probe"] = {
             "count": len(reminders),
             "object_has_message": any(len(item.get("object_id", "").split("/")) >= 2 for item in reminders),
             "object_matches_target": any(item.get("object_id", "").split("/")[:2] == [token, str(message)] for item in reminders),
             "should_notify": [item.get("shouldNotify") for item in reminders],
-            "status_allows_notification": headers["X-Nextcloud-User-Status"] in ("online", "away", "offline", "invisible"),
+            "status_allows_notification": status in ("online", "away", "busy", "offline", "invisible"),
+            "status": status if status in ("online", "away", "busy", "offline", "invisible", "dnd") else "missing" if status is None else "other",
+            "user_status_capability": "user-status" in endpoints,
             "target_count": len(targets),
             "target_token_matches": all(item.get("token") == token for item in targets),
             "target_kind": [item.get("messageType") for item in targets],
@@ -124,6 +130,7 @@ class RecoveryLab(Lab):
                             body={"roomType": 2, "roomName": "Disposable recovery fixture"},
                             expected=(201,), name="recovery.create-room")
         self.recovery_token = room["token"]
+        self.sensitive.append(self.recovery_token)
         self.request("lab_alice", "POST", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"] + "/participants",
                      body={"newParticipant": "lab_bob", "source": "users"}, name="recovery.add-member")
         directory = self.runtime / f"{key}-recovery"

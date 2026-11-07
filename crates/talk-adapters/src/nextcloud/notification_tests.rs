@@ -473,7 +473,10 @@ async fn personal_reminders_accept_old_own_messages_and_distinct_server_events_w
     target["actorId"] = json!("fixture_user");
     let mut replies = notifications(json!([]), "online");
     for id in [101, 102] {
-        replies.extend(notifications(json!([reminder(id)]), "online"));
+        replies.extend(notifications(
+            json!([reminder(id)]),
+            if id == 102 { "busy" } else { "online" },
+        ));
         replies.push(Reply::data(notification_caps()));
         replies.push(Reply::data(data.clone()));
         replies.push(Reply::data(json!([target.clone()])));
