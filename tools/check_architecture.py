@@ -126,6 +126,31 @@ def allow_input_caret_timer(source: str) -> str:
     return source[:start] + method + source[end - 1:]
 
 
+def allow_call_clock(source: str) -> str:
+    """Permit the call view's single retained, cancellable visual clock only."""
+    code = import_source(source)
+    starts = list(re.finditer(r"\bfn\s+start_call_clock\s*\([^;{}]*\)\s*\{", code))
+    require(len(starts) == 1, "native call view must have one clock owner")
+    if len(starts) != 1:
+        return source
+    start = starts[0].end()
+    depth, end = 1, start
+    while depth and end < len(code):
+        depth += (code[end] == '{') - (code[end] == '}')
+        end += 1
+    require(depth == 0, "native call clock method is not closed")
+    if depth:
+        return source
+    method = source[start:end - 1]
+    spawn = r"\bcx\s*\.\s*spawn\s*\("
+    timer = r"\bcx\s*\.\s*background_executor\s*\(\s*\)\s*\.\s*timer\s*\(\s*CALL_CLOCK_INTERVAL\s*\)"
+    require(len(re.findall(spawn, method)) == 1, "call clock must own one foreground task")
+    require(len(re.findall(timer, method)) == 1, "call clock must use one visual interval")
+    method = re.sub(spawn, "cx.reviewed_call_clock(", method)
+    method = re.sub(timer, "cx.reviewed_call_interval()", method)
+    return source[:start] + method + source[end - 1:]
+
+
 def allow_native_export_waiter(source: str) -> str:
     """One foreground waiter observes bounded snapshots and submits typed intents.
 
@@ -538,6 +563,8 @@ def check() -> None:
         # GPUI's read allocation is not bounded; admission and privacy gating
         # belong to the input owner/producer. Other views cannot access the OS.
         hidden_io = source
+        if path == native / "presentation/mod.rs":
+            hidden_io = allow_call_clock(hidden_io)
         if path == native / "presentation/input.rs":
             hidden_io = allow_input_caret_timer(hidden_io)
             hidden_io = re.sub(r"\.(?:read_from_clipboard|write_to_clipboard)\s*\(", ".reviewed_input_clipboard(", hidden_io)

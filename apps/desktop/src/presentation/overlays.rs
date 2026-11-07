@@ -106,7 +106,16 @@ impl Desktop {
             .absolute()
             .inset_0()
             .occlude()
-            .bg(t.scrim)
+            .bg(
+                if matches!(
+                    overlay,
+                    Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent
+                ) {
+                    gpui::rgba(0x0f172a80).into()
+                } else {
+                    t.scrim
+                },
+            )
             .flex()
             .when(side, |d| d.justify_end().p_3())
             .when(!side, |d| d.items_center().justify_center().p_5())
@@ -121,8 +130,8 @@ impl Desktop {
                         .when(side, |d| d.h_full())
                         // Reserve space for wrapped titles and action rows;
                         // content can still scroll at larger text scales.
-                        .when(overlay == Overlay::ConfirmRecording, |d| d.h(self.sp(260.)))
-                        .when(overlay == Overlay::ConfirmEndCall, |d| d.h(self.sp(230.)))
+                        .when(overlay == Overlay::ConfirmRecording, |d| d.h(self.sp(210.)))
+                        .when(overlay == Overlay::ConfirmEndCall, |d| d.h(self.sp(210.)))
                         .when(overlay == Overlay::RecordingConsent, |d| d.h(self.sp(280.)))
                         .when(overlay == Overlay::Create, |d| {
                             d.h(px((f32::from(window.viewport_size().height)
@@ -182,14 +191,24 @@ impl Desktop {
                                 .when(overlay == Overlay::CreatePoll, |d| {
                                     d.children(self.poll_drafts_header(cx))
                                 })
-                                .child(self.icon_button(
-                                    "close-overlay",
-                                    ("x", "Schließen"),
-                                    ButtonStyle::Quiet,
-                                    Availability::available(),
-                                    LocalAction::Close,
-                                    cx,
-                                )),
+                                .when(
+                                    !matches!(
+                                        overlay,
+                                        Overlay::ConfirmRecording
+                                            | Overlay::ConfirmEndCall
+                                            | Overlay::RecordingConsent
+                                    ),
+                                    |d| {
+                                        d.child(self.icon_button(
+                                            "close-overlay",
+                                            ("x", "Schließen"),
+                                            ButtonStyle::Quiet,
+                                            Availability::available(),
+                                            LocalAction::Close,
+                                            cx,
+                                        ))
+                                    },
+                                ),
                         )
                         .child(content)
                         .when(overlay == Overlay::Create, |d| {
@@ -216,6 +235,16 @@ impl Desktop {
     pub(super) fn call_participants_body(&self, cx: &Context<Self>) -> Div {
         let mut body = div().flex().flex_col().gap_3();
         if let Some(call) = &self.snapshot.call {
+            if call.recording_control.is_some() || call.can_end_everyone {
+                body = body.child(div().flex().justify_end().child(self.icon_button(
+                    "call-moderation",
+                    ("more", "Moderation"),
+                    ButtonStyle::Quiet,
+                    Availability::available().hinted(),
+                    LocalAction::ToggleCallModeration,
+                    cx,
+                )));
+            }
             body = body.child(self.hint(&format!(
                 "{} · {}",
                 self.l("Im Anruf"),
@@ -303,7 +332,9 @@ impl Desktop {
             if call.recording_uncertain {
                 body = body.child(self.hint(self.l("Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei.")));
             }
-            if let Some(start) = call.recording_control {
+            if self.call_moderation_open
+                && let Some(start) = call.recording_control
+            {
                 body = body.child(self.button(
                             "call-recording-control",
                             if start { "Aufzeichnung starten" } else { "Aufzeichnung stoppen" },
@@ -319,11 +350,12 @@ impl Desktop {
                             cx,
                         ));
             }
-            if call.can_end_everyone {
+            if self.call_moderation_open && call.can_end_everyone {
+                body = body.child(div().border_t_1().border_color(self.theme.border));
                 body = body.child(self.button(
                     "end-everyone",
                     "Für alle beenden",
-                    ButtonStyle::Secondary,
+                    ButtonStyle::Danger,
                     Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet."),
                     LocalAction::Open(Overlay::ConfirmEndCall),
                     cx,

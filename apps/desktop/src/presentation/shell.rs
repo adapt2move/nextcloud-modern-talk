@@ -874,7 +874,7 @@ impl Desktop {
             .iter()
             .find(|a| a.scope == call.scope.account)
             .map_or("Konto unbekannt", |a| a.label.as_str());
-        div().absolute().inset_0().occlude().bg(t.scrim).flex().items_center().justify_center().p_5()
+        div().absolute().inset_0().occlude().bg(gpui::rgba(0x0f172a66)).flex().items_center().justify_center().p_5()
             .child(self.scroll_area(super::navigation::Region::Call).max_h_full().w_full().max_w(px(360.)).rounded(px(16.)).bg(t.surface).border_1().border_color(t.border).shadow_lg().p_6()
                 .child(div().flex().flex_col().items_center().gap_4().text_center()
                     .child(div().flex().items_center().gap_2().child(self.scaled_icon("phone",16.,t.muted)).child(self.hint(self.l("Eingehender Direktanruf"))))

@@ -317,14 +317,22 @@ impl Desktop {
                     .gap_2()
                     .child(self.scaled_icon("refresh", 16., t.warning))
                     .child(self.l("Verbindung wird wiederhergestellt …"))
-                    .child(self.button(
-                        "reconnect-call",
-                        "Erneut verbinden",
-                        ButtonStyle::Secondary,
-                        true,
-                        LocalAction::Intent(UiIntent::ReconnectCall(call.scope)),
-                        cx,
-                    )),
+                    .when(
+                        self.call_reconnecting_since.is_some_and(|(scope, at)| {
+                            scope == call.scope
+                                && at.elapsed() >= std::time::Duration::from_secs(15)
+                        }),
+                        |d| {
+                            d.child(self.button(
+                                "reconnect-call",
+                                "Erneut verbinden",
+                                ButtonStyle::Secondary,
+                                true,
+                                LocalAction::Intent(UiIntent::ReconnectCall(call.scope)),
+                                cx,
+                            ))
+                        },
+                    ),
             );
         }
         if let CallStage::Required(gate) = call.stage {
@@ -379,7 +387,14 @@ impl Desktop {
                                     .child(self.l(title)),
                             )
                             .child(self.hint(self.l(description)))
-                            .when(gate == RequiredGate::RecordingConsent, |d| {
+                             .when_some(match gate {
+                        RequiredGate::MicrophonePermission => Some(talk_core::preferences::permissions::PermissionKind::Microphone),
+                        RequiredGate::CameraPermission => Some(talk_core::preferences::permissions::PermissionKind::Camera),
+                        _ => None,
+                    }, |d, kind| d.child(self.button("gate-system-settings", "Systemeinstellungen öffnen", ButtonStyle::Secondary,
+                        Availability::when(self.observation(kind).can_open_settings, "Systemeinstellungen sind auf diesem System nicht verfügbar."),
+                        LocalAction::Permission(kind, talk_core::preferences::permissions::PermissionAction::OpenSystemSettings), cx)))
+                    .when(gate == RequiredGate::RecordingConsent, |d| {
                                 d.child(self.button(
                                     "required-gate",
                                     "Zustimmung prüfen",
@@ -388,7 +403,9 @@ impl Desktop {
                                     LocalAction::Open(Overlay::RecordingConsent),
                                     cx,
                                 ))
-                            }),
+                            })
+                            .child(self.button("gate-leave", "Anruf verlassen", ButtonStyle::Quiet, true,
+                                LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))), cx)),
                     ),
             );
         }
@@ -445,7 +462,7 @@ impl Desktop {
                     .find(|(scope, tile, _, _)| *scope == call.scope && *tile == screen.tile)
                     .map(|(_, _, _, image)| image);
                 let visual = if let Some(image) = image {
-                    div().w_full().flex_1().min_h_0().child(
+                    div().w_full().h_full().child(
                         img(image.clone())
                             .w_full()
                             .h_full()
@@ -453,45 +470,32 @@ impl Desktop {
                     )
                 } else {
                     div()
-                        .flex_1()
+                        .w_full()
+                        .h_full()
                         .flex()
-                        .flex_col()
                         .items_center()
                         .justify_center()
-                        .gap_4()
-                        .child(self.scaled_icon("monitor-up", 40., t.stage_muted))
-                        .child(
-                            div()
-                                .text_size(self.sp(13.))
-                                .text_color(t.stage_muted)
-                                .child(
-                                    self.l("Der geteilte Inhalt ist hier noch nicht verfügbar."),
-                                ),
-                        )
-                };
-                stage = stage.child(
-                    div()
-                        .w_full()
-                        .h(px(feature_height))
-                        .flex_none()
-                        .rounded(px(12.))
-                        .bg(t.stage_panel)
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap_4()
-                        .p_4()
-                        .child(visual)
+                        .gap_2()
+                        .child(self.scaled_icon("refresh", 18., t.stage_muted))
                         .child(self.lf(
                             "{name} teilt den Bildschirm",
                             &[("name", screen.name.as_str())],
                         ))
-                        .when(!screen.flowing, |stage| {
-                            stage.child(
-                                self.hint(self.l("Warte auf Bildschirmdaten …"))
-                                    .text_color(t.stage_muted),
-                            )
-                        }),
+                };
+                let width = (f32::from(window.viewport_size().width)
+                    - if show_chat || show_people { 332. } else { 32. })
+                .min(feature_height * 16. / 9.)
+                .max(160.);
+                stage = stage.child(
+                    div().w_full().flex().justify_center().child(
+                        div()
+                            .w(px(width))
+                            .h(px(width * 9. / 16.))
+                            .flex_none()
+                            .rounded(px(12.))
+                            .bg(t.stage_panel)
+                            .child(visual),
+                    ),
                 );
             }
             // Reserve the docked chat before choosing a grid so tiles keep a
@@ -573,8 +577,10 @@ impl Desktop {
                                 participant.initials.as_str(),
                                 if focused == Some(participant.local_id) {
                                     104.
+                                } else if pip && participant.self_user {
+                                    56.
                                 } else if filmstrip {
-                                    64.
+                                    40.
                                 } else {
                                     (tile_height * 0.4).clamp(56., 128.)
                                 },
@@ -641,7 +647,8 @@ impl Desktop {
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .text_size(self.sp(13.))
+                                    .text_size(self.sp(12.))
+                                    .text_ellipsis()
                                     .font_weight(FontWeight::MEDIUM)
                                     .child(
                                         if participant.self_user
@@ -928,7 +935,7 @@ impl Desktop {
                 .size(px(44.))
                 .min_h(px(44.))
                 .rounded_full()
-                .when(id != "screen-share" && state != MediaState::Active, |d| {
+                .when(id != "screen-share" && state == MediaState::Off, |d| {
                     d.bg(gpui::rgb(0x9e3e32)).text_color(gpui::white())
                 });
             let mut group = div()
@@ -996,6 +1003,9 @@ impl Desktop {
                 .rounded_full(),
             );
         }
+        if !call.hand_supported {
+            primary_controls = primary_controls.child(div().size(px(44.)));
+        }
         if !call.reactions.as_slice().is_empty() {
             let mut reaction_control = div().relative().child(
                 self.round_icon_button(
@@ -1058,6 +1068,9 @@ impl Desktop {
                 reaction_control = reaction_control.children(self.call_reaction(call.scope, None));
             }
             primary_controls = primary_controls.child(reaction_control);
+        }
+        if call.reactions.as_slice().is_empty() {
+            primary_controls = primary_controls.child(div().size(px(44.)));
         }
         for (id, symbol, label, action) in [
             (
@@ -1190,7 +1203,7 @@ impl Desktop {
                             ))
                             .child(self.icon_button(
                                 "fullscreen-call",
-                                ("square", "Vollbild umschalten"),
+                                (if window.is_fullscreen() { "minimize-2" } else { "maximize-2" }, "Vollbild umschalten"),
                                 ButtonStyle::Stage,
                                 Availability::available().labelled(),
                                 LocalAction::ToggleCallFullscreen(call.scope),
@@ -1256,53 +1269,33 @@ impl Desktop {
             .call
             .as_ref()
             .expect("terminal call projection");
-        let outcome = if failed {
-            div()
-                .p_5()
-                .rounded(px(12.))
-                .bg(t.danger_bg)
-                .text_color(t.danger)
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap_3()
-                .text_center()
-                .child(self.scaled_icon("phone-down", 26., t.danger))
-                .child(
-                    div()
-                        .text_size(self.sp(18.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(self.l("Verbindung fehlgeschlagen")),
+        let duration = self
+            .call_started
+            .filter(|(scope, _)| *scope == call.scope)
+            .map(|(_, started)| {
+                let seconds = started.elapsed().as_secs();
+                self.lf(
+                    "Dauer {duration}",
+                    &[("duration", &format!("{}:{:02}", seconds / 60, seconds % 60))],
                 )
-                .child(
-                    div()
-                        .text_size(self.sp(12.))
-                        .child(self.l("Der Anruf konnte nicht verbunden werden.")),
-                )
-        } else {
-            self.state_note(
-                "phone-down",
-                "Anruf beendet",
-                "Du bist nicht mehr im Anruf.",
-            )
-        };
+            });
         div().size_full().p_3().bg(t.chrome()).child(self.content_card(
-            div().text_color(t.text)
-                .flex().flex_col()
+            div().size_full().bg(t.subtle).text_color(t.text).flex().flex_col()
                 .child(div().flex_none().px_6().py_4().border_b_1().border_color(t.border)
                     .font_weight(FontWeight::MEDIUM).child(call.title.as_str().to_owned()))
-                .child(self.scroll_area(super::navigation::Region::Call).flex_1().min_h_0().p_6()
-                    .child(div().max_w(px(520.)).mx_auto().py_6().flex().flex_col().gap_4()
-                        .child(self.reveal(("call-outcome", usize::from(failed)), outcome))
-                        .child(self.button("return-conversation", "Zurück zum Gespräch", ButtonStyle::Primary,
-                            true, LocalAction::ReturnConversation, cx))
-                        .child(self.button("rejoin-call", if call.direct { "Erneut anrufen" } else { "Erneut beitreten" },
-                            ButtonStyle::Secondary,
+                .child(div().flex_1().min_h_0().flex().items_center().justify_center().p_6().child(
+                    div().w_full().max_w(px(320.)).flex().flex_col().items_center().gap_4().text_center()
+                        .child(div().size(px(48.)).rounded_full().bg(if failed { t.danger_bg } else { t.surface })
+                            .flex().items_center().justify_center().child(self.scaled_icon(if failed { "cloud" } else { "check-circle" }, 24., if failed { t.danger } else { t.muted })))
+                        .child(div().text_size(self.sp(20.)).font_weight(FontWeight::MEDIUM).child(self.l(if failed { "Verbindung fehlgeschlagen" } else { "Anruf beendet" })))
+                        .child(div().text_size(self.sp(14.)).child(if failed { self.l("Der Anruf konnte nicht verbunden werden.").to_owned() } else { duration.unwrap_or_else(|| self.l("Du bist nicht mehr im Anruf.").to_owned()) }))
+                        .child(self.button("rejoin-call", if call.direct { "Erneut anrufen" } else { "Erneut beitreten" }, ButtonStyle::Primary,
                             Availability::when(self.selected_call().is_some_and(|entry| match entry {
                                 super::state::CallEntry::Direct(scope) | super::state::CallEntry::Conference(scope) => scope == call.scope,
-                            }), "Ein erneuter Anruf ist für dieses Gespräch derzeit nicht freigegeben."),
-                            LocalAction::Call, cx))
-                        .when(self.local_feedback_visible(), |d| d.child(self.feedback_view(cx)))))))
+                            }), "Ein erneuter Anruf ist für dieses Gespräch derzeit nicht freigegeben."), LocalAction::Call, cx).w_full())
+                        .child(self.button("return-conversation", "Zurück zum Gespräch", ButtonStyle::Secondary, true, LocalAction::ReturnConversation, cx).w_full())
+                        .when(self.local_feedback_visible(), |d| d.child(self.feedback_view(cx)))
+                ))))
     }
     pub(super) fn call_chat(&self, cx: &Context<Self>) -> Div {
         let t = self.theme;

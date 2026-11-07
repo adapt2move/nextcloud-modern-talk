@@ -100,6 +100,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Se está compartiendo tu pantalla.",
     ),
     (
+        "Dauer {duration}",
+        "Duration {duration}",
+        "Duración {duration}",
+    ),
+    (
         "Der Anrufstatus ist unklar. Verlasse den Anruf und prüfe, ob er beendet wurde.",
         "The call status is unclear. Leave the call and check whether it ended.",
         "El estado de la llamada no está claro. Sal de la llamada y comprueba si terminó.",
@@ -228,6 +233,7 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Start video call",
         "Iniciar videollamada",
     ),
+    ("Moderation", "Moderation", "Moderación"),
     ("Nicht beitreten", "Do not join", "No unirse"),
     ("Nicht im Anruf", "Not in the call", "Fuera de la llamada"),
     (

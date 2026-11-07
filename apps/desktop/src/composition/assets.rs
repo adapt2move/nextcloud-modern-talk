@@ -21,6 +21,8 @@ impl AssetSource for Assets {
             "icons/hand.svg" => include_bytes!("../../assets/icons/hand.svg"),
             "icons/more.svg" => include_bytes!("../../assets/icons/more.svg"),
             "icons/chat.svg" => include_bytes!("../../assets/icons/chat.svg"),
+            "icons/maximize-2.svg" => include_bytes!("../../assets/icons/maximize-2.svg"),
+            "icons/minimize-2.svg" => include_bytes!("../../assets/icons/minimize-2.svg"),
             "icons/grid.svg" => include_bytes!("../../assets/icons/grid.svg"),
             "icons/thumbs-up.svg" => include_bytes!("../../assets/icons/thumbs-up.svg"),
             "icons/sparkles.svg" => include_bytes!("../../assets/icons/sparkles.svg"),
