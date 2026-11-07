@@ -74,6 +74,21 @@ pub(super) enum RecordingResolution {
     Uncertain,
 }
 
+/// Do not display or settle a recording state from an expired or invalidated
+/// conversation observation, even if the last refresh completed successfully.
+pub(super) fn current_recording(
+    observed: talk_core::policy::Observed<talk_core::policy::RecordingState>,
+    scope: talk_core::ids::CallScope,
+    now: talk_core::policy::Moment,
+    policy_ready: bool,
+) -> talk_core::policy::RecordingState {
+    use talk_core::policy::{Observed, RecordingState};
+    match observed {
+        Observed::Known { value, lease } if policy_ready && lease.is_fresh(scope, now) => value,
+        _ => RecordingState::Unknown,
+    }
+}
+
 /// A receipt alone is not a recording state. Only a later fresh observation
 /// settles the request; expiry never replays it or claims that it stopped.
 pub(super) fn recording_resolution(
@@ -105,7 +120,71 @@ pub(super) fn recording_resolution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use talk_core::policy::RecordingState;
+    use talk_core::{
+        ids::{
+            AccountId, AccountScope, CallGeneration, CallScope, ClockEpoch, ConversationId, HostId,
+            RuntimeGeneration,
+        },
+        policy::{Lease, Moment, Observed, RecordingState, Source},
+    };
+
+    #[test]
+    fn recording_status_expires_and_cannot_cross_call_scope() {
+        let account = AccountId::from_local(1);
+        let scope = CallScope {
+            account: AccountScope {
+                account,
+                runtime: RuntimeGeneration::from_local(1),
+            },
+            conversation: ConversationId {
+                account,
+                host: HostId::from_local(1),
+                local: 1,
+            },
+            call: CallGeneration::from_local(1),
+        };
+        let now = Moment {
+            epoch: ClockEpoch::from_local(1),
+            millis: 10,
+        };
+        let lease = Lease::from_qualified_refresh(scope, Source::Conversation, now, now).unwrap();
+        let observed = Observed::Known {
+            value: RecordingState::Active,
+            lease,
+        };
+        assert_eq!(
+            current_recording(observed, scope, now, true),
+            RecordingState::Active
+        );
+        assert_eq!(
+            current_recording(observed, scope, now, false),
+            RecordingState::Unknown
+        );
+        assert_eq!(
+            current_recording(
+                observed,
+                CallScope {
+                    call: CallGeneration::from_local(2),
+                    ..scope
+                },
+                now,
+                true
+            ),
+            RecordingState::Unknown
+        );
+        assert_eq!(
+            current_recording(
+                observed,
+                scope,
+                Moment {
+                    millis: lease.expires().millis,
+                    ..now
+                },
+                true
+            ),
+            RecordingState::Unknown
+        );
+    }
 
     #[test]
     fn recording_receipts_never_fabricate_or_replay_a_result() {

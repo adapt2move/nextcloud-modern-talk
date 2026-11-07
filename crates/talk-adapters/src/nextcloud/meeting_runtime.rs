@@ -935,13 +935,16 @@ async fn media_loop(
                 }
             }
             let policy_ready = transport_ready && received_policy >= required_policy;
+            let recording = moderation::current_recording(
+                match bundle.inputs.room {
+                    Observed::Known { value, lease } => Observed::Known { value: value.recording, lease },
+                    Observed::Unknown => Observed::Unknown,
+                },
+                scope, network.now(), policy_ready,
+            );
             if let Some(pending) = recording_pending.as_ref() {
-                let observed = match bundle.inputs.room {
-                    Observed::Known { value, .. } => value.recording,
-                    _ => RecordingState::Unknown,
-                };
                 match moderation::recording_resolution(
-                    pending.start, pending.accepted, policy_ready, observed,
+                    pending.start, pending.accepted, recording != RecordingState::Unknown, recording,
                     pending.requested.elapsed() >= Duration::from_secs(20),
                 ) {
                     moderation::RecordingResolution::Pending => {}
@@ -1133,8 +1136,8 @@ async fn media_loop(
                 snapshot.end_pending = end_pending;
                 snapshot.end_failed = end_failed;
                 snapshot.counters = totals;
-                snapshot.recording = match bundle.inputs.room { Observed::Known { value, .. } => value.recording, _ => RecordingState::Unknown };
-                snapshot.recording_control = if policy_ready && call.phase() == Phase::Active && !end_pending {
+                snapshot.recording = recording;
+                snapshot.recording_control = if recording != RecordingState::Unknown && call.phase() == Phase::Active && !end_pending {
                     bundle.recording_control
                 } else { None };
                 snapshot.recording_pending = recording_pending.is_some();
