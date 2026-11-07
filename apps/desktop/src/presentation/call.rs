@@ -568,8 +568,7 @@ impl Desktop {
             });
             let filmstrip = focused.is_some() || call.screen_stage().is_some();
             let count = call.participants.as_slice().len();
-            let pip = call.direct
-                && count == 2
+            let pip = count == 2
                 && !filmstrip
                 && call.participants.as_slice().iter().any(|p| p.self_user)
                 && call.participants.as_slice().iter().any(|p| !p.self_user);
