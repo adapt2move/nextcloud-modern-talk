@@ -2421,20 +2421,20 @@ impl Desktop {
             for entry in self.snapshot.content_panel.poll_drafts.as_slice() {
                 let id = entry.id;
                 let group: gpui::SharedString = format!("poll-draft-{id}").into();
-                let mut actions =
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .gap_1()
-                        .child(self.button(
-                            ("poll-draft-use", id as usize),
-                            "Für neue Umfrage verwenden",
-                            ButtonStyle::Quiet,
-                            Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
-                            LocalAction::Content(Action::LoadDraft { id, edit: false }),
-                            cx,
-                        ));
+                let mut actions = div()
+                    .w_full()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_1()
+                    .child(self.button(
+                        ("poll-draft-use", id as usize),
+                        "Für neue Umfrage verwenden",
+                        ButtonStyle::Quiet,
+                        Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
+                        LocalAction::Content(Action::LoadDraft { id, edit: false }),
+                        cx,
+                    ));
                 if self.snapshot.content_panel.poll_drafts_edit.enabled() {
                     actions = actions.child(
                         self.button(
@@ -2470,14 +2470,17 @@ impl Desktop {
                         ))
                 } else {
                     actions
-                        .child(self.icon_button(
-                            ("poll-draft-menu", id as usize),
-                            ("more", "Weitere Optionen"),
-                            ButtonStyle::Quiet,
-                            Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
-                            LocalAction::Content(Action::ToggleDraftMenu(id)),
-                            cx,
-                        ))
+                        .child(
+                            self.icon_button(
+                                ("poll-draft-menu", id as usize),
+                                ("more", "Weitere Optionen"),
+                                ButtonStyle::Quiet,
+                                Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
+                                LocalAction::Content(Action::ToggleDraftMenu(id)),
+                                cx,
+                            )
+                            .ml_auto(),
+                        )
                         .when(self.content_ui.draft_menu == Some(id), |actions| {
                             actions.child(self.button(
                                 ("poll-draft-delete", id as usize),

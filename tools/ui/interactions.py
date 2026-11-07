@@ -56,6 +56,19 @@ def exercise(scenario, env, xid, out, label, large=False):
                  '-colorspace', 'gray', '-threshold', '75%', str(banner_path)], env)
             text += normalized(run(['tesseract', str(banner_path), 'stdout', '--psm', '7'], env).stdout)
             banner_path.unlink()
+        if scenario == 'poll-dialog' and (width, height) == (1280, 800) and any(
+                term in ('TEAMESSEN', 'GARTEN', 'WERKSTATT') for term in required):
+            # The small field text can be missed by whole-window OCR. Inspect
+            # the actual three native inputs at high contrast, in both themes.
+            field_path = out / f'{label}-ocr-poll-field.png'
+            for x, y, w in ((350, 222, 575), (382, 275, 420), (382, 327, 420)):
+                image_args = ['convert', str(path), '-crop', f'{w}x36+{x}+{y}', '+repage',
+                              '-resize', '400%', '-colorspace', 'gray']
+                if '-dark-' in label:
+                    image_args.append('-negate')
+                run(image_args + ['-auto-level', '-threshold', '75%', str(field_path)], env)
+                text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
+            field_path.unlink()
         for term in required:
             # At small sizes Tesseract sometimes reads the highlighted German
             # selection count's final letters as "ahit". Keep the numeric count
