@@ -430,6 +430,10 @@ pub enum Command {
         target: u128,
     },
     EndEveryone(CallScope),
+    SetRecording {
+        call: CallScope,
+        start: bool,
+    },
     Consent(CallScope),
     Reconnect(CallScope),
     Stop(CallScope),
@@ -443,7 +447,8 @@ impl Command {
             | Self::SetHand { call, .. }
             | Self::React { call, .. }
             | Self::Ring { call, .. }
-            | Self::MuteParticipant { call, .. } => *call,
+            | Self::MuteParticipant { call, .. }
+            | Self::SetRecording { call, .. } => *call,
             Self::Consent(call)
             | Self::EndEveryone(call)
             | Self::Reconnect(call)
@@ -481,6 +486,10 @@ pub struct Snapshot {
     pub screen: DeviceState,
     pub peers: u16,
     pub recording: RecordingState,
+    /// Some(true) starts, Some(false) stops; None means unavailable.
+    pub recording_control: Option<bool>,
+    pub recording_pending: bool,
+    pub recording_uncertain: bool,
     pub hand_supported: bool,
     pub hand_raised: bool,
     pub reactions: crate::bounded::Page<crate::bounded::Text<64>, 32>,

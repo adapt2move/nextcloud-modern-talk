@@ -22,6 +22,7 @@ pub(crate) struct Bundle {
     pub ring_supported: bool,
     pub end_supported: bool,
     pub mute_supported: bool,
+    pub recording_control: Option<bool>,
 }
 pub(crate) struct Invitee {
     pub attendee: u64,
@@ -347,6 +348,21 @@ impl Sources {
                 && permissions & 2 != 0
                 && r.has_call == Some(true)
                 && connected,
+            recording_control: if has("recording-v1")
+                && c.recording_enabled == Some(true)
+                && matches!(r.participant_type, Some(1 | 2))
+                && attributes & 4 == 0
+                && r.has_call == Some(true)
+                && connected
+            {
+                match recording {
+                    RecordingState::Inactive => Some(true),
+                    RecordingState::Active => Some(false),
+                    _ => None,
+                }
+            } else {
+                None
+            },
             hand_supported,
             reactions,
         })

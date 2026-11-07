@@ -570,7 +570,8 @@ impl NextcloudClient {
                         | Command::React { .. }
                         | Command::Ring { .. }
                         | Command::MuteParticipant { .. }
-                        | Command::EndEveryone(_) => {
+                        | Command::EndEveryone(_)
+                        | Command::SetRecording { .. } => {
                             self.meeting_owner = Some(CallOwner::Pending { call, last });
                             return Err(self.error(ErrorKind::PermissionDenied));
                         }
@@ -651,6 +652,7 @@ impl NextcloudClient {
                             | Command::Ring { .. }
                             | Command::MuteParticipant { .. }
                             | Command::EndEveryone(_)
+                            | Command::SetRecording { .. }
                     ) {
                         self.meeting_owner = Some(CallOwner::Ended {
                             snapshot,
@@ -726,6 +728,9 @@ fn pending_snapshot(call: &CallSession) -> Snapshot {
         screen: DeviceState::Unavailable,
         peers: 0,
         recording: RecordingState::Unknown,
+        recording_control: None,
+        recording_pending: false,
+        recording_uncertain: false,
         hand_supported: false,
         hand_raised: false,
         reactions: talk_core::bounded::Page::empty(),

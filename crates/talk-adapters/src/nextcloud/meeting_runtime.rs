@@ -72,6 +72,11 @@ struct PolicyUpdate {
     bundle: Bundle,
     after: u64,
 }
+struct RecordingPending {
+    start: bool,
+    requested: Instant,
+    accepted: bool,
+}
 struct Peer {
     local: u128,
     status: StatusSnapshot,
@@ -180,6 +185,9 @@ impl LiveCall {
             screen: DeviceState::Unavailable,
             peers: 0,
             recording: RecordingState::Unknown,
+            recording_control: None,
+            recording_pending: false,
+            recording_uncertain: false,
             hand_supported: false,
             hand_raised: false,
             reactions: talk_core::bounded::Page::empty(),
@@ -683,6 +691,8 @@ async fn media_loop(
     let mut mute_status: Option<calls::CallRingStatus> = None;
     let mut end_pending = false;
     let mut end_failed = false;
+    let mut recording_pending: Option<RecordingPending> = None;
+    let mut recording_uncertain = false;
     let mut refreshes = 1u64;
     let mut stage = "initial peer reconciliation";
     let result: Result<(), ()> = async {
@@ -717,6 +727,17 @@ async fn media_loop(
                                 calls::RingOutcome::Pending
                             } else { calls::RingOutcome::Failed };
                             ring_status = Some(calls::CallRingStatus { target, outcome });
+                        }
+                    }
+                    Command::SetRecording { start, .. } if transport_ready && received_policy >= required_policy
+                        && call.phase() == Phase::Active && !end_pending && !recording_uncertain
+                        && recording_pending.is_none() && bundle.recording_control == Some(start)
+                        && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
+                        && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending) => {
+                        if ring_tx.try_send(moderation::Request::Recording { start }).is_ok() {
+                            recording_pending = Some(RecordingPending { start, requested: Instant::now(), accepted: false });
+                        } else {
+                            recording_uncertain = true;
                         }
                     }
                     Command::EndEveryone(_) => {
@@ -788,6 +809,17 @@ async fn media_loop(
                         else { end_failed = true; }
                     }
                     moderation::Result::EndEveryone { .. } => {}
+                    moderation::Result::Recording { start, accepted } => {
+                        if let Some(pending) = recording_pending.as_mut().filter(|pending| pending.start == start) {
+                            if accepted {
+                                pending.accepted = true;
+                            } else {
+                                recording_pending = None;
+                                recording_uncertain = true;
+                            }
+                            refresh_needed = true;
+                        }
+                    }
                 }
             }
             stage = "remote signaling";
@@ -903,6 +935,23 @@ async fn media_loop(
                 }
             }
             let policy_ready = transport_ready && received_policy >= required_policy;
+            if let Some(pending) = recording_pending.as_ref() {
+                let observed = match bundle.inputs.room {
+                    Observed::Known { value, .. } => value.recording,
+                    _ => RecordingState::Unknown,
+                };
+                let settled = pending.accepted && if pending.start {
+                    matches!(observed, RecordingState::Starting | RecordingState::Active)
+                } else {
+                    observed == RecordingState::Inactive
+                };
+                let failed = pending.accepted && observed == RecordingState::Failed;
+                let expired = pending.requested.elapsed() >= Duration::from_secs(20);
+                if settled || failed || expired {
+                    recording_pending = None;
+                    recording_uncertain = failed || expired;
+                }
+            }
             if policy_ready && hand_raised && bundle.hand_supported && announced_refresh != refreshes {
                 announced_refresh = refreshes;
                 let _ = hand_tx.send(Some(outgoing::Message { peers: bundle.peers.iter().map(|p| p.session.clone()).collect(),
@@ -1085,6 +1134,11 @@ async fn media_loop(
                 snapshot.end_failed = end_failed;
                 snapshot.counters = totals;
                 snapshot.recording = match bundle.inputs.room { Observed::Known { value, .. } => value.recording, _ => RecordingState::Unknown };
+                snapshot.recording_control = if policy_ready && call.phase() == Phase::Active && !end_pending {
+                    bundle.recording_control
+                } else { None };
+                snapshot.recording_pending = recording_pending.is_some();
+                snapshot.recording_uncertain = recording_uncertain;
                 snapshot.revision = snapshot.revision.saturating_add(1);
             }
         }

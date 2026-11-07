@@ -521,6 +521,10 @@ pub struct CallView {
     /// Screen metadata only; frames remain in the scoped media image owner.
     pub screen_stage: Option<CallScreenStage>,
     pub recording: CallRecordingState,
+    /// Some(true) starts, Some(false) stops; None hides unsupported controls.
+    pub recording_control: Option<bool>,
+    pub recording_pending: bool,
+    pub recording_uncertain: bool,
     pub hand_supported: bool,
     pub hand_raised: bool,
     pub reactions: Page<Text<64>, 32>,
@@ -772,6 +776,10 @@ pub enum UiIntent {
         enabled: bool,
     },
     EndCallForEveryone(CallScope),
+    SetCallRecording {
+        call: CallScope,
+        start: bool,
+    },
     MuteCallParticipant {
         call: CallScope,
         target: u128,

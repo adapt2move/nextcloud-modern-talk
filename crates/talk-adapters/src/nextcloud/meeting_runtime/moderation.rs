@@ -16,11 +16,15 @@ pub(super) enum Request {
         peer: nextcloud_talk_api::signaling::PeerSession,
     },
     EndEveryone,
+    Recording {
+        start: bool,
+    },
 }
 pub(super) enum Result {
     Ring { target: u128, accepted: bool },
     Mute { target: u128, accepted: bool },
     EndEveryone { accepted: bool },
+    Recording { start: bool, accepted: bool },
 }
 
 pub(super) async fn run(
@@ -50,6 +54,10 @@ pub(super) async fn run(
             },
             Request::EndEveryone => Result::EndEveryone {
                 accepted: writer.end_for_everyone(&ctx).await.is_ok(),
+            },
+            Request::Recording { start } => Result::Recording {
+                start,
+                accepted: writer.set_recording(&ctx, start).await.is_ok(),
             },
         };
         if !session.live() || cancel.is_cancelled() {
