@@ -170,9 +170,13 @@ impl NextcloudClient {
         caps: &Capabilities,
         notice: &api::notifications::MessageNotification,
     ) -> Result<Option<talk_core::protocol::MessageNotice>, PortError> {
+        // Reminder timestamps are their due time, not their delivery time. A
+        // slow server can create a new reminder notification long after it was
+        // due; the account high-water baseline still prevents replay on resume.
         if !notice.eligible
-            || notice.timestamp < self.message_notifications.since
-            || notice.timestamp.saturating_add(FRESH.as_secs()) < unix_seconds()
+            || (!notice.reminder
+                && (notice.timestamp < self.message_notifications.since
+                    || notice.timestamp.saturating_add(FRESH.as_secs()) < unix_seconds()))
         {
             return Ok(None);
         }

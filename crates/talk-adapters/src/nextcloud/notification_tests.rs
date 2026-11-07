@@ -455,10 +455,10 @@ async fn complete_lists_keep_metadata_and_stable_ids_but_partial_or_oversized_li
 
 #[tokio::test]
 async fn personal_reminders_accept_old_own_messages_and_distinct_server_events_without_reads() {
-    let (stamp, datetime) = wall_time();
+    let (stamp, _) = wall_time();
     let reminder = |id| {
         json!({"notification_id":id,"app":"spreed","user":"fixture_user",
-        "object_type":"reminder","object_id":"testroom","shouldNotify":true,"datetime":datetime,
+        "object_type":"reminder","object_id":"testroom","shouldNotify":true,"datetime":"2020-01-01T00:00:00+00:00",
         "subject":"Untrusted", "subjectRichParameters":{"message":{"id":"42","type":"highlight","name":"fixture"}}})
     };
     let mut data = room();
