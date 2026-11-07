@@ -169,6 +169,7 @@ struct MessageGeometry {
     anchor: Option<(u128, gpui::Pixels)>,
     header_inset: gpui::Pixels,
     boundary_inset: gpui::Pixels,
+    compact: bool,
 }
 
 /// Painting an older row is navigation, never an instruction to rewind reading.
@@ -364,7 +365,7 @@ impl Desktop {
                     call.stage,
                     super::CallStage::Ended | super::CallStage::Failed
                 ) && super::docked_call_chat(
-                    window.viewport_size().width >= px(1000.) && self.scale < 150,
+                    window.viewport_size().width >= px(900.) && self.scale < 150,
                     self.call_chat_open,
                     self.overlay,
                 )
@@ -1457,6 +1458,17 @@ impl Desktop {
         compact: bool,
         cx: &Context<Self>,
     ) -> Div {
+        if self.message_ui.geometry.borrow().compact != compact {
+            let anchor = self.message_ui.list.logical_scroll_top();
+            let count = self.message_ui.list.item_count();
+            self.message_ui.geometry.borrow_mut().compact = compact;
+            if count > 0 {
+                // Compact call rows have different heights. Invalidate cached
+                // geometry while retaining the current logical scroll anchor.
+                self.message_ui.list.splice(0..count, count);
+                self.message_ui.list.scroll_to(anchor);
+            }
+        }
         let previous = self.message_ui.geometry.borrow().header_inset;
         let boundary_inset = self.sp(32.);
         if previous != header_inset

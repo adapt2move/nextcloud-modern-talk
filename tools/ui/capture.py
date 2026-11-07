@@ -95,15 +95,6 @@ def capture(args, before_runtime_cleanup=None):
                         run(["xdotool", "windowfocus", "--sync", xid], env)
                         run(["xdotool", "windowmove", "--sync", xid, "0", "0"], env)
                         run(["xdotool", "windowsize", "--sync", xid, str(args.width), str(args.height)], env)
-                        if args.call_fullscreen:
-                            run(["xdotool", "windowactivate", "--sync", xid], env)
-                            # The call fixture's header action owns fullscreen. Use
-                            # the native control, then capture the resulting window.
-                            run(["xdotool", "mousemove", "--window", xid, str(args.width - 49), "86", "click", "1"], env)
-                            time.sleep(.5)
-                            wm_state = run(["xprop", "-id", xid, "_NET_WM_STATE"], env).stdout
-                            if "_NET_WM_STATE_FULLSCREEN" not in wm_state:
-                                raise RuntimeError("Call header did not enter window-manager fullscreen")
                         run(["xdotool", "mousemove", "--sync", "1590", "1190"], env)
                         if args.settle_seconds:
                             time.sleep(args.settle_seconds)
@@ -122,6 +113,17 @@ def capture(args, before_runtime_cleanup=None):
                             if time.monotonic() >= paint_deadline:
                                 raise RuntimeError(f"Native window stayed blank: {label}")
                             time.sleep(0.5)
+                        if args.call_fullscreen:
+                            run(["xdotool", "windowactivate", "--sync", xid], env)
+                            # The call fixture's header action owns fullscreen. Use
+                            # the native control, then capture the resulting window.
+                            run(["xdotool", "mousemove", "--window", xid, str(args.width - 49), "86", "click", "1"], env)
+                            time.sleep(.75)
+                            wm_state = run(["xprop", "-id", xid, "_NET_WM_STATE"], env).stdout
+                            if "_NET_WM_STATE_FULLSCREEN" not in wm_state:
+                                raise RuntimeError("Call header did not enter window-manager fullscreen")
+                            run(["xdotool", "mousemove", "--sync", "1590", "1190"], env)
+                            run(["import", "-window", xid, str(screenshot)], env)
                         status = Path(f"/proc/{app.pid}/status").read_text()
                         memory = {line.split(":", 1)[0]: line.split(":", 1)[1].strip() for line in status.splitlines() if line.startswith(("VmRSS:", "VmHWM:", "Threads:"))}
                         actual_size = [int(part) for part in run(["identify", "-format", "%w %h", str(screenshot)], env).stdout.split()]
