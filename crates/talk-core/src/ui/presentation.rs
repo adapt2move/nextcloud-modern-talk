@@ -590,6 +590,11 @@ pub enum UiIntent {
         account: AccountScope,
         offset: u32,
     },
+    /// Mark a listed room unread without changing the selected conversation.
+    MarkRoomUnread {
+        request: RequestId,
+        context: ConversationRef,
+    },
     /// Acknowledge or cancel only this native promise, including after navigation.
     FinishFileExport {
         request: RequestId,

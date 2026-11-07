@@ -758,6 +758,7 @@ pub(super) fn model() -> Accounts {
         attachment_owner: files::Owner::default(),
         message_poll_at: Instant::now(),
         message_poll_request: 0,
+        thread_refresh_due: None,
     }
 }
 fn completion(scope: AccountScope, current: bool, reply: ProtocolReply) -> ConnectionCompletion {

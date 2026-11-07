@@ -2,7 +2,7 @@
 use super::collection::CollectionState;
 use super::controls::{Availability, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SidebarDestination};
-use gpui::{Context, Div, FontWeight, div, prelude::*, px};
+use gpui::{Context, Div, FontWeight, MouseButton, div, prelude::*, px};
 use talk_core::preferences::navigation::{
     AccountNavigation, NavigationEdit, NavigationSection, RemoteNavigationSupport,
 };
@@ -709,13 +709,16 @@ impl Desktop {
         row: &ConversationView,
         namespace: &'static str,
         cx: &Context<Self>,
-    ) -> Div {
+    ) -> gpui::Stateful<Div> {
         let t = self.theme;
         let context = row.context;
         let selected = Some(context) == self.snapshot.selected
             && self.destination == SidebarDestination::Conversations;
         let id = scoped_id(namespace, context, 0, 0);
         let row_focus = self.control_focus(id.clone(), cx);
+        let can_mark_unread =
+            self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::MarkUnread);
+        let menu_open = self.room_menu == Some((context, namespace));
         let control = self
             .button(
                 id,
@@ -836,35 +839,74 @@ impl Desktop {
         // One small indent is enough to show group membership. The list shares
         // the top-level gutter; stacked container/row insets waste that space.
         div()
+            .id(scoped_id(namespace, context, 1, 0))
             .flex_none()
             .flex()
-            .items_center()
+            .flex_col()
             .when(namespace == "room", |d| d.pl(px(4.)))
-            .child(control.flex_1().min_w_0())
-            .when(
-                selected
-                    && self.message_feature_enabled(
-                        talk_core::ui::messaging::MessageFeature::MarkUnread,
-                    ),
-                |row| {
-                    row.child(
-                        self.icon_button(
-                            scoped_id("room-mark-unread", context, 0, 0),
-                            ("inbox", "Gespräch als ungelesen markieren"),
+            .when(menu_open, |d| {
+                d.on_mouse_down_out(cx.listener(move |this, _, _, cx| {
+                    if this.room_menu == Some((context, namespace)) {
+                        this.room_menu = None;
+                        cx.notify();
+                    }
+                }))
+            })
+            .child(
+                div()
+                    .relative()
+                    .group("sidebar-room")
+                    .flex()
+                    .items_center()
+                    .when(can_mark_unread, |d| {
+                        d.on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, _, window, cx| {
+                                this.handle(
+                                    LocalAction::ToggleRoomMenu(context, namespace),
+                                    window,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        )
+                    })
+                    .child(control.flex_1().min_w_0())
+                    .when(can_mark_unread, |row| {
+                        row.child(
+                            self.icon_button(
+                                scoped_id(namespace, context, 1, 1),
+                                ("more", "Weitere Optionen"),
+                                ButtonStyle::Quiet,
+                                Availability::available(),
+                                LocalAction::ToggleRoomMenu(context, namespace),
+                                cx,
+                            )
+                            .size(px(28.))
+                            .absolute()
+                            .right_0()
+                            .bg(if selected { t.selected } else { t.sidebar })
+                            .when(!menu_open && !self.keyboard_navigation, |d| d.opacity(0.))
+                            .group_hover("sidebar-room", |d| d.opacity(1.)),
+                        )
+                    }),
+            )
+            .when(menu_open && can_mark_unread, |row| {
+                row.child(
+                    self.context_menu_surface().ml_2().child(
+                        self.button_with_leading_icon(
+                            scoped_id(namespace, context, 1, 2),
+                            ("Als ungelesen markieren", "inbox"),
                             ButtonStyle::Quiet,
-                            Availability::available(),
-                            LocalAction::MessageIn(
-                                context,
-                                super::messaging::Action::Command(
-                                    talk_core::ui::messaging::MessageAction::MarkUnread,
-                                ),
-                            ),
+                            true,
+                            LocalAction::MarkRoomUnread(context),
                             cx,
                         )
-                        .size(px(28.)),
-                    )
-                },
-            )
+                        .justify_start()
+                        .w_full(),
+                    ),
+                )
+            })
     }
 
     pub(super) fn inbox(&self, cx: &Context<Self>) -> Div {

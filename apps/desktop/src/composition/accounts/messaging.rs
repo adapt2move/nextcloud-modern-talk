@@ -1193,6 +1193,12 @@ impl Accounts {
         {
             result = Err(Completion::Failed(UnavailableReason::PolicyStale));
         }
+        if work == Work::Unread
+            && result.is_ok()
+            && !matches!(&result, Ok(wire::MessagingResult::Changed))
+        {
+            result = Err(Completion::Uncertain);
+        }
         if matches!(work, Work::PinChange { .. })
             && !matches!(
                 &result,

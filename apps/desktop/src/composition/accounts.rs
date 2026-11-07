@@ -154,6 +154,7 @@ pub struct Accounts {
     attachment_owner: files::Owner,
     message_poll_at: Instant,
     message_poll_request: u64,
+    thread_refresh_due: Option<(AccountScope, Instant)>,
 }
 impl Accounts {
     pub fn start(media: std::sync::Arc<talk_adapters::media::MediaService>) -> Rc<RefCell<Self>> {
@@ -200,6 +201,7 @@ impl Accounts {
             attachment_owner: files::Owner::default(),
             message_poll_at: Instant::now(),
             message_poll_request: 0,
+            thread_refresh_due: None,
         }))
     }
     pub fn shutdown(&mut self) {
@@ -321,6 +323,7 @@ impl Accounts {
             return;
         }
         self.snapshot.active_account = scope;
+        self.thread_refresh_due = None;
         self.snapshot.threads = talk_core::ui::presentation::ThreadList {
             account: scope,
             ..Default::default()
@@ -548,6 +551,7 @@ impl Accounts {
         self.tick_content();
         self.tick_file_work();
         self.tick_background();
+        self.tick_thread_refresh(Instant::now());
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
@@ -984,6 +988,9 @@ impl Accounts {
         match intent {
             UiIntent::RefreshThreads(scope) => self.refresh_threads(scope)?,
             UiIntent::PageThreads { account, offset } => self.page_threads(account, offset)?,
+            UiIntent::MarkRoomUnread { request, context } => {
+                self.queue_room_unread(request, context)?;
+            }
             UiIntent::FinishFileExport { request, context } => {
                 self.finish_file_export(request, context)
             }
@@ -1464,7 +1471,9 @@ impl NativeDesktopPort for Port {
         }
         model.dirty = false;
         model.snapshot.revision = model.snapshot.revision.saturating_add(1);
-        Some(model.snapshot.clone())
+        let mut snapshot = model.snapshot.clone();
+        model.project_room_unread(&mut snapshot);
+        Some(snapshot)
     }
 }
 fn page<T, const N: usize>(items: impl IntoIterator<Item = T>) -> Page<T, N> {

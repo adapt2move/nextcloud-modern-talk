@@ -103,6 +103,73 @@ fn model() -> (Accounts, ConversationRef, NavigationRoomKey) {
 }
 
 #[test]
+fn queued_room_unread_overlays_new_observations_and_never_replays_ambiguity() {
+    let (mut model, context, room) = model();
+    model.snapshot.conversations = page(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .cloned()
+            .map(|mut row| {
+                if row.context == context {
+                    row.unread = 0;
+                }
+                row
+            }),
+    );
+    model.outbox.load(
+        context.account.account,
+        &page([stored(1, room, Intent::MarkUnread, OutboxPhase::Queued, 1)]),
+    );
+    model.project_history(context);
+    assert!(model.snapshot.message_panel.as_ref().unwrap().unread_queued);
+    let mut projected = model.snapshot.clone();
+    model.project_room_unread(&mut projected);
+    assert_eq!(
+        projected
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .unread,
+        1
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .unread,
+        0
+    );
+
+    model.outbox.entries[0].state = State::Uncertain;
+    model.outbox.entries[0].record.phase = OutboxPhase::Uncertain;
+    assert!(reconcile_command(context, &Intent::MarkUnread).is_none());
+    model.outbox.entries[0].state = State::Failed;
+    model.project_history(context);
+    assert!(!model.snapshot.message_panel.as_ref().unwrap().unread_queued);
+    let mut rolled_back = model.snapshot.clone();
+    model.project_room_unread(&mut rolled_back);
+    assert_eq!(
+        rolled_back
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .unread,
+        0
+    );
+}
+
+#[test]
 fn queued_bubbles_distinguish_staging_dispatch_and_uncertain_reconciliation() {
     let (mut model, context, room) = model();
     model.outbox.load(

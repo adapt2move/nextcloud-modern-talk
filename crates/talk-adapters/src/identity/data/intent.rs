@@ -72,6 +72,7 @@ pub enum OutboxIntent {
     CancelScheduled {
         message: u64,
     },
+    MarkUnread,
 }
 impl OutboxIntent {
     pub fn kind(&self) -> OutboxKind {
@@ -85,6 +86,7 @@ impl OutboxIntent {
             Self::Reminder { .. } => OutboxKind::Reminder,
             Self::Schedule { .. } => OutboxKind::Schedule,
             Self::CancelScheduled { .. } => OutboxKind::CancelScheduled,
+            Self::MarkUnread => OutboxKind::MarkUnread,
         }
     }
     fn valid(&self) -> bool {
@@ -96,6 +98,7 @@ impl OutboxIntent {
                 })
         };
         match self {
+            Self::MarkUnread => true,
             Self::Send { body, options: o } => !body.as_str().trim().is_empty() && options(o),
             Self::Schedule {
                 body,
@@ -152,6 +155,16 @@ impl OutboxRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mark_unread_intent_roundtrips_without_conversation_authority() {
+        let room = NavigationRoomKey::new(&format!("r1:{:032x}", 7)).unwrap();
+        let record =
+            OutboxRecord::from_intent(OperationId::from_local(4), room, &OutboxIntent::MarkUnread)
+                .unwrap();
+        assert_eq!(record.kind, OutboxKind::MarkUnread);
+        assert_eq!(record.intent(), Ok(OutboxIntent::MarkUnread));
+    }
 
     #[test]
     fn private_reply_survives_restart_and_cannot_be_combined_or_scheduled() {

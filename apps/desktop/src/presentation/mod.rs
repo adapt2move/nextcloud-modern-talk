@@ -104,6 +104,8 @@ pub enum LocalAction {
     ToggleNavigation,
     ToggleCallChat,
     Navigate(ConversationRef),
+    ToggleRoomMenu(ConversationRef, &'static str),
+    MarkRoomUnread(ConversationRef),
     OpenSubscribedThread(ConversationRef, u128),
     SendThread,
     ToggleThreadOptions,
@@ -206,6 +208,7 @@ pub struct InitialView {
     pub prejoin: bool,
     pub onboarding: bool,
     pub threads_fixture: bool,
+    pub room_menu_fixture: bool,
     pub scale: u16,
 }
 
@@ -291,6 +294,7 @@ pub struct Desktop {
     startup_account_dialog: bool,
     destination: SidebarDestination,
     collapsed_sections: [bool; 5],
+    room_menu: Option<(ConversationRef, &'static str)>,
     archive_request: u64,
     pub navigation_open: bool,
     sidebar_hidden: bool,
@@ -364,6 +368,7 @@ impl Desktop {
             prejoin,
             onboarding,
             threads_fixture,
+            room_menu_fixture,
             scale,
         } = initial;
         let snapshot = port
@@ -373,6 +378,14 @@ impl Desktop {
             valid_snapshot(&snapshot),
             "composition supplied inconsistent initial projection"
         );
+        let initial_room_menu = (development && room_menu_fixture)
+            .then(|| {
+                snapshot.conversations.as_slice().iter().find(|room| {
+                    Some(room.context) != snapshot.selected && room.archived == Some(false)
+                })
+            })
+            .flatten()
+            .map(|room| (room.context, "room"));
         let startup_account_dialog = initial_overlay.is_none()
             && snapshot.accounts.as_slice().is_empty()
             && !snapshot.saved_accounts.as_slice().is_empty();
@@ -551,6 +564,7 @@ impl Desktop {
                 SidebarDestination::Conversations
             },
             collapsed_sections: [false; 5],
+            room_menu: initial_room_menu,
             archive_request: 0,
             navigation_open: false,
             sidebar_hidden: false,
@@ -1372,6 +1386,15 @@ impl Desktop {
             }
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
+                if let Some((context, namespace)) = self.room_menu.take() {
+                    if let Some(focus) =
+                        self.control_focus(controls::scoped_id(namespace, context, 1, 1), cx)
+                    {
+                        focus.focus(window);
+                    }
+                    cx.notify();
+                    return;
+                }
                 if self.overlay == Some(Overlay::Thread) && !self.save_thread_draft(cx) {
                     return;
                 }
@@ -1419,6 +1442,7 @@ impl Desktop {
                 }
             }
             LocalAction::Navigate(context) => {
+                self.room_menu = None;
                 if self.save_thread_draft(cx)
                     && self.save_draft(cx)
                     && self.submit(UiIntent::OpenConversation(context))
@@ -1435,6 +1459,14 @@ impl Desktop {
                         self.root_focus.focus(window);
                     }
                 }
+            }
+            LocalAction::ToggleRoomMenu(context, namespace) => {
+                let target = (context, namespace);
+                self.room_menu = (self.room_menu != Some(target)).then_some(target);
+            }
+            LocalAction::MarkRoomUnread(context) => {
+                self.room_menu = None;
+                self.submit_sidebar_unread(context);
             }
             LocalAction::OpenSubscribedThread(context, root) => {
                 if self

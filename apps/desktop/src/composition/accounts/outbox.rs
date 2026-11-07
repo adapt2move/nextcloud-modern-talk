@@ -194,6 +194,7 @@ impl Outbox {
         panel: &mut view::MessagePanel,
     ) {
         panel.queued_actions = 0;
+        panel.unread_queued = false;
         panel.failed_drafts = Page::empty();
         for entry in self
             .entries
@@ -218,6 +219,9 @@ impl Outbox {
                 && !matches!(e.state, State::Failed | State::Removing)
         }) {
             panel.queued_actions = panel.queued_actions.saturating_add(1);
+            if matches!(entry.intent, Intent::MarkUnread) {
+                panel.unread_queued = true;
+            }
             if entry.state == State::ParkedUncertain {
                 continue;
             }
@@ -243,6 +247,47 @@ impl Outbox {
     }
 }
 impl Accounts {
+    pub(super) fn queue_room_unread(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+    ) -> Result<(), SubmitError> {
+        if self.snapshot.active_account != Some(context.account)
+            || !self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|row| row.context == context)
+        {
+            return Err(SubmitError::StaleScope);
+        }
+        self.queue_message_action(request, context, &view::MessageAction::MarkUnread)
+            .unwrap_or(Err(SubmitError::Unavailable(
+                UnavailableReason::PolicyStale,
+            )))
+    }
+
+    /// Overlay queued unread state over the newest room observation, not a
+    /// stale copy captured before another device changed the room.
+    pub(super) fn project_room_unread(&self, snapshot: &mut PresentationSnapshot) {
+        snapshot.conversations = page(snapshot.conversations.as_slice().iter().cloned().map(
+            |mut room| {
+                if let Some(key) = room.navigation_key.as_ref()
+                    && self.outbox.entries.iter().any(|entry| {
+                        entry.account == room.context.account.account
+                            && &entry.record.room == key
+                            && matches!(entry.intent, Intent::MarkUnread)
+                            && !matches!(entry.state, State::Failed | State::Removing)
+                    })
+                {
+                    room.unread = room.unread.max(1);
+                }
+                room
+            },
+        ));
+    }
+
     pub(super) fn outbox_available(&self, context: ConversationRef) -> bool {
         self.cache.persistable(context)
             || self.current(context.account).is_ok()
@@ -392,11 +437,44 @@ impl Accounts {
         })?;
         let converted = self.outbox_intent(context, action)?;
         Some((|| {
-            if self.snapshot.selected != Some(context) {
+            if self.snapshot.selected != Some(context)
+                && (!matches!(action, view::MessageAction::MarkUnread)
+                    || self.snapshot.active_account != Some(context.account)
+                    || !self
+                        .snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .any(|row| row.context == context))
+            {
                 return Err(SubmitError::StaleScope);
             }
             let intent = converted?;
             let room = stable;
+            // A repeated deliberate activation may replace an uncertain mark,
+            // but must not create overlapping read-marker writes. Reapplying
+            // after uncertainty is a new user intent, never an automatic retry.
+            let replaced_unread = if matches!(intent, Intent::MarkUnread) {
+                match self.outbox.entries.iter().position(|entry| {
+                    entry.account == context.account.account
+                        && entry.record.room == room
+                        && matches!(entry.intent, Intent::MarkUnread)
+                        && !matches!(entry.state, State::Failed | State::Removing)
+                }) {
+                    Some(index)
+                        if matches!(
+                            self.outbox.entries[index].state,
+                            State::Uncertain | State::ParkedUncertain
+                        ) =>
+                    {
+                        Some(index)
+                    }
+                    Some(_) => return Err(SubmitError::Busy),
+                    None => None,
+                }
+            } else {
+                None
+            };
             let durable = self.cache.persistable(context)
                 && match &intent {
                     Intent::Send { options, .. } => {
@@ -456,6 +534,9 @@ impl Accounts {
                 }
             }
             let created = history::now_unix();
+            if let Some(index) = replaced_unread {
+                self.outbox.entries[index].state = State::Removing;
+            }
             self.outbox.entries.push(Entry {
                 account: context.account.account,
                 record,
@@ -559,6 +640,7 @@ impl Accounts {
             A::CancelScheduled(message) => {
                 id(*message).map(|message| Intent::CancelScheduled { message })
             }
+            A::MarkUnread => Ok(Intent::MarkUnread),
             A::Forward {
                 message,
                 destination,
@@ -1038,6 +1120,13 @@ impl Accounts {
         };
         let result = reply.as_ref().ok();
         let is_reconcile = self.outbox.entries[index].record.phase == OutboxPhase::Uncertain;
+        if !is_reconcile
+            && matches!(self.outbox.entries[index].intent, Intent::MarkUnread)
+            && matches!(result, Some(wire::MessagingResult::Changed))
+            && let Some(context) = self.outbox.entries[index].context
+        {
+            self.remember_room_unread(context);
+        }
         match result {
             Some(wire::MessagingResult::Send(receipt)) if receipt.state == SendState::Rejected => {
                 self.fail_outbox(operation, UnavailableReason::PermissionDenied)
@@ -1356,6 +1445,7 @@ fn command(
             C::CancelScheduled(mid(*message)),
             W::CancelScheduled(u128::from(*message)),
         ),
+        Intent::MarkUnread => (C::MarkUnread, W::Unread),
         Intent::Forward {
             message,
             destination,
@@ -1386,6 +1476,9 @@ fn reconcile_command(
         sequence,
     };
     Some(match intent {
+        // Repeating DELETE can move the read marker past messages that arrived
+        // since the first attempt. An uncertain mutation needs user attention.
+        Intent::MarkUnread => return None,
         Intent::Send { .. } => (C::ReconcileSend, W::Send),
         Intent::Forward { .. } => (C::ReconcileSend, W::Send),
         Intent::Edit { message, .. }
@@ -1453,6 +1546,7 @@ fn reconciled(intent: &Intent, result: &wire::MessagingResult) -> bool {
                 })
         ),
         Intent::Schedule { .. } => false,
+        Intent::MarkUnread => false,
     }
 }
 fn overlay(

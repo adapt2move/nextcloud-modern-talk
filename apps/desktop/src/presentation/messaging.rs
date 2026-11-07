@@ -977,6 +977,14 @@ impl Desktop {
     }
     fn observe_visible_message(&mut self, context: ConversationRef) {
         if self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .is_some_and(|panel| panel.context == context && panel.unread_queued)
+        {
+            return;
+        }
+        if self
             .message_ui
             .unread_hold
             .is_some_and(|(room, _)| room == context)
@@ -1233,6 +1241,21 @@ impl Desktop {
         } else {
             None
         }
+    }
+
+    pub(super) fn submit_sidebar_unread(&mut self, context: ConversationRef) {
+        if Some(context) == self.snapshot.selected {
+            self.submit_message(MessageAction::MarkUnread);
+            return;
+        }
+        let Some(next) = self.message_ui.request.checked_add(1) else {
+            return;
+        };
+        self.message_ui.request = next;
+        self.submit(UiIntent::MarkRoomUnread {
+            request: RequestId(next),
+            context,
+        });
     }
     pub(super) fn show_reaction_authors(
         &mut self,
@@ -2834,6 +2857,7 @@ fn feature_allows_intent(
             | MessageFeature::Reminders
             | MessageFeature::Schedules
             | MessageFeature::Forward
+            | MessageFeature::MarkUnread
     );
     value.enabled() && content == ContentState::Ready
         || queue_available

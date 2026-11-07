@@ -396,6 +396,33 @@ impl Purpose {
     }
 }
 impl Accounts {
+    pub(super) fn remember_room_unread(&mut self, context: ConversationRef) {
+        if let Some(account) = self.background.account_mut(context.account) {
+            account.rooms = page(account.rooms.as_slice().iter().cloned().map(|mut row| {
+                if row.context == context {
+                    row.unread = row.unread.max(1);
+                }
+                row
+            }));
+        }
+        if self.snapshot.active_account == Some(context.account) {
+            self.snapshot.conversations = page(
+                self.snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .cloned()
+                    .map(|mut row| {
+                        if row.context == context {
+                            row.unread = row.unread.max(1);
+                        }
+                        row
+                    }),
+            );
+            self.load_rooms = Some(context.account);
+        }
+        self.touch();
+    }
     /// Entry point for account transport hints. It deliberately accepts no wire
     /// JSON, content, media state or authority. Repeated hints occupy the same slot.
     pub fn invalidate_account(&mut self, scope: AccountScope, change: protocol::AccountChange) {
@@ -620,6 +647,10 @@ impl Accounts {
                 .or(batch.first_transport_failure);
             // Invalidations share the HTTP slots and their minimum interval. A
             // reconnect cannot enqueue room polls, replay alerts or change authority.
+            let messages_changed = batch
+                .changes
+                .as_slice()
+                .contains(&protocol::AccountChange::Messages);
             for &change in batch.changes.as_slice() {
                 if change == protocol::AccountChange::Conversations
                     && let Some(account) = self.background.account_mut(scope)
@@ -631,6 +662,9 @@ impl Accounts {
                 }
                 self.background
                     .invalidate(scope, Observation::change(change), now);
+            }
+            if messages_changed {
+                self.hint_thread_refresh(scope, now);
             }
         }
     }

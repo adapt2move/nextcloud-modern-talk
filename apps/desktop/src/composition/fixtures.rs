@@ -51,6 +51,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-edit",
     "thread-error",
     "thread-list",
+    "sidebar-unread",
     "chat-content",
     "chat-content-progress",
     "chat-content-loading",
@@ -197,6 +198,9 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("sidebar-unread") {
+        return snapshot(Some("chat-ux"));
+    }
     if scenario == Some("thread-list") {
         let mut state = snapshot(Some("thread"));
         if let Some(context) = state.selected {
@@ -1408,6 +1412,23 @@ impl NativeDesktopPort for DevelopmentPort {
                 if self.snapshot.threads.account == Some(account) =>
             {
                 self.snapshot.threads.offset = offset;
+            }
+            UiIntent::MarkRoomUnread { context, .. }
+                if self.snapshot.active_account == Some(context.account) =>
+            {
+                self.snapshot.conversations = page(
+                    self.snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .cloned()
+                        .map(|mut room| {
+                            if room.context == context {
+                                room.unread = room.unread.max(1);
+                            }
+                            room
+                        }),
+                );
             }
             UiIntent::Message {
                 context,

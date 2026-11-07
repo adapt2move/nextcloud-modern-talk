@@ -3,6 +3,42 @@ use super::*;
 use talk_core::ui::presentation::ThreadView;
 
 impl Accounts {
+    pub(super) fn tick_thread_refresh(&mut self, now: Instant) {
+        let Some((scope, due)) = self.thread_refresh_due else {
+            return;
+        };
+        if self.snapshot.active_account != Some(scope)
+            || self.snapshot.threads.support != FeatureSupport::Supported
+        {
+            self.thread_refresh_due = None;
+            return;
+        }
+        if now < due {
+            return;
+        }
+        let offset = self.snapshot.threads.offset;
+        match self.load_threads(scope, offset) {
+            Ok(()) => self.thread_refresh_due = None,
+            Err(SubmitError::Busy) => {
+                self.thread_refresh_due = Some((scope, now + Duration::from_secs(2)));
+            }
+            Err(_) => {
+                self.thread_refresh_due = Some((scope, now + Duration::from_secs(30)));
+            }
+        }
+    }
+
+    pub(super) fn hint_thread_refresh(&mut self, scope: AccountScope, now: Instant) {
+        if self.snapshot.active_account == Some(scope)
+            && self.snapshot.threads.support == FeatureSupport::Supported
+        {
+            let soon = now + Duration::from_secs(2);
+            self.thread_refresh_due = Some(match self.thread_refresh_due {
+                Some((current, due)) if current == scope => (scope, due.min(soon)),
+                _ => (scope, soon),
+            });
+        }
+    }
     pub(super) fn refresh_threads(&mut self, scope: AccountScope) -> Result<(), SubmitError> {
         self.load_threads(scope, 0)
     }
@@ -96,6 +132,39 @@ impl Accounts {
             Err(error) => self.snapshot.threads.content = content_error(error),
             _ => self.snapshot.threads.content = ContentState::Failed,
         }
+        if self.snapshot.threads.support == FeatureSupport::Supported {
+            let next = Instant::now() + Duration::from_secs(30);
+            self.thread_refresh_due = Some(match self.thread_refresh_due {
+                Some((current, due)) if current == scope => (scope, due.min(next)),
+                _ => (scope, next),
+            });
+        }
         self.touch();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_hints_coalesce_without_delaying_the_first_refresh() {
+        let mut model = super::super::tests::model();
+        model.snapshot = crate::composition::fixtures::snapshot(Some("thread-list"));
+        let scope = model.snapshot.active_account.unwrap();
+        let now = Instant::now();
+        model.hint_thread_refresh(scope, now);
+        assert_eq!(
+            model.thread_refresh_due,
+            Some((scope, now + Duration::from_secs(2)))
+        );
+        model.hint_thread_refresh(scope, now + Duration::from_secs(1));
+        assert_eq!(
+            model.thread_refresh_due,
+            Some((scope, now + Duration::from_secs(2)))
+        );
+        model.snapshot.threads.support = FeatureSupport::Unsupported;
+        model.tick_thread_refresh(now + Duration::from_secs(3));
+        assert!(model.thread_refresh_due.is_none());
     }
 }

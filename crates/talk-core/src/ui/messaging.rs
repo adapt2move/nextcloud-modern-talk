@@ -253,6 +253,8 @@ pub struct MessagePanel {
     /// Local durable or session-memory admission, never a server permission grant.
     pub queue_available: bool,
     pub queued_actions: u32,
+    /// A pending room unread mutation keeps automatic read receipts suspended.
+    pub unread_queued: bool,
     /// Latest scoped outbox failure, identified independently from user request
     /// counters so a late rejection cannot complete another action.
     pub action_error: Option<(u64, MessageActionError)>,
@@ -310,6 +312,7 @@ impl MessagePanel {
             failed_drafts: Page::empty(),
             queue_available: false,
             queued_actions: 0,
+            unread_queued: false,
             action_error: None,
             pinned_messages: Page::empty(),
             pins_state: RemoteState::Idle,
