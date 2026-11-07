@@ -20,6 +20,25 @@ fn marking_the_first_message_unread_uses_talks_explicit_sentinel() {
     assert!(mutation);
 }
 
+#[tokio::test]
+async fn empty_unread_forward_page_is_not_a_redirect() {
+    let server = Server::start(vec![(304, String::new(), Duration::ZERO)]).await;
+    let (mut client, clock) = client(&server);
+    let response = client
+        .request(
+            &context(&clock),
+            Request::Chat {
+                room: RoomToken::parse("room1234").unwrap(),
+                command: chat::Command::UnreadAfter { after: Some(42) },
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(response, Reply::History { messages, last_given: None, .. } if messages.is_empty())
+    );
+}
+
 #[test]
 fn subscribed_threads_are_account_scoped_and_paged() {
     let (method, route, query, _, _, mutation) =

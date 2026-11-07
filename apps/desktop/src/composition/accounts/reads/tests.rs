@@ -41,6 +41,26 @@ fn unread_location_preserves_the_room_scope_and_start_sentinel() {
 }
 
 #[test]
+fn older_thread_read_uses_the_current_root_and_cursor() {
+    let room = crate::composition::fixtures::context(1);
+    let Ok(wire::MessagingCommand::History {
+        before: Some(before),
+        thread: Some(root),
+    }) = (Read::ThreadOlder {
+        root: 7,
+        before: 42,
+    })
+    .command(room)
+    else {
+        panic!("thread page")
+    };
+    assert_eq!(before.conversation, room.conversation);
+    assert_eq!(before.sequence, 42);
+    assert_eq!(root.conversation, room.conversation);
+    assert_eq!(root.sequence, 7);
+}
+
+#[test]
 fn only_busy_nonadmission_retries_the_exact_request_and_target_without_extending_its_deadline() {
     let now = Instant::now();
     let mut pending = Some(job(now));

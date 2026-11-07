@@ -18,15 +18,29 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Messages and background activity
 
-- Marking unread from a message requires a preceding message whose adjacency was
-  observed in the current runtime; the first loaded row and cached-only gaps do
-  not supply that evidence. Manual unread actions currently require a connection.
-- Existing threads can be opened in a docked pane at wide window sizes with a
-  separate draft. Thread subscription navigation, pane controls and all composer
-  interactions are incomplete. The Talk 24/25 API creates a thread with a new root
-  message; it does not expose an operation to convert an existing ordinary
-  message into a thread. See the upstream [thread controller](https://github.com/nextcloud/spreed/blob/stable35/lib/Controller/ThreadController.php)
+- Marking unread from a message requires a live-proven preceding message or an
+  exhausted live history page proving the first message; cached-only gaps do not
+  establish adjacency. This message action requires a connection. Room-level
+  mark unread can be queued offline, but an ambiguous server response is not
+  replayed automatically; the action can be requested again explicitly.
+  Locating an unloaded first unread message reads at most four history pages,
+  plus an exhaustion check, and reports an unavailable result if the boundary
+  cannot be established within that bound.
+- Threads use the Talk `threads` capability and current room permissions. The
+  account-wide list contains the subscriptions the server returns for rooms
+  already known to the account, in pages of 50. Talk 24/25 has no independent
+  thread read marker, so a thread's unread indicator is inferred from the room
+  marker and latest known reply. Each displayed reply page holds at most 50
+  messages. Replier avatars use available cached replies and the server's most
+  recent activity summary; unopened threads may initially show only one replier.
+  The API creates a thread with a new root message; it does not expose an
+  operation to convert an existing ordinary message into a thread. See the
+  upstream [thread controller](https://github.com/nextcloud/spreed/blob/stable35/lib/Controller/ThreadController.php)
   and [chat controller](https://github.com/nextcloud/spreed/blob/stable35/lib/Controller/ChatController.php).
+- Private replies require a supported server, an eligible local user author and
+  permission to expose the source and open a direct conversation. Reactions and
+  their author lists are capability and permission gated; author observations
+  are bounded and may need a fresh connection.
 - Markdown covers bounded CommonMark, strikethrough and task markers. Tables
   remain readable source; HTML and Markdown images do not execute or load.
   The composer supports direct editing of basic marks, headings, lists, task
@@ -76,8 +90,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Session history retains up to 32 rooms with 100 messages per room. Eligible
   durable accounts also restore up to eight ordinary-room histories, member
   counts, read-only scalar room settings and deliberately staged outgoing intents from private, unencrypted
-  storage. Restricted, unknown-policy and session-only content stays in memory.
-  Inactive rooms are not continuously mirrored in full. Unsubmitted drafts are
+  storage. Up to four recently opened 50-message thread windows per stored room
+  share the existing cache size and eligibility limits; older windows are dropped
+  first when the account cache is full. Restricted, unknown-policy and session-only
+  content stays in memory. Inactive rooms are not continuously mirrored in full. Unsubmitted drafts are
   session-local. Small reencoded previews persist for up to seven days, with
   at most 24 entries and 4 MiB per account; original attachments are not cached.
 - The outgoing queue is bounded to 64 intents and 512 KiB per account. It

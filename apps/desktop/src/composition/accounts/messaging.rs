@@ -7,6 +7,7 @@ use talk_core::ui::{conversation::RemoteState, messaging as view};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Work {
     Thread,
+    ThreadOlder(u128),
     ThreadActivity,
     ThreadRoot(u128),
     ThreadInfo(u128),
@@ -61,7 +62,7 @@ impl Work {
             Self::History => DiagnosticOperation::History,
             Self::Older => DiagnosticOperation::Older,
             Self::Context(_) | Self::UnreadContext(_) => DiagnosticOperation::Context,
-            Self::Thread => DiagnosticOperation::Thread,
+            Self::Thread | Self::ThreadOlder(_) => DiagnosticOperation::Thread,
             Self::Latest | Self::Prefetch | Self::Poll | Self::Metadata => {
                 DiagnosticOperation::Poll
             }
@@ -488,7 +489,9 @@ impl Accounts {
                     panel.state = RemoteState::Saving(request);
                 }
                 Work::History | Work::Older => panel.history = RemoteState::Loading(request),
-                Work::Thread => panel.thread_state = RemoteState::Loading(request),
+                Work::Thread | Work::ThreadOlder(_) => {
+                    panel.thread_state = RemoteState::Loading(request)
+                }
                 Work::ThreadRoot(_) => panel.thread_root_state = RemoteState::Loading(request),
                 Work::Context(target) | Work::UnreadContext(target) => {
                     panel.context_load = Some(view::ContextLoad {
@@ -640,6 +643,19 @@ impl Accounts {
             ),
             other => other,
         };
+        let optimistic_thread = match &action {
+            V::RenameThread { root, title } => Some(super::thread_change::Change::Title {
+                root: *root,
+                title: title.clone(),
+            }),
+            V::ThreadNotifications { root, level } => {
+                Some(super::thread_change::Change::Notifications {
+                    root: *root,
+                    level: *level,
+                })
+            }
+            _ => None,
+        };
         match &action {
             V::StageFiles(paths) => return self.stage_files(context, paths.clone()),
             V::SendFiles { caption, target } => {
@@ -696,6 +712,7 @@ impl Accounts {
             V::Pins => Work::Pins,
             V::ShareUpload { .. } => Work::Share,
             V::Thread(_) => Work::Thread,
+            V::ThreadOlder(root) => Work::ThreadOlder(*root),
             V::ThreadRoot(root) => Work::ThreadRoot(*root),
             V::ThreadInfo(root) => Work::ThreadInfo(*root),
             V::RenameThread { root, .. } | V::ThreadNotifications { root, .. } => {
@@ -797,6 +814,18 @@ impl Accounts {
             },
             V::Thread(root) => W::History {
                 before: None,
+                thread: Some(message_id(context, root)?),
+            },
+            V::ThreadOlder(root) => W::History {
+                before: Some(message_id(
+                    context,
+                    self.snapshot
+                        .message_panel
+                        .as_ref()
+                        .filter(|panel| panel.context == context && panel.thread_root == Some(root))
+                        .and_then(|panel| panel.thread_older)
+                        .ok_or(SubmitError::StaleScope)?,
+                )?),
                 thread: Some(message_id(context, root)?),
             },
             V::ThreadRoot(root) => W::Context(message_id(context, root)?),
@@ -941,6 +970,15 @@ impl Accounts {
             })
         });
         self.start_message(request, context, command, work)?;
+        if let Some(change) = optimistic_thread
+            && let Some(panel) = self
+                .snapshot
+                .message_panel
+                .as_mut()
+                .filter(|panel| panel.context == context)
+        {
+            super::thread_change::begin(panel, request, change);
+        }
         if let Work::ThreadInfo(root) = work
             && let Some(panel) = self
                 .snapshot
@@ -1090,6 +1128,14 @@ impl Accounts {
                             && panel.thread_state == RemoteState::Loading(request)
                     })
             }
+            Work::ThreadOlder(root) => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel.thread_root == Some(root)
+                            && panel.thread_state == RemoteState::Loading(request)
+                    })
+            }
             Work::Context(target) | Work::UnreadContext(target) => {
                 self.snapshot.selected == Some(context)
                     && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
@@ -1183,7 +1229,11 @@ impl Accounts {
         let mut result =
             if matches!(
                 work,
-                Work::Thread | Work::ThreadRoot(_) | Work::Context(_) | Work::UnreadContext(_)
+                Work::Thread
+                    | Work::ThreadOlder(_)
+                    | Work::ThreadRoot(_)
+                    | Work::Context(_)
+                    | Work::UnreadContext(_)
             ) && !matches!(&result, Ok(wire::MessagingResult::Messages { .. }) | Err(_))
             {
                 Err(Completion::Failed(UnavailableReason::PolicyStale))
@@ -1324,7 +1374,9 @@ impl Accounts {
                     wire::MessagingResult::Capabilities(capabilities) => {
                         project_capabilities(panel, &capabilities);
                     }
-                    wire::MessagingResult::Messages { messages, .. } => {
+                    wire::MessagingResult::Messages {
+                        messages, cursor, ..
+                    } => {
                         if let Work::UnreadContext(marker) = work {
                             if let Some(first) = messages
                                 .as_slice()
@@ -1358,6 +1410,12 @@ impl Accounts {
                                     .filter(|m| !m.metadata.pin_notice),
                             );
                         } else if work == Work::Thread {
+                            panel.thread_older = cursor
+                                .map(|cursor| u128::from(cursor.sequence))
+                                .filter(|cursor| {
+                                    panel.thread_root.is_some_and(|root| *cursor > root)
+                                });
+                            panel.thread_has_newer = false;
                             panel.thread_messages = page(
                                 messages
                                     .as_slice()
@@ -1366,6 +1424,21 @@ impl Accounts {
                                     .filter(|m| !m.metadata.pin_notice),
                             );
                             thread_changed = true;
+                        } else if let Work::ThreadOlder(root) = work {
+                            let rows = page(
+                                messages
+                                    .as_slice()
+                                    .iter()
+                                    .map(message_view)
+                                    .filter(|row| !row.metadata.pin_notice),
+                            );
+                            panel.thread_older = cursor
+                                .map(|cursor| u128::from(cursor.sequence))
+                                .filter(|cursor| *cursor > root);
+                            if !rows.as_slice().is_empty() {
+                                panel.thread_messages = rows;
+                                panel.thread_has_newer = true;
+                            }
                         } else if let Work::ThreadRoot(root) = work {
                             if let Some(message) = messages
                                 .as_slice()
@@ -1386,7 +1459,8 @@ impl Accounts {
                                 .map(message_view)
                                 .filter(|row| {
                                     !row.metadata.pin_notice
-                                        && (row.metadata.thread == Some(root)
+                                        && ((!panel.thread_has_newer
+                                            && row.metadata.thread == Some(root))
                                             || panel
                                                 .thread_messages
                                                 .as_slice()
@@ -1614,6 +1688,9 @@ impl Accounts {
             Completion::Failed(reason) => RemoteState::Failed(request, reason),
             Completion::Uncertain => RemoteState::Uncertain(request),
         };
+        if matches!(work, Work::ThreadChange(_)) {
+            super::thread_change::settle(panel, request, completion);
+        }
         if matches!(work, Work::ThreadInfo(_)) && panel.thread_details_request == Some(request) {
             panel.thread_details_request = None;
         }
@@ -1635,7 +1712,7 @@ impl Accounts {
                     .cloned(),
             );
         }
-        if work == Work::Thread {
+        if matches!(work, Work::Thread | Work::ThreadOlder(_)) {
             panel.thread_state = state;
             if completion == Completion::Failed(UnavailableReason::PermissionDenied) {
                 panel.thread_messages = Page::empty();
@@ -1677,6 +1754,7 @@ impl Accounts {
         }
         reconcile_related(panel, &self.snapshot.messages, &changed);
         let thread_cache = if completion == Completion::ServerAccepted
+            && !panel.thread_has_newer
             && (thread_changed || !changed.is_empty())
         {
             panel.thread_root.map(|root| {

@@ -470,6 +470,30 @@ async fn released_server_messaging_and_room_controls() {
     let second = canonical_accepted_id(sent, OperationId::from_local(102));
     assert_eq!(second.conversation, id);
     let marker_before = read_marker(&mut client, &runtime, id).await;
+    let MR::Messages {
+        messages: recent, ..
+    } = m(
+        &mut client,
+        &runtime,
+        id,
+        139,
+        "unread-latest-control",
+        M::History {
+            before: None,
+            thread: None,
+        },
+    )
+    .await
+    else {
+        panic!("history control")
+    };
+    assert!(
+        recent
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == first),
+        "history control omitted first fixture message"
+    );
     let MR::Messages { messages, .. } = m(
         &mut client,
         &runtime,
@@ -486,7 +510,20 @@ async fn released_server_messaging_and_room_controls() {
         messages
             .as_slice()
             .iter()
-            .any(|message| message.message.id == first)
+            .any(|message| message.message.id.sequence <= first.sequence),
+        "first unread page: count={}, min={:?}, max={:?}, fixture={}",
+        messages.as_slice().len(),
+        messages
+            .as_slice()
+            .iter()
+            .map(|row| row.message.id.sequence)
+            .min(),
+        messages
+            .as_slice()
+            .iter()
+            .map(|row| row.message.id.sequence)
+            .max(),
+        first.sequence,
     );
     let MR::Messages { messages, .. } = m(
         &mut client,
@@ -863,6 +900,33 @@ async fn released_server_messaging_and_room_controls() {
                 .as_ref()
                 .is_some_and(|parent| parent.id == thread_reply)
     }));
+    let MR::Messages { messages, .. } = m(
+        &mut client,
+        &runtime,
+        id,
+        138,
+        "thread-older-page",
+        M::History {
+            before: Some(nested),
+            thread: Some(thread),
+        },
+    )
+    .await
+    else {
+        panic!("older thread page")
+    };
+    assert!(
+        messages
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == thread_reply)
+    );
+    assert!(
+        !messages
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == nested)
+    );
     m(
         &mut client,
         &runtime,

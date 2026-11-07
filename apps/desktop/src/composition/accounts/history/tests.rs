@@ -1381,6 +1381,10 @@ fn admit_target(
             panel.thread_root = Some(7);
             panel.thread_state = RemoteState::Loading(RequestId(serial));
         }
+        Work::ThreadOlder(root) => {
+            panel.thread_root = Some(root);
+            panel.thread_state = RemoteState::Loading(RequestId(serial));
+        }
         Work::Context(target) | Work::UnreadContext(target) => {
             panel.context_load = Some(talk_core::ui::messaging::ContextLoad {
                 target,
@@ -1391,6 +1395,72 @@ fn admit_target(
         _ => panic!("targeted read required"),
     }
     operation
+}
+
+#[test]
+fn older_thread_pages_are_scoped_and_do_not_replace_the_cached_latest_window() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    let latest = message_view(&message(key, 90, "Latest reply"));
+    model
+        .history
+        .remember_thread(key, 7, page([latest.clone()]), None);
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_messages = page([latest]);
+    panel.thread_older = Some(90);
+    let operation = admit_target(&mut model, key, 2, Work::ThreadOlder(7));
+    model.apply_message(
+        RequestId(2),
+        key,
+        operation,
+        Work::ThreadOlder(7),
+        reply(
+            key,
+            operation,
+            messages(key, [message(key, 40, "Older reply")], Some(40)),
+        ),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.thread_messages.as_slice()[0].local_id, 40);
+    assert_eq!(panel.thread_older, Some(40));
+    assert!(panel.thread_has_newer);
+    assert_eq!(
+        model
+            .history
+            .get(key)
+            .unwrap()
+            .thread(7)
+            .unwrap()
+            .as_slice()[0]
+            .local_id,
+        90
+    );
+    let stale = admit_target(&mut model, key, 3, Work::ThreadOlder(7));
+    model.snapshot.message_panel.as_mut().unwrap().thread_root = Some(8);
+    model.apply_message(
+        RequestId(3),
+        key,
+        stale,
+        Work::ThreadOlder(7),
+        reply(
+            key,
+            stale,
+            messages(key, [message(key, 30, "Stale page")], Some(30)),
+        ),
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .thread_messages
+            .as_slice()[0]
+            .local_id,
+        40
+    );
 }
 
 #[test]

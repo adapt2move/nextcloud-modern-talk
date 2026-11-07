@@ -280,8 +280,13 @@ pub struct MessagePanel {
     pub thread_root_state: RemoteState,
     pub thread_root_message: Option<super::presentation::MessageView>,
     pub thread_messages: Page<super::presentation::MessageView, 50>,
+    /// Server cursor for the previous reply page; pages stay bounded.
+    pub thread_older: Option<u128>,
+    pub thread_has_newer: bool,
     pub thread_activity: Page<ThreadActivity, 50>,
     pub thread_details: Option<ThreadDetails>,
+    /// Prior observation for the single admitted optimistic thread change.
+    pub thread_change_prior: Option<(RequestId, ThreadDetails, Option<bool>)>,
     pub thread_details_request: Option<RequestId>,
     pub context: ConversationRef,
     /// Foreground mutation state; targeted reads settle their own request slots.
@@ -334,8 +339,11 @@ impl MessagePanel {
             thread_root_state: RemoteState::Idle,
             thread_root_message: None,
             thread_messages: Page::empty(),
+            thread_older: None,
+            thread_has_newer: false,
             thread_activity: Page::empty(),
             thread_details: None,
+            thread_change_prior: None,
             thread_details_request: None,
             context,
             state: RemoteState::Idle,
@@ -412,6 +420,7 @@ pub enum MessageAction {
     DismissUpload,
     Files,
     Thread(u128),
+    ThreadOlder(u128),
     ThreadRoot(u128),
     ThreadInfo(u128),
     RenameThread {

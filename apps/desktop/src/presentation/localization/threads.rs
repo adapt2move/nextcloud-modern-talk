@@ -1,5 +1,15 @@
 //! Thread navigation labels; user content is never translated.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
+    (
+        "Ältere Antworten laden",
+        "Load older replies",
+        "Cargar respuestas anteriores",
+    ),
+    (
+        "Neueste Antworten anzeigen",
+        "Show latest replies",
+        "Mostrar respuestas recientes",
+    ),
     ("Alle Antworten", "All replies", "Todas las respuestas"),
     (
         "Anhänge in Threads sind noch nicht verfügbar.",

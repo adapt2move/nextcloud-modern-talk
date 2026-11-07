@@ -14,6 +14,7 @@ mod preview;
 mod reads;
 mod removal;
 mod startup;
+mod thread_change;
 mod threads;
 mod update;
 use crate::diagnostics::{

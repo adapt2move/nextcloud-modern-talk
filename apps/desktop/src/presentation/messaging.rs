@@ -57,6 +57,7 @@ pub(crate) enum Action {
     CloseSearch,
     Locate(u128),
     JumpUnread,
+    OlderThread(u128),
     CyclePin { current: u128, forward: bool },
     Schedule,
     CancelTime,
@@ -1639,6 +1640,16 @@ impl Desktop {
                         self.submit_message(MessageAction::LocateUnreadAfter(marker))
                 {
                     self.message_ui.unread_jump = Some((context, request));
+                }
+            }
+            Action::OlderThread(root) => {
+                if self.thread_parent == Some((context, root)) {
+                    let request = self.submit_message(MessageAction::ThreadOlder(root));
+                    self.message_ui.thread_load = Some(ThreadLoad {
+                        context,
+                        root,
+                        request,
+                    });
                 }
             }
             Action::Schedule => {

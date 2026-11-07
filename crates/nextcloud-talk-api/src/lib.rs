@@ -489,7 +489,9 @@ impl Client {
             request,
             Request::History { .. }
                 | Request::Chat {
-                    command: chat::Command::History { .. } | chat::Command::Poll { .. },
+                    command: chat::Command::History { .. }
+                        | chat::Command::Poll { .. }
+                        | chat::Command::UnreadAfter { .. },
                     ..
                 }
         ) {

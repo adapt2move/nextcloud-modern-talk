@@ -7,6 +7,30 @@ use talk_core::protocol::conversation::ActionAvailability;
 use talk_core::protocol::messaging::*;
 use talk_core::protocol::{FeatureSupport, Role, RoomKind};
 
+fn visible_unread_event(event: &api::models::Message, marker: u64, now: u64) -> bool {
+    let hidden = matches!(
+        event.system.as_deref(),
+        Some(
+            "reaction_deleted"
+                | "message_edited"
+                | "message_deleted"
+                | "reaction"
+                | "reaction_revoked"
+        )
+    );
+    let Some(row) = event.update.as_deref().or((!hidden).then_some(event)) else {
+        return false;
+    };
+    row.id > marker
+        && !row
+            .expires
+            .is_some_and(|expires| expires > 0 && expires <= now)
+        && !matches!(
+            row.system.as_deref(),
+            Some("message_pinned" | "message_unpinned")
+        )
+}
+
 pub(super) struct UploadName {
     conversation: ConversationId,
     path: String,
@@ -1145,10 +1169,12 @@ impl NextcloudClient {
                 after: self.message_scope(*after, id)?,
                 thread: thread.map(|m| self.message_scope(m, id)).transpose()?,
             },
-            C::UnreadAfter(after) => WireCommand::UnreadAfter {
-                after: after
-                    .map(|message| self.message_scope(message, id))
-                    .transpose()?,
+            C::UnreadAfter(Some(after)) => WireCommand::UnreadAfter {
+                after: Some(self.message_scope(*after, id)?),
+            },
+            C::UnreadAfter(None) => WireCommand::History {
+                before: None,
+                thread: None,
             },
             C::Context(m) => WireCommand::Context(self.message_scope(*m, id)?),
             C::Edit { message, text } => {
@@ -1356,11 +1382,58 @@ impl NextcloudClient {
             }
             r => r?,
         };
-        if let C::UnreadAfter(after) = &command {
+        if matches!(command, C::UnreadAfter(None)) {
+            // Released Talk treats a future offset of zero as an empty poll.
+            // Find the start by walking backwards, retaining only the oldest
+            // visible page, and require an exhausted page before calling it first.
+            let mut before = None;
+            let mut oldest = None;
+            for index in 0..=4 {
+                let api::Reply::History {
+                    messages,
+                    last_given,
+                    ..
+                } = &response
+                else {
+                    return Err(self.error(ErrorKind::Malformed));
+                };
+                if messages.is_empty() && last_given.is_none() {
+                    response = oldest.unwrap_or(response);
+                    break;
+                }
+                let next = last_given
+                    .filter(|next| *next > 0 && before.is_none_or(|previous| *next < previous))
+                    .ok_or_else(|| self.error(ErrorKind::Malformed))?;
+                if index == 4 {
+                    return Err(self.error(ErrorKind::TooLarge));
+                }
+                if messages
+                    .iter()
+                    .any(|event| visible_unread_event(event, 0, now_unix()))
+                {
+                    oldest = Some(response);
+                }
+                before = Some(next);
+                response = self
+                    .transport
+                    .api_request(
+                        c,
+                        api::Request::Chat {
+                            room: api::models::RoomToken::parse(self.check_room(id)?)
+                                .map_err(|kind| self.error(transport::kind(kind)))?,
+                            command: WireCommand::History {
+                                before,
+                                thread: None,
+                            },
+                        },
+                    )
+                    .await?;
+            }
+        } else if let C::UnreadAfter(Some(after)) = &command {
             // Edits, reactions and pin notices can occupy a whole forward page
             // without producing a visible new row. Follow their server cursor,
             // with the same deadline and a strict limit on additional reads.
-            let marker = after.map_or(0, |message| message.sequence);
+            let marker = after.sequence;
             let mut cursor = marker;
             for _ in 0..3 {
                 let api::Reply::History {
@@ -1371,27 +1444,9 @@ impl NextcloudClient {
                 else {
                     break;
                 };
-                let visible = messages.iter().any(|event| {
-                    let hidden = matches!(
-                        event.system.as_deref(),
-                        Some(
-                            "reaction_deleted"
-                                | "message_edited"
-                                | "message_deleted"
-                                | "reaction"
-                                | "reaction_revoked"
-                        )
-                    );
-                    let Some(row) = event.update.as_deref().or((!hidden).then_some(event)) else {
-                        return false;
-                    };
-                    row.id > marker
-                        && !row.expires.is_some_and(|expires| expires <= now_unix())
-                        && !matches!(
-                            row.system.as_deref(),
-                            Some("message_pinned" | "message_unpinned")
-                        )
-                });
+                let visible = messages
+                    .iter()
+                    .any(|event| visible_unread_event(event, marker, now_unix()));
                 let Some(next) = last_given.filter(|next| *next > cursor) else {
                     break;
                 };

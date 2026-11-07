@@ -670,6 +670,18 @@ impl Desktop {
                 .update(cx, |i, _| i.set_value("cloud.example.test"));
         }
         desktop.refresh_message_ui(cx);
+        if development
+            && let Some((context, message, emoji)) =
+                desktop.snapshot.message_panel.as_ref().and_then(|panel| {
+                    panel
+                        .reaction_authors
+                        .as_slice()
+                        .first()
+                        .map(|authors| (panel.context, authors.message, authors.emoji.clone()))
+                })
+        {
+            desktop.show_reaction_authors(context, message, emoji, true);
+        }
         desktop
     }
     fn account_name(&self, account: &talk_core::ui::presentation::AccountView) -> String {

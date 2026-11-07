@@ -42,6 +42,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-reactions",
     "chat-reactions-pending",
     "chat-reactions-denied",
+    "reaction-authors",
     "loading-conversations",
     "chat-server-denied",
     "chat-server-unavailable",
@@ -51,8 +52,11 @@ pub const SCENARIOS: &[&str] = &[
     "chat-edit",
     "thread-error",
     "thread-list",
+    "thread-paged",
     "thread-compose",
     "sidebar-unread",
+    "unread-divider",
+    "unread-jump",
     "chat-content",
     "chat-content-progress",
     "chat-content-loading",
@@ -199,6 +203,55 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("thread-paged") {
+        let mut state = snapshot(Some("thread"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.thread_older = Some(40);
+            panel.thread_has_newer = true;
+        }
+        return state;
+    }
+    if matches!(scenario, Some("unread-divider" | "unread-jump")) {
+        let mut state = snapshot(Some("chat-grouped"));
+        let marker = if scenario == Some("unread-divider") {
+            3
+        } else {
+            1
+        };
+        state.conversations = page(state.conversations.as_slice().iter().cloned().map(
+            |mut room| {
+                if Some(room.context) == state.selected {
+                    room.unread = 3;
+                    room.last_read_message = Some(marker);
+                }
+                room
+            },
+        ));
+        if scenario == Some("unread-divider") {
+            state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+                if row.local_id == 4 {
+                    row.metadata.unread_after = Some(marker);
+                }
+                row
+            }));
+        }
+        return state;
+    }
+    if scenario == Some("reaction-authors") {
+        let mut state = snapshot(Some("chat-reactions"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.reaction_authors = page([talk_core::ui::messaging::ReactionAuthors {
+                message: 4,
+                emoji: text("👍"),
+                authors: page([
+                    text("Mara Fischer"),
+                    text("Jonas Weber"),
+                    text("Alex Sommer"),
+                ]),
+            }]);
+        }
+        return state;
+    }
     if scenario == Some("thread-compose") {
         let mut state = snapshot(Some("chat-edit"));
         state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
@@ -1274,12 +1327,17 @@ impl DevelopmentPort {
         Self {
             reaction_fixture: matches!(
                 scenario,
-                Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
+                Some(
+                    "chat-reactions"
+                        | "chat-reactions-pending"
+                        | "chat-reactions-denied"
+                        | "reaction-authors"
+                )
             )
             .then_some(scenario == Some("chat-reactions-pending")),
             reaction_diagnostics: 0,
             thread_fixture: match scenario {
-                Some("chat-edit" | "thread" | "thread-list") => Some(false),
+                Some("chat-edit" | "thread" | "thread-list" | "thread-paged") => Some(false),
                 Some("thread-error") => Some(true),
                 _ => None,
             },
@@ -1294,7 +1352,11 @@ impl DevelopmentPort {
                         | "chat-edit"
                         | "thread-error"
                         | "thread-list"
+                        | "thread-paged"
                         | "chat-send-pending"
+                        | "unread-divider"
+                        | "unread-jump"
+                        | "reaction-authors"
                 )
             ),
             chat_motion: scenario == Some("chat-motion"),
@@ -1876,6 +1938,8 @@ impl NativeDesktopPort for DevelopmentPort {
                     }
                     MessageAction::Thread(root) if self.thread_fixture.is_some() => {
                         panel.thread_root = Some(root);
+                        panel.thread_older = None;
+                        panel.thread_has_newer = false;
                         panel.thread_state = if self.thread_fixture == Some(true) {
                             talk_core::ui::conversation::RemoteState::Failed(
                                 request,
@@ -1895,6 +1959,25 @@ impl NativeDesktopPort for DevelopmentPort {
                         row.metadata.replyable = true;
                         row.metadata.thread = Some(root);
                         panel.thread_messages = page([row]);
+                    }
+                    MessageAction::ThreadOlder(root)
+                        if self.thread_fixture.is_some()
+                            && panel.thread_root == Some(root)
+                            && panel.thread_older.is_some() =>
+                    {
+                        let mut row = message(
+                            20,
+                            "Jonas Weber",
+                            "JW",
+                            "09:55",
+                            "Earlier fictional reply.",
+                            false,
+                        );
+                        row.metadata.thread = Some(root);
+                        panel.thread_messages = page([row]);
+                        panel.thread_older = None;
+                        panel.thread_has_newer = true;
+                        panel.thread_state = talk_core::ui::conversation::RemoteState::Idle;
                     }
                     MessageAction::ThreadInfo(root) if self.thread_fixture.is_some() => {
                         panel.thread_details = Some(talk_core::ui::messaging::ThreadDetails {
@@ -1966,6 +2049,22 @@ impl NativeDesktopPort for DevelopmentPort {
                             "UI_CHAT_UX locate room={} message={id}",
                             context.conversation.local
                         );
+                    }
+                    MessageAction::LocateUnreadAfter(marker) => {
+                        let id = self
+                            .snapshot
+                            .messages
+                            .as_slice()
+                            .iter()
+                            .filter(|row| row.local_id > marker && !row.metadata.pin_notice)
+                            .map(|row| row.local_id)
+                            .min()
+                            .ok_or(SubmitError::StaleScope)?;
+                        panel.context_load = Some(talk_core::ui::messaging::ContextLoad {
+                            target: marker,
+                            state: talk_core::ui::conversation::RemoteState::Idle,
+                        });
+                        panel.located = Some((request, id));
                     }
                     MessageAction::Files | MessageAction::Pins => {
                         println!("UI_CHAT_UX shared room={}", context.conversation.local);

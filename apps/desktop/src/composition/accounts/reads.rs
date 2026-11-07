@@ -13,6 +13,10 @@ use talk_core::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Read {
     Thread(u128),
+    ThreadOlder {
+        root: u128,
+        before: u128,
+    },
     Context(u128),
     UnreadAfter(u128),
     Older(u128),
@@ -35,6 +39,22 @@ impl Read {
         use view::MessageAction as A;
         Some(Ok(match action {
             A::Thread(root) => Self::Thread(*root),
+            A::ThreadOlder(root) => {
+                let before = match model
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .filter(|panel| panel.context == context && panel.thread_root == Some(*root))
+                    .and_then(|panel| panel.thread_older)
+                {
+                    Some(before) => before,
+                    None => return Some(Err(SubmitError::StaleScope)),
+                };
+                Self::ThreadOlder {
+                    root: *root,
+                    before,
+                }
+            }
             A::Context(target) => Self::Context(*target),
             A::LocateUnreadAfter(marker) => Self::UnreadAfter(*marker),
             A::Older => Self::Older(
@@ -75,6 +95,7 @@ impl Read {
     fn work(&self) -> Work {
         match self {
             Self::Thread(_) => Work::Thread,
+            Self::ThreadOlder { root, .. } => Work::ThreadOlder(*root),
             Self::Context(id) => Work::Context(*id),
             Self::UnreadAfter(marker) => Work::UnreadContext(*marker),
             Self::Older(_) => Work::Older,
@@ -105,6 +126,10 @@ impl Read {
         Ok(match self {
             Self::Thread(root) => wire::MessagingCommand::History {
                 before: None,
+                thread: Some(id(*root)?),
+            },
+            Self::ThreadOlder { root, before } => wire::MessagingCommand::History {
+                before: Some(id(*before)?),
                 thread: Some(id(*root)?),
             },
             Self::Context(target) => wire::MessagingCommand::Context(id(*target)?),
@@ -193,7 +218,10 @@ fn project(panel: &mut view::MessagePanel, job: &QueuedRead, state: RemoteState,
         Read::Thread(root) => {
             if initial {
                 if panel.thread_root != Some(*root) {
+                    super::thread_change::cancel(panel);
                     panel.thread_messages = Page::empty();
+                    panel.thread_older = None;
+                    panel.thread_has_newer = false;
                     panel.thread_root_message = None;
                     panel.thread_root_state = RemoteState::Idle;
                     panel.thread_details = None;
@@ -201,6 +229,11 @@ fn project(panel: &mut view::MessagePanel, job: &QueuedRead, state: RemoteState,
                 }
                 panel.thread_root = Some(*root);
             }
+            if panel.thread_root == Some(*root) {
+                panel.thread_state = state;
+            }
+        }
+        Read::ThreadOlder { root, .. } => {
             if panel.thread_root == Some(*root) {
                 panel.thread_state = state;
             }

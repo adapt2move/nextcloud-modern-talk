@@ -285,7 +285,7 @@
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}",
       "status": "partial",
       "api": "Request::Chat / chat::Command::History / Poll / UnreadAfter",
-      "scope": "Bounded history/context and finite future reads with safe read/privacy defaults. UnreadAfter uses a nonnegative lastKnownMessageId (zero means start), lookIntoFuture=1 and timeout=0. No destructive chat long-poll owner. Source: spreed stable34 and stable35 lib/Controller/ChatController.php receiveMessages."
+      "scope": "Bounded history/context and finite future reads with safe read/privacy defaults. UnreadAfter uses a nonnegative lastKnownMessageId, lookIntoFuture=1 and timeout=0. The adapter handles the first-unread sentinel with a bounded backward history scan because released Talk returns an empty future poll for zero. No destructive chat long-poll owner. Source: spreed stable34 and stable35 lib/Controller/ChatController.php receiveMessages."
     },
     {
       "operation_id": "chat-clear-history",

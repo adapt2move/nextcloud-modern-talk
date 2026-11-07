@@ -680,6 +680,19 @@ impl Desktop {
                     .child(self.hint(&self.count(super::localization::Count::Replies, count)))
                     .child(div().h(px(1.)).flex_1().bg(self.theme.border)),
             );
+            if panel.thread_older.is_some() {
+                body = body.child(self.button(
+                    "thread-older-replies",
+                    "Ältere Antworten laden",
+                    ButtonStyle::Quiet,
+                    Availability::when(
+                        state == ContentState::Ready,
+                        "Die Verbindung ist derzeit nicht bereit.",
+                    ),
+                    LocalAction::MessageIn(context, super::messaging::Action::OlderThread(root)),
+                    cx,
+                ));
+            }
             let mut previous = None;
             for message in panel
                 .thread_messages
@@ -691,6 +704,19 @@ impl Desktop {
                     .is_some_and(|previous| self.thread_messages_grouped(previous, message));
                 body = body.child(self.thread_message(message, continuation, cx));
                 previous = Some(message);
+            }
+            if panel.thread_has_newer {
+                body = body.child(self.button(
+                    "thread-latest-replies",
+                    "Neueste Antworten anzeigen",
+                    ButtonStyle::Quiet,
+                    Availability::when(
+                        state == ContentState::Ready,
+                        "Die Verbindung ist derzeit nicht bereit.",
+                    ),
+                    LocalAction::Thread(context, root),
+                    cx,
+                ));
             }
         }
         body
@@ -724,12 +750,21 @@ impl Desktop {
             .p_3()
             .border_b_1()
             .border_color(self.theme.border);
-        let following = thread_following(
-            &self.snapshot.threads,
-            context,
-            root,
-            details.notification_level,
-        );
+        let following = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| panel.context == context)
+            .and_then(|panel| panel.thread_change_prior.as_ref())
+            .and_then(|(_, _, following)| *following)
+            .or_else(|| {
+                thread_following(
+                    &self.snapshot.threads,
+                    context,
+                    root,
+                    details.notification_level,
+                )
+            });
         if following != Some(true) {
             body = body.child(
                 self.button(
