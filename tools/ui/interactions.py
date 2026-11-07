@@ -203,6 +203,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         time.sleep(1)
         expect('sidebar action opens the selected room notification controls', ['Alle Nachrichten', 'Nur Erwähnungen', 'Anrufbenachrichtigungen'])
     elif scenario == 'search-filter':
+        click('Alle', ymin=190)
         expect('sidebar filters start with the loaded rooms', ['Produktteam', 'Teamküche', 'Erwähnungen'])
         click('Erwähnungen')
         expect('mention filter keeps known mentions and explains unknown state', ['Produktteam', 'Erwähnungen sind noch nicht bekannt'], ['Teamküche'])

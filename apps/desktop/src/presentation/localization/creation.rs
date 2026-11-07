@@ -25,8 +25,8 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "The server settings do not allow this visibility.",
         "La configuración del servidor no permite esta visibilidad.",
     ),
-    ("Hinzugefügt", "Added", "Añadido"),
     ("Hinzufügen", "Add", "Añadir"),
+    ("Hinzugefügt", "Added", "Añadido"),
     (
         "Nur eingeladene Personen können dieses Gespräch finden.",
         "Only invited people can find this conversation.",
