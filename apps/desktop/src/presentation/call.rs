@@ -416,10 +416,16 @@ impl Desktop {
                         &[("name", screen.name.as_str())],
                     ))
                     .when_some(screen.dimensions, |stage, (width, height)| {
-                        stage.child(self.hint(&format!("{width} × {height}")))
+                        stage.child(
+                            self.hint(&format!("{width} × {height}"))
+                                .text_color(t.stage_muted),
+                        )
                     })
                     .when(!screen.flowing, |stage| {
-                        stage.child(self.hint(self.l("Warte auf Bildschirmdaten …")))
+                        stage.child(
+                            self.hint(self.l("Warte auf Bildschirmdaten …"))
+                                .text_color(t.stage_muted),
+                        )
                     }),
             );
         }
