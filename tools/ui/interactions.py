@@ -406,9 +406,16 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'prejoin':
         time.sleep(1)  # Allow the first frame to mount and focus the modal.
         key('Escape')
+        time.sleep(.8)  # Let the native compositor present the returned room.
         expect('conference prejoin cancellation returns to room', ['Nachricht an Designbesprechung'])
         click('Beitreten', inspected_point=(1280,800,1181,92))
         expect('explicit conference entry shows prejoin', ['Bereit', 'Jetzt', 'teil'])
-        click('teilnehmen',inspected_point=(1280,800,1080,500))
+        # OCR can see the same word in the explanatory sentence but miss the
+        # blue button. The next state verifies this inspected native hit point.
+        path, _, _ = observe()
+        size = tuple(map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split()))
+        if size != (1280, 800):
+            raise AssertionError('Prejoin interaction requires the inspected 1280x800 layout')
+        run(['xdotool', 'mousemove', '--window', xid, '1080', '500', 'click', '1'], env)
         expect('join reports connecting without synthetic media success', ['Verbindung wird aufgebaut'], ['Anruf aktiv'])
     return checks
