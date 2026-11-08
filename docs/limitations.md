@@ -34,8 +34,15 @@ of complete parity with the official clients.
   classified rooms never submit recording consent or allow recording. Changed
   consent closes the old media owner and requires explicit rejoin.
 - Internal signaling and HPB are implemented; the HPB lab profile uses Talk
-  25.0.6, signaling 2.1.1 and Janus 1.3.0. UDP TURN relay is supported; TURN over
-  TCP/TLS and live TURN credential rotation in established peers are unavailable.
+  25.0.6, signaling 2.1.1 and Janus 1.3.0. TURN relay works over UDP and, through
+  a loopback bridge, over TCP and TLS (`turns:`, typically port 443); the relay's
+  certificate is verified by the operating system's trust store, so a company CA
+  installed in the system is honoured, and an unverified relay carries nothing.
+  TLS TURN was checked against a real coturn server with relayed audio and video
+  decoding on both sides, not against a Talk deployment's own TURN. STUN over TLS
+  or TCP and live TURN credential rotation in established peers are unavailable.
+  The bridge is a separate TCP connection per local interface the engine
+  allocates on, which a TLS-only TURN server may count against per-user quotas.
   Relay-required calls never fall back to host candidates.
 - Recovery is bounded and revalidates policy. HPB resume retains microphone/camera
   intent, but full network handover and Janus ICE recovery remain unqualified.

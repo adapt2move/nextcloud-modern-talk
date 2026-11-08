@@ -1,8 +1,9 @@
 //! Capabilities of the pinned async engine, not merely URI syntax. In released
 //! webrtc 0.21.1, peer_connection/transport/turn_relayer.rs rejects secure/non-UDP TURN and
 //! peer_connection/transport/stun_gatherer.rs rejects secure STUN. Do not pass those alternatives
-//! through and let its warnings silently imply supported traversal.
-use super::{Error, IceServer};
+//! through and let its warnings silently imply supported traversal. TURN over TCP/TLS is
+//! not passed through but carried by a loopback bridge ([`super::turn_proxy`]).
+use super::{Error, IceServer, turn_proxy::Target};
 use rtc::ice::url::{SchemeType, Url};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -15,13 +16,16 @@ pub enum IcePolicy {
 pub enum UnsupportedTransport {
     StunTcp,
     StunTls,
-    TurnTcp,
-    TurnTls,
 }
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct IceSupport {
     pub stun_udp: bool,
     pub turn_udp: bool,
+    /// TURN over TCP, reached through a loopback bridge.
+    pub turn_tcp: bool,
+    /// TURN over TLS, reached through a loopback bridge and verified by the
+    /// system trust store.
+    pub turn_tls: bool,
     /// Distinct advertised alternatives that this engine cannot use. No URLs,
     /// usernames or credentials enter this report.
     pub unsupported: Vec<UnsupportedTransport>,
@@ -52,16 +56,24 @@ pub struct IceEvidence {
     pub selected: Option<SelectedPair>,
 }
 
+/// A `turn:…?transport=tcp` or `turns:` URL the engine cannot dial itself.
+pub(super) struct Relay {
+    pub server: usize,
+    pub url: usize,
+    pub target: Target,
+}
+
 pub(super) fn plan(
     servers: Vec<IceServer>,
     policy: IcePolicy,
-) -> Result<(Vec<IceServer>, IceSupport), Error> {
+) -> Result<(Vec<IceServer>, IceSupport, Vec<Relay>), Error> {
     if servers.len() > 8 {
         return Err(Error::Malformed);
     }
     let configured = !servers.is_empty();
-    let mut usable = Vec::new();
+    let mut usable: Vec<IceServer> = Vec::new();
     let mut support = IceSupport::default();
+    let mut relays = Vec::new();
     for mut server in servers {
         if server.urls.is_empty()
             || server.urls.len() > 4
@@ -71,6 +83,7 @@ pub(super) fn plan(
             return Err(Error::Malformed);
         }
         let mut urls = Vec::new();
+        let mut bridged = Vec::new();
         for raw in server.urls {
             if raw.len() > 2048 || raw.bytes().any(|b| b.is_ascii_control() || b == b' ') {
                 return Err(Error::Malformed);
@@ -97,9 +110,30 @@ pub(super) fn plan(
                     support.stun_udp = true;
                     None
                 }
-                SchemeType::Turns => Some(UnsupportedTransport::TurnTls),
-                SchemeType::Turn if url.proto.to_string() != "udp" => {
-                    Some(UnsupportedTransport::TurnTcp)
+                SchemeType::Turns | SchemeType::Turn
+                    if matches!(url.scheme, SchemeType::Turns)
+                        || url.proto.to_string() != "udp" =>
+                {
+                    if server.username.is_empty() || server.password.is_empty() {
+                        return Err(Error::Malformed);
+                    }
+                    let tls = matches!(url.scheme, SchemeType::Turns);
+                    if tls {
+                        support.turn_tls = true;
+                    } else {
+                        support.turn_tcp = true;
+                    }
+                    // The bridge's address replaces this URL once it exists.
+                    bridged.push((
+                        urls.len(),
+                        Target {
+                            host: url.host.clone(),
+                            port: url.port,
+                            tls,
+                        },
+                    ));
+                    urls.push(parse.to_owned());
+                    continue;
                 }
                 SchemeType::Turn => {
                     if server.username.is_empty() || server.password.is_empty() {
@@ -119,14 +153,21 @@ pub(super) fn plan(
             }
         }
         if !urls.is_empty() {
+            let index = usable.len();
+            relays.extend(bridged.into_iter().map(|(url, target)| Relay {
+                server: index,
+                url,
+                target,
+            }));
             server.urls = urls;
             usable.push(server);
         }
     }
-    if (configured && usable.is_empty()) || (policy == IcePolicy::Relay && !support.turn_udp) {
+    let relayed = support.turn_udp || support.turn_tcp || support.turn_tls;
+    if (configured && usable.is_empty()) || (policy == IcePolicy::Relay && !relayed) {
         return Err(Error::Unsupported);
     }
-    Ok((usable, support))
+    Ok((usable, support, relays))
 }
 
 #[cfg(test)]
@@ -140,27 +181,62 @@ mod tests {
         }
     }
     #[test]
-    fn mixed_settings_keep_udp_and_report_each_unsupported_alternative() {
-        let (servers, report) = plan(
+    fn tcp_and_tls_turn_are_bridged_and_udp_stays_direct() {
+        let (servers, report, relays) = plan(
             vec![server(&[
                 "turn:127.0.0.1:3478?transport=udp",
-                "turn:127.0.0.1:3478?transport=tcp",
-                "turns:127.0.0.1:5349?transport=tcp",
+                "turn:turn.example:3478?transport=tcp",
+                "turns:turn.example:5349?transport=tcp",
+                "turns:turn.example",
             ])],
             IcePolicy::Relay,
         )
         .unwrap();
-        assert_eq!(servers[0].urls, ["turn:127.0.0.1:3478?transport=udp"]);
-        assert!(report.turn_udp);
+        assert_eq!(servers[0].urls.len(), 4);
+        assert!(report.turn_udp && report.turn_tcp && report.turn_tls);
+        assert!(report.unsupported.is_empty());
+        let found: Vec<_> = relays
+            .iter()
+            .map(|r| {
+                (
+                    r.server,
+                    r.url,
+                    r.target.host.as_str(),
+                    r.target.port,
+                    r.target.tls,
+                )
+            })
+            .collect();
         assert_eq!(
-            report.unsupported,
-            [UnsupportedTransport::TurnTcp, UnsupportedTransport::TurnTls]
+            found,
+            [
+                (0, 1, "turn.example", 3478, false),
+                (0, 2, "turn.example", 5349, true),
+                (0, 3, "turn.example", 5349, true),
+            ]
         );
+    }
+    #[test]
+    fn a_tls_only_deployment_is_usable_and_never_falls_back_to_host_candidates() {
+        let (servers, report, relays) = plan(
+            vec![server(&["turns:turn.example:443?transport=tcp"])],
+            IcePolicy::Relay,
+        )
+        .unwrap();
+        assert_eq!(servers.len(), 1);
+        assert!(report.turn_tls && !report.turn_udp);
+        assert_eq!(relays.len(), 1);
+        let mut anonymous = server(&["turns:turn.example:443"]);
+        anonymous.username.clear();
+        assert!(matches!(
+            plan(vec![anonymous], IcePolicy::All),
+            Err(Error::Malformed)
+        ));
     }
     #[test]
     fn unsupported_only_and_relay_without_turn_do_not_fall_back_to_host() {
         assert!(matches!(
-            plan(vec![server(&["turns:127.0.0.1:5349"])], IcePolicy::All),
+            plan(vec![server(&["stuns:127.0.0.1:5349"])], IcePolicy::All),
             Err(Error::Unsupported)
         ));
         assert!(matches!(
@@ -188,7 +264,7 @@ mod tests {
             ),
             Err(Error::Malformed)
         ));
-        let (_, report) = plan(
+        let (_, report, _) = plan(
             vec![server(&[
                 "stun:127.0.0.1?transport=tcp",
                 "stun:127.0.0.1?transport=udp",

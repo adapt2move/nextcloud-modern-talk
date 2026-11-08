@@ -274,3 +274,18 @@ three 60-second native frame workloads. Preparation is outside timed intervals.
 The runner preserves failed observations and private fixtures remain in `/run`
 until cleanup. Keep native diagnostics separate from CPU-heavy build jobs.
 See [performance](quality/performance.md) for boundaries and qualification limits.
+
+## TURN over TLS check
+
+The `media_flows_through_a_real_turn_server_over_tls` test is ignored by default because it needs a TURN server the test cannot start. The server must present the throwaway certificate in `crates/talk-adapters/src/media/fixtures/turn-test-cert.der` (CN `nmt-turn-test`, SAN `localhost` and `127.0.0.1`; its key sits beside it and is test-only). With Docker, convert both files to PEM with `openssl`, mount them and start coturn on the TLS port only:
+
+```sh
+docker run -d --name nmt-coturn -p 5349:5349 -v "$PEM_DIR:/certs:ro" coturn/coturn:latest \
+  -n --lt-cred-mech --user nmt:secret --realm nmt.test --cert /certs/cert.pem \
+  --pkey /certs/key.pem --no-udp --no-tcp --tls-listening-port 5349 \
+  --min-port 49160 --max-port 49200 --allow-loopback-peers
+NMT_TURNS_URL='turns:127.0.0.1:5349?transport=tcp' NMT_TURN_USER=nmt NMT_TURN_PASS=secret \
+  python3 tools/cargo.py test --locked -p talk-adapters --lib -- media_flows_through_a_real_turn_server --ignored
+```
+
+Local ICE across many interfaces is not always reliable on a workstation; the test retries with fresh peers.

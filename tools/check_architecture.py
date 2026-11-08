@@ -24,7 +24,7 @@ GRAPH = {
     "nextcloud-talk-api": ("crates/nextcloud-talk-api", {"reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "cookie", "futures-lite", "futures-util", "tokio-tungstenite", "rustls", "rustls-native-certs", "percent-encoding", "roxmltree", "time"}),
     # Image decoding belongs to the adapter when preparing a bounded upload;
     # native presentation still receives neither selected paths nor image bytes.
-    "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "rusqlite", "dirs", "jiff", "semver", "self_update", "sha2", "tempfile", "flate2", "tar", "zip", "webrtc", "rtc", "async-trait", "gstreamer", "gstreamer-app", "gstreamer-video", "futures-util", "image", "vodozemac", "ring"}),
+    "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "rusqlite", "dirs", "jiff", "semver", "self_update", "sha2", "tempfile", "flate2", "tar", "zip", "webrtc", "rtc", "async-trait", "gstreamer", "gstreamer-app", "gstreamer-video", "futures-util", "image", "vodozemac", "ring", "rustls", "tokio-rustls", "rustls-platform-verifier"}),
     "talk-bootstrap": ("apps/bootstrap", {"talk-core", "talk-adapters"}),
     "talk-desktop": ("apps/desktop", {"talk-core", "talk-adapters", "gpui", "unicode-segmentation", "atomicwrites", "cpal", "gstreamer", "gstreamer-app", "gstreamer-video", "image"}),
 }
@@ -371,6 +371,8 @@ def check() -> None:
         'self_update': {'default-features': False, 'features': ['reqwest', 'rustls', 'checksums', 'archive-tar', 'compression-tar-gz', 'archive-zip', 'compression-zip-deflate']},
         'sha2': {'default-features': False},
         'vodozemac': {'default-features': False},
+        'tokio-rustls': {'default-features': False, 'features': ['tls12']},
+        'rustls-platform-verifier': {'default-features': False},
         'ring': {'default-features': False, 'features': ['alloc']},
         'tempfile': {'default-features': False, 'features': ['getrandom']},
         'flate2': {'default-features': False, 'features': ['rust_backend']},

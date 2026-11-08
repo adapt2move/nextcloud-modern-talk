@@ -6,6 +6,8 @@
 mod codecs;
 #[path = "ice.rs"]
 mod ice;
+#[path = "turn_proxy.rs"]
+mod turn_proxy;
 use codecs::Codec;
 use futures_util::FutureExt;
 pub use ice::{CandidateKind, IceEvidence, IcePolicy, IceSupport, SelectedPair};
@@ -67,6 +69,9 @@ pub struct RtcConfiguration {
     pub role: Role,
     /// Call end-to-end encryption; absent for calls that are not protected this way.
     pub(crate) e2ee: Option<crate::media::e2ee::Keys>,
+    /// Test-only trust anchors for a TURN server whose certificate the system does not know.
+    #[cfg(test)]
+    pub(crate) turn_tls: Option<std::sync::Arc<rustls::ClientConfig>>,
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Role {
@@ -468,6 +473,7 @@ pub struct NativePeer {
     local_candidates: u16,
     role: Role,
     e2ee: Option<crate::media::e2ee::Keys>,
+    _bridges: Vec<turn_proxy::Bridge>,
     ice_support: IceSupport,
     ice_evidence: IceEvidence,
 }
@@ -534,7 +540,21 @@ impl NativePeer {
             return Err(Error::Malformed);
         }
         let role = config.role;
-        let (ice_servers, ice_support) = ice::plan(config.ice_servers, config.ice_policy)?;
+        let (mut ice_servers, ice_support, relays) =
+            ice::plan(config.ice_servers, config.ice_policy)?;
+        // TURN over TCP/TLS is carried by loopback bridges the peer owns.
+        let mut bridges = Vec::with_capacity(relays.len());
+        if !relays.is_empty() {
+            let tls = turn_proxy::system_tls().ok();
+            #[cfg(test)]
+            let tls = config.turn_tls.clone().or(tls);
+            for relay in relays {
+                let bridge = turn_proxy::Bridge::start(relay.target, tls.clone()).await?;
+                ice_servers[relay.server].urls[relay.url] =
+                    format!("turn:{}?transport=udp", bridge.address());
+                bridges.push(bridge);
+            }
+        }
         let configuration = RTCConfigurationBuilder::default()
             .with_bundle_policy(RTCBundlePolicy::MaxBundle)
             .with_ice_transport_policy(match config.ice_policy {
@@ -652,6 +672,7 @@ impl NativePeer {
             local_candidates: 0,
             role,
             e2ee: config.e2ee,
+            _bridges: bridges,
             ice_support,
             ice_evidence: IceEvidence::default(),
         };
@@ -1423,6 +1444,51 @@ mod tests {
             b,
             (0, 0),
             "no key, no media (not even to a peer without E2EE)"
+        );
+    }
+
+    /// Media relayed by a real TURN server reached over TLS (`NMT_TURNS_URL`, with
+    /// `NMT_TURN_USER`/`NMT_TURN_PASS`), the server presenting the certificate in
+    /// `fixtures/turn-test-cert.der`. Needs a server the test cannot start itself.
+    #[tokio::test]
+    #[ignore = "needs a TURN server reachable over TLS; see docs/development.md"]
+    async fn media_flows_through_a_real_turn_server_over_tls() {
+        let (Ok(url), Ok(user), Ok(pass)) = (
+            std::env::var("NMT_TURNS_URL"),
+            std::env::var("NMT_TURN_USER"),
+            std::env::var("NMT_TURN_PASS"),
+        ) else {
+            panic!("NMT_TURNS_URL, NMT_TURN_USER and NMT_TURN_PASS must be set");
+        };
+        let mut roots = rustls::RootCertStore::empty();
+        roots
+            .add(rustls::pki_types::CertificateDer::from(
+                include_bytes!("fixtures/turn-test-cert.der").to_vec(),
+            ))
+            .unwrap();
+        let tls = std::sync::Arc::new(
+            rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth(),
+        );
+        let config = || RtcConfiguration {
+            ice_servers: vec![IceServer {
+                urls: vec![url.clone()],
+                username: user.clone(),
+                password: pass.clone(),
+            }],
+            ice_policy: IcePolicy::Relay,
+            turn_tls: Some(tls.clone()),
+            ..Default::default()
+        };
+        let [a, b] = converse(|| (config(), config()), Duration::from_secs(5)).await;
+        assert!(
+            a.0 > 100 && a.1 > 10 && b.0 > 100 && b.1 > 10,
+            "relayed media decodes: {a:?} {b:?}"
         );
     }
 

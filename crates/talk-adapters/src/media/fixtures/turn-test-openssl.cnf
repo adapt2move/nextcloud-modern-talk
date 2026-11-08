@@ -1,0 +1,11 @@
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = nmt-turn-test
+[ext]
+subjectAltName = DNS:localhost,IP:127.0.0.1
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+extendedKeyUsage = serverAuth
