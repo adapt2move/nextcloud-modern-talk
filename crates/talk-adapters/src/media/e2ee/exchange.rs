@@ -63,7 +63,7 @@ pub(crate) enum Error {
 
 fn base64_padded(bytes: &[u8]) -> String {
     let mut text = base64_encode(bytes);
-    while text.len() % 4 != 0 {
+    while !text.len().is_multiple_of(4) {
         text.push('=');
     }
     text

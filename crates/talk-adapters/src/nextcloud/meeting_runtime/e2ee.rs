@@ -17,10 +17,13 @@ use tokio::sync::mpsc;
 
 const MAX_PARTICIPANTS: usize = 256;
 
+/// Talk identity to the session id both clients order by (see `WireResolver`).
+pub(super) type Resolver = Arc<dyn Fn(&PeerSession) -> Option<PeerSession> + Send + Sync>;
+
 pub(super) struct Call {
     exchange: Exchange,
     /// Talk identity to the session id both clients order by (see `WireResolver`).
-    resolver: Arc<dyn Fn(&PeerSession) -> Option<PeerSession> + Send + Sync>,
+    resolver: Resolver,
     send: Arc<Mutex<Encryptor>>,
     /// One decryptor per remote participant, shared by its camera and screen.
     receivers: Vec<(PeerSession, Arc<Mutex<Decryptor>>)>,
@@ -33,7 +36,7 @@ pub(super) struct Call {
 impl Call {
     pub(super) fn start(
         own: &PeerSession,
-        resolver: Arc<dyn Fn(&PeerSession) -> Option<PeerSession> + Send + Sync>,
+        resolver: Resolver,
         outbox: mpsc::Sender<(PeerSession, Value)>,
     ) -> Result<Self, ()> {
         let mut call = Self {
@@ -196,7 +199,7 @@ mod tests {
         PeerSession::parse(text).unwrap()
     }
     /// Talk identity "t<x>" is reached on the wire as "w<x>".
-    fn resolver() -> Arc<dyn Fn(&PeerSession) -> Option<PeerSession> + Send + Sync> {
+    fn resolver() -> Resolver {
         Arc::new(|talk| {
             talk.wire_text()
                 .strip_prefix('t')

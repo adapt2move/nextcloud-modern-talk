@@ -398,8 +398,10 @@ mod tests {
             decoder.sample().unwrap().and_then(|sample| {
                 let map = sample.buffer()?.map_readable().ok()?;
                 map.as_slice()
-                    .chunks_exact(2)
-                    .any(|b| i16::from_le_bytes([b[0], b[1]]).unsigned_abs() > 500)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .any(|b| i16::from_le_bytes(*b).unsigned_abs() > 500)
                     .then_some(())
             })
         })

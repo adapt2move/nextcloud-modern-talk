@@ -602,11 +602,12 @@ fn configuration(
     }
 }
 /// Whether this call must be end-to-end encrypted (Talk's `isEnabled`: advertised
-/// and not explicitly disabled). Unknown policy is treated as required.
+/// and not explicitly disabled). Admission only reaches the media owner with a
+/// known policy; a later unreadable refresh neither starts nor stops encryption.
 fn requires_e2ee(bundle: &Bundle) -> bool {
-    !matches!(
+    matches!(
         bundle.inputs.host_configuration,
-        Observed::Known { value, .. } if !value.encryption_required
+        Observed::Known { value, .. } if value.encryption_required
     )
 }
 fn sid() -> Result<Negotiation, ()> {
