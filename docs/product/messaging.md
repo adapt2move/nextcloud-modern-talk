@@ -1,10 +1,10 @@
 # Messages, threads, and retrieval
 
-These requirements define messaging behavior. Implemented paths and remaining parity work are described in [known limitations](../limitations.md) and the [feature inventory](../compatibility/feature-inventory.md). Sources: [chat, reaction, thread, scheduling, and capability contracts](../compatibility/baselines-and-sources.md#protocol-sources). All writes require current membership, relevant permissions, and supported room/host behavior.
+These requirements define messaging behavior. Implemented paths and remaining parity work are described in [known limitations](../limitations.md). Sources: [chat, reaction, thread, scheduling, and capability contracts](../compatibility/baselines-and-sources.md#protocol-sources). All writes require current membership, relevant permissions, and supported room/host behavior.
 
 ## MSG-001
 
-**Read and paginate history (P1).** Render text, rich objects, system events, deleted/edited markers, timestamps, and reply context with stable message identities. Preserve scroll position when older messages arrive. Separate first load, older-history load, empty history, partial history, and failed pagination. Do not execute HTML or scripts from any message or object.
+**Read and paginate history.** Render text, rich objects, system events, deleted/edited markers, timestamps, and reply context with stable message identities. Preserve scroll position when older messages arrive. Separate first load, older-history load, empty history, partial history, and failed pagination. Do not execute HTML or scripts from any message or object.
 
 Display message times as `HH:MM` in the system timezone, without a UTC suffix or a timezone selector. The platform owner observes the system zone outside the UI thread; rendering uses that cached observation.
 
@@ -28,7 +28,7 @@ When the reader was already at the end before an incoming append, follow the new
 
 ## MSG-002
 
-**Compose and format (P1).** Provide multiline text, emoji, supported Markdown, paste, and explicit send. Respect the server message-length limit before sending and preserve text on rejection. Offer a discoverable send-key preference; the default is Enter to send and Shift+Enter for a newline, with IME composition never interpreted as send. Native rendering must safely handle lists, code, quotes, links, and supported emphasis; unsupported syntax stays readable.
+**Compose and format.** Provide multiline text, emoji, supported Markdown, paste, and explicit send. Respect the server message-length limit before sending and preserve text on rejection. Offer a discoverable send-key preference; the default is Enter to send and Shift+Enter for a newline, with IME composition never interpreted as send. Native rendering must safely handle lists, code, quotes, links, and supported emphasis; unsupported syntax stays readable.
 
 Render ordinary message bodies with native CommonMark formatting, including headings, ordered/unordered lists, task markers, emphasis, strikethrough, inline/fenced code and quotes. Recognize explicit Markdown links, web autolinks and bare `http://`, `https://` and `www.` addresses outside code. Show the canonical destination on hover and keyboard focus. Only validated HTTP/HTTPS destinations without credentials or ambiguous control characters can open. HTML and remote Markdown images remain inert text; no preview request follows from parsing.
 
@@ -50,7 +50,7 @@ Acceptance: formatting preview and sent text preserve meaning, Unicode, and line
 
 ## MSG-003
 
-**Make delivery states truthful (P1).** A pending message progresses through preparing/sending, accepted by server, failed, or delivery-unknown. Server acceptance is not proof of a recipient read. Use a client reference to reconcile optimistic messages with received messages, without assuming the server deduplicates requests. Retain ambiguous sends for read-only reconciliation without assuming safe replay.
+**Make delivery states truthful.** A pending message progresses through preparing/sending, accepted by server, failed, or delivery-unknown. Server acceptance is not proof of a recipient read. Use a client reference to reconcile optimistic messages with received messages, without assuming the server deduplicates requests. Retain ambiguous sends for read-only reconciliation without assuming safe replay.
 
 Deliberate send/thread reply, edit, delete, reaction, pin/unpin, forward, reminder, schedule/edit/cancel scheduled message, room mark unread, thread title/follow, favorite, archive, room notification-level, poll vote and already-uploaded file publication actions enter one account-owned optimistic queue. Each account holds at most 64 intents and 512 KiB of encoded intent data. Reject overflow explicitly and preserve the user's current text. Keep accepted work and correlated results until acknowledged; ordinary cache eviction and cache age never discard a queued intent.
 
@@ -72,13 +72,13 @@ Acceptance: disconnect after possible dispatch shows an uncertain delivery state
 
 ## MSG-004
 
-**Draft locally and handle offline composition (P1).** Keep a draft per account, conversation, and thread/reply context. Restore text, attachments still available, and recipient context when switching views. Persist only under the approved content-storage policy. Explain session-only retention in the relevant storage settings and before an action that discards unsent work, rather than repeating it in the composer. Typing offline creates a draft, not an outgoing action. Only deliberate submission creates an intent under MSG-003, which may resume after reconnect and fresh validation. Restoring a draft never submits it. Storage settings distinguish unsent draft retention from already staged outgoing work.
+**Draft locally and handle offline composition.** Keep a draft per account, conversation, and thread/reply context. Restore text, attachments still available, and recipient context when switching views. Persist only under the approved content-storage policy. Explain session-only retention in the relevant storage settings and before an action that discards unsent work, rather than repeating it in the composer. Typing offline creates a draft, not an outgoing action. Only deliberate submission creates an intent under MSG-003, which may resume after reconnect and fresh validation. Restoring a draft never submits it. Storage settings distinguish unsent draft retention from already staged outgoing work.
 
 Acceptance: any persisted draft restores only for the same account under AUTH-009; session-only mode does not claim recovery. A deleted thread/root or revoked room yields a recoverable draft with explicit destination selection, never a silent post to the main timeline. Logout and cache-clear explain draft loss.
 
 ## MSG-005
 
-**Reply and privately reply (P1 reply; P3 private reply).** Quote only supported replyable messages, preserve original references, and let the reader navigate to context. Private reply creates/opens the permitted direct conversation and clearly changes the audience before send; it must not leak a classified/restricted message or imply that the whole source room receives it.
+**Reply and privately reply.** Quote only supported replyable messages, preserve original references, and let the reader navigate to context. Private reply creates/opens the permitted direct conversation and clearly changes the audience before send; it must not leak a classified/restricted message or imply that the whole source room receives it.
 
 Selecting Reply immediately shows the original author and a preview of up to two text lines above the composer. Composer previews and quotes in message rows share an inset vertical marker with rounded ends, rather than a left border. The preview follows the current message projection; deleted or inaccessible sources show an unavailable state without retaining their text.
 
@@ -90,13 +90,13 @@ Reveal a message's reply arrow and overflow menu when that message is hovered or
 
 ## MSG-006
 
-**Use real threads (P3; safe reading/fallback P1).** When supported, create named threads, rename when authorized, reply within them, list recent/subscribed activity, change supported thread notification/subscription levels, and navigate between root context and thread. Thread drafts and unread counts are distinct from the main composer. Do not simulate a server thread using a local-only grouping while claiming parity.
+**Use real threads.** When supported, create named threads, rename when authorized, reply within them, list recent/subscribed activity, change supported thread notification/subscription levels, and navigate between root context and thread. Thread drafts and unread counts are distinct from the main composer. Do not simulate a server thread using a local-only grouping while claiming parity.
 
 Acceptance: thread send includes the correct server relationship and appears in the same thread on another supported client. A missing `threads` capability hides thread creation; received unfamiliar thread data remains readable without flattening a reply into an unrelated send. Removed roots and inaccessible threads produce a clear unavailable state.
 
 ## MSG-007
 
-**React without conflating reaction and chat permission (P1).** Add/remove one's own supported reaction and inspect permitted reaction authors. Optimistic changes reconcile with server counts and the current user's state. Separate call reactions from message reactions.
+**React without conflating reaction and chat permission.** Add/remove one's own supported reaction and inspect permitted reaction authors. Optimistic changes reconcile with server counts and the current user's state. Separate call reactions from message reactions.
 
 Acceptance: chat denied plus reaction allowed still permits reactions; the reverse does not. A revoked `react-permission`, deleted message, or failed request rolls back the pending reaction. Multiple clients and repeated clicks converge without inflated counts.
 
@@ -108,7 +108,7 @@ At the default text size, reaction badges use a compact 24-point visual surface 
 
 ## MSG-008
 
-**Edit and delete within actual policy (P1).** Offer edits and deletions according to message type, actor, moderator rights, capability, and current server limits. Show an edit mode and retained draft on failure. Distinguish delete message, delete rich-object share, and delete underlying file; never imply that deleting a chat share deletes the file everywhere. Honor note-to-self editing extensions only when supported.
+**Edit and delete within actual policy.** Offer edits and deletions according to message type, actor, moderator rights, capability, and current server limits. Show an edit mode and retained draft on failure. Distinguish delete message, delete rich-object share, and delete underlying file; never imply that deleting a chat share deletes the file everywhere. Honor note-to-self editing extensions only when supported.
 
 Acceptance: expired edit/delete windows or a concurrent deletion produce explicit failure and a refreshed message. A successful edit shows server edit metadata; a successful delete updates timeline, previews, local search, pins, and cached excerpts. Do not hard-code an unlimited deletion/edit window from the version number.
 
@@ -116,13 +116,13 @@ Repeated Enter while an edit is staging retains the admitted request. A matching
 
 ## MSG-009
 
-**Mention, send silently, and show typing with privacy (P1 mentions; P3 silent send).** Autocomplete actual users and allowed room-wide mentions. Respect `mention-permissions`, `silent-send`, and typing privacy. Show the silent-send choice before submission; it is not the same as muting one's own notifications. Format federated/guest mention identifiers according to the server contract.
+**Mention, send silently, and show typing with privacy.** Autocomplete actual users and allowed room-wide mentions. Respect `mention-permissions`, `silent-send`, and typing privacy. Show the silent-send choice before submission; it is not the same as muting one's own notifications. Format federated/guest mention identifiers according to the server contract.
 
 Acceptance: forbidden `@all` cannot be sent through a decorative mention control. Silent sends reconcile with their returned state; sharing media uses its own metadata/gates, not an assumed identical endpoint. Private typing preference emits no typing events, and typing expires on idle/disconnect without a permanent “schreibt …” label.
 
 ## MSG-010
 
-**Read markers, unread state, and receipts (P1).** Mark read when the relevant conversation is actually presented and its content is visible under the client's reading policy; background prefetch, notifications, and search must not clear unread state. Distinguish unread counts, mentions, explicit “mark unread”, and optional common-read receipts. Respect read privacy and the server's session activity model.
+**Read markers, unread state, and receipts.** Mark read when the relevant conversation is actually presented and its content is visible under the client's reading policy; background prefetch, notifications, and search must not clear unread state. Distinguish unread counts, mentions, explicit “mark unread”, and optional common-read receipts. Respect read privacy and the server's session activity model.
 
 Advance the read marker only to a message whose end has been painted inside the current conversation viewport, with the hidden pin-activity extension in MSG-012. This also applies to a short history that fits without scrolling. Replaced rows, hidden histories and a different account/runtime cannot reuse an earlier visibility observation. Busy local admission leaves the marker eligible for retry and does not display a send warning. Clear a room's unread count only when the acknowledged target covers its canonical event cursor, including omitted activity.
 
@@ -132,7 +132,7 @@ Acceptance: a hidden/minimized conversation does not become read from a backgrou
 
 ## MSG-011
 
-**Search with scope and context (P1).** Provide conversation and account-wide message search through supported APIs, showing scope, query, progress, result snippets, and navigation to message context. Keep server search separate from an explicitly labeled partial local-cache search. Do not claim complete offline search. Where supported, add sender/date/type filters only with defined server semantics.
+**Search with scope and context.** Provide conversation and account-wide message search through supported APIs, showing scope, query, progress, result snippets, and navigation to message context. Keep server search separate from an explicitly labeled partial local-cache search. Do not claim complete offline search. Where supported, add sender/date/type filters only with defined server semantics.
 
 Acceptance: no matches, forbidden search, remote host failure, and incomplete offline results are different states. A result deleted or expired before opening reports unavailable; it does not reintroduce cached content. Search cannot reveal another account or restricted room through snippets or history.
 
@@ -140,7 +140,7 @@ Ctrl+F on Windows/Linux and Command+F on macOS opens or focuses conversation sea
 
 ## MSG-012
 
-**Pin messages (P3).** List pins, navigate to their context, and pin/unpin only when permitted and `pinned-messages` is advertised. Support a pin expiry and personal hide action when the applicable contract permits them; hiding a pin for oneself does not unpin it for everyone. Pins refer to canonical messages and do not override retention.
+**Pin messages.** List pins, navigate to their context, and pin/unpin only when permitted and `pinned-messages` is advertised. Support a pin expiry and personal hide action when the applicable contract permits them; hiding a pin for oneself does not unpin it for everyone. Pins refer to canonical messages and do not override retention.
 
 Acceptance: a pin creation failure does not leave a local pin presented as shared. A pinned message later deleted/expired becomes unavailable and is reconciled. A participant losing pin privileges retains only permitted read behavior.
 
@@ -150,7 +150,7 @@ Clicking a banner navigates smoothly to the canonical message. A context fetch w
 
 ## MSG-013
 
-**Remind later (P3).** Set/change/cancel a personal reminder for an accessible message, with local date/time selection and a visible upcoming-reminders list where available. The current backend uses supported server reminders. The chooser asks when to remind, without exposing server/local storage choices. Offer 20 minutes, one hour, three hours, tomorrow at 09:00 and next Monday at 09:00, plus a custom local date and time. Resolve calendar presets in the system timezone. Reject skipped clock times during daylight-saving changes and offer the first or second occurrence for repeated times. Closing the chooser preserves the draft and reply target. Scheduling uses the same chooser. A reminder never sends a message to other participants. Use server-confirmed timestamps and status.
+**Remind later.** Set/change/cancel a personal reminder for an accessible message, with local date/time selection and a visible upcoming-reminders list where available. The current backend uses supported server reminders. The chooser asks when to remind, without exposing server/local storage choices. Offer 20 minutes, one hour, three hours, tomorrow at 09:00 and next Monday at 09:00, plus a custom local date and time. Resolve calendar presets in the system timezone. Reject skipped clock times during daylight-saving changes and offer the first or second occurrence for repeated times. Closing the chooser preserves the draft and reply target. Scheduling uses the same chooser. A reminder never sends a message to other participants. Use server-confirmed timestamps and status.
 
 An authenticated personal message-reminder notification uses the local important-notices policy, with its own typed reason and account/conversation target. Resolve it from supported server identifiers, never translated subjects or a local timer inferred from a message timestamp. Disabling local delivery does not cancel the server reminder or mark its message read.
 
@@ -160,7 +160,7 @@ An empty write acknowledgement does not supply a reminder timestamp. Read the st
 
 ## MSG-014
 
-**Schedule messages on the server (P3).** With `scheduled-messages`, select date/time, inspect pending schedules, and edit/cancel according to actual API permissions. Clearly label scheduled versus sent. Do not replace server scheduling with an undocumented local timer that requires the client to remain running.
+**Schedule messages on the server.** With `scheduled-messages`, select date/time, inspect pending schedules, and edit/cancel according to actual API permissions. Clearly label scheduled versus sent. Do not replace server scheduling with an undocumented local timer that requires the client to remain running.
 
 Acceptance: quitting after server confirmation preserves the schedule; a request timeout is reconciled before another schedule is created. A rejected schedule retains text. A server send failure, lost membership, or cancellation race appears as returned status without falsely claiming delivery or cancellation.
 
@@ -168,13 +168,13 @@ A confirmed cancellation removes only that scheduled entry from the local list.
 
 ## MSG-015
 
-**Translate and summarize optionally (P4).** Offer message translation and unread-chat summaries only with supported APIs/providers and room policy. Show destination/provider information where available and require deliberate activation; never send private content to a third-party model chosen by the client. Keep original text available and label generated output. Summarizing does not mark unseen messages read automatically.
+**Translate and summarize optionally.** Offer message translation and unread-chat summaries only with supported APIs/providers and room policy. Show destination/provider information where available and require deliberate activation; never send private content to a third-party model chosen by the client. Keep original text available and label generated output. Summarizing does not mark unseen messages read automatically.
 
 Acceptance: provider disabled/unavailable, unsupported language, task timeout, insufficient permissions, and classified/sensitive restrictions produce clear states. Generated text is not treated as authoritative conversation history; links to source context remain available when allowed.
 
 ## MSG-016
 
-**Copy and forward deliberately (P3).** Permit copying text/links or forwarding selected content only when its room/security policy permits exposure and a supported destination send/share contract exists. A separate dialog names the account, previews the outgoing content, filters at most 100 loaded conversations of the same account, and requires destination selection followed by explicit confirmation. Preserve the composer and return focus to the originating timeline, thread or call chat on cancel. Revalidate the exact source, current permissions, session generation and destination before dispatch; stale controls cannot authorize a changed source. Forwarded content must not impersonate the original author; distinguish a new share/quote from the original message. Every ordinary action in the message menu has a matching icon.
+**Copy and forward deliberately.** Permit copying text/links or forwarding selected content only when its room/security policy permits exposure and a supported destination send/share contract exists. A separate dialog names the account, previews the outgoing content, filters at most 100 loaded conversations of the same account, and requires destination selection followed by explicit confirmation. Preserve the composer and return focus to the originating timeline, thread or call chat on cancel. Revalidate the exact source, current permissions, session generation and destination before dispatch; stale controls cannot authorize a changed source. Forwarded content must not impersonate the original author; distinguish a new share/quote from the original message. Every ordinary action in the message menu has a matching icon.
 
 Acceptance: cross-account forwarding is never an automatic side effect of switching accounts. An inaccessible or classified source cannot be exported through a forwarding shortcut. Missing attachment rights or an unavailable target preserves the user's choice with a clear failure. A failed forward does not remove or mark the source as sent to the destination. Clipboard use is explicit and subject to the security contract.
 

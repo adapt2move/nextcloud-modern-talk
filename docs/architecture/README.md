@@ -68,7 +68,7 @@ Errors preserve safe context without credentials or message contents.
 Adapters map protocol observations to application policy. Mutations with uncertain
 outcomes use bounded read-only reconciliation instead of blind retries. A room-level
 denial, timeout or rate limit is not account revocation. The [integration contract](nextcloud-contract.md)
-defines admission, completion and shutdown; [protocol sources](source-evidence.md)
+defines admission, completion and shutdown; [protocol sources](../compatibility/baselines-and-sources.md#protocol-sources)
 record the upstream references.
 
 ## Policy and lifetime

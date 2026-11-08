@@ -1,444 +1,169 @@
 # Known limitations
 
-The alpha does not yet implement every feature of the official Talk clients.
-Availability follows the server's capabilities, configuration and room policy.
-For individual operations, see the [feature inventory](compatibility/feature-inventory.md).
+These are the limits of **v0.0.13 alpha**. Features follow current server
+capabilities, configuration, room policy and permissions; the
+[product requirements](product/README.md) describe intended behavior, not a claim
+of complete parity with the official clients.
 
 ## Servers and calls
 
-- Call protocol selection uses advertised `conversation-v4` and `signaling-v3`,
-  not an allowlist of NextCloud major versions. Lab coverage remains NC34/Talk24
-  and NC35/Talk25; accepting compatible capabilities is not qualification of
-  every newer server. Call E2EE is unsupported: it blocks only when the server
-  advertises `call-end-to-end-encryption` and its configuration does not
-  explicitly disable it, matching the official web client's feature guard.
-  Unknown consent modes require explicit agreement in ordinary rooms;
-  classified conversations never submit recording consent. Missing optional
-  recording/reaction settings disable those controls. Missing room or participant labels
-  do not block calls. Missing grid settings
-  suspend remote video until the limit is known rather than blocking audio calls.
-  Omitted or null ICE server lists mean no configured STUN/TURN servers;
-  malformed supplied settings remain unavailable. Failed policy reads retry without authorizing media. The call card and local
-  diagnostics distinguish missing evidence from an actual prohibition. A changed
-  consent requirement during a live call closes the old media owner and offers
-  explicit rejoin with fresh consent, rather than accepting consent for a closed generation.
+- Target families are NextCloud 34 / Talk 24 and NextCloud 35 / Talk 25. Lab
+  baselines are 34.0.5 / 24.0.6 and 35.0.2 / 25.0.6; other patches and compatible
+  backports are not automatically verified. Calls select `conversation-v4` and
+  `signaling-v3` by capability rather than a major-version allowlist.
+- **Call E2EE is unsupported.** Admission blocks when
+  `call-end-to-end-encryption` is advertised and its configuration does not
+  explicitly disable it. Transport encryption is not call E2EE. Guest and
+  federated media are unavailable.
+- The call card and local diagnostics distinguish missing policy evidence from
+  a prohibition. Unknown required policy stays closed; failed reads retry without
+  granting media authority. Ordinary rooms require applicable recording consent;
+  classified rooms never submit recording consent or allow recording. Changed
+  consent closes the old media owner and requires explicit rejoin.
+- Internal signaling and HPB are implemented; the HPB lab profile uses Talk
+  25.0.6, signaling 2.1.1 and Janus 1.3.0. UDP TURN relay is supported; TURN over
+  TCP/TLS and live TURN credential rotation in established peers are unavailable.
+  Relay-required calls never fall back to host candidates.
+- Recovery is bounded and revalidates policy. HPB resume retains microphone/camera
+  intent, but full network handover and Janus ICE recovery remain unqualified.
+  Full HPB process replacement with an existing Talk 25 web peer can leave its
+  subscription gate stale; explicit web-peer leave/rejoin restored media in the
+  exercised case. A native rejoin cannot repair the remote peer's state.
+- Screen sharing uses VP8, admits one remote screen up to 1920×1080 and stops
+  selection on call/control loss. It never restarts automatically after recovery.
+  Multiple screen broadcasters and conference-scale performance are unqualified.
+  Missing grid policy suspends remote video without blocking an otherwise allowed
+  audio call.
+- Linux capture requires a matching ScreenCast portal backend and
+  `gstreamer1.0-pipewire`; Xvfb alone is insufficient. Sources need even dimensions
+  and known geometry no larger than 1920×1080. Unmodified desktop picker/capture
+  and revocation behavior remain unqualified. macOS uses the bundled
+  ScreenCaptureKit helper and system picker at up to 1080p/10 fps; native packaged
+  permission and lifecycle checks remain necessary. Windows screen publication,
+  system audio and H.264 screen negotiation are unavailable.
+- Recording needs a configured backend and fresh moderator authority; recorder
+  interoperability, audio-only selection and recording-file workflows are not
+  established. Raised hands, reactions, moderator controls, automatic lobby
+  admission and physical devices need further native/server validation. Device
+  switching stops publication and requires explicit enablement. The call dock
+  stays inside the main window.
 
+## Navigation, messages and offline use
 
-- Exercised server baselines are NextCloud 34.0.5 / Talk 24.0.6 and NextCloud
-  35.0.2 / Talk 25.0.6. HPB checks use Talk 25.0.6, signaling 2.1.1 and Janus 1.3.0.
-- TURN over TCP/TLS is unavailable in the pinned async engine; live TURN
-  credential rotation is not integrated into established application peers.
-  The engine’s async `peer_connection/transport/turn_relayer.rs` rejects
-  secure TURN and non-UDP TURN URLs before allocation; parsing TCP/TLS URLs in
-  the core is insufficient. Supporting them requires an async transport with
-  TCP/TLS connection ownership, certificate validation and TURN stream framing,
-  followed by forced-relay media qualification. Relay-required calls do not fall
-  back to host candidates.
-  UDP relay checks do not establish connectivity through every enterprise network.
-- Screen streams use separate internal-signaling or HPB/Janus connections.
-  One remote screen is admitted, with VP8 decode up to 1920×1080; it takes
-  priority within the server's video limit. Cameras retain their smaller decode
-  profile. Unsupported/failed remote screen decoding retires that stream.
-- Linux publication uses the ScreenCast portal's per-session source selection
-  and PipeWire/GStreamer, without persisted sources or system audio. Sources
-  with missing geometry, odd dimensions or dimensions above 1920×1080 are
-  unavailable before capture admission. A matching desktop portal backend and
-  `gstreamer1.0-pipewire` are required; Xvfb alone supplies neither. The software
-  compositor probe uses an explicitly patched portal backend for SHM-only
-  capture. The headless Sway rerun did not deliver native source frames with
-  that older backend; fixed and maximum frame-rate constraints also failed
-  negotiation. Generated native 720p screen frames reaching the web client
-  establish media transport only. Linux desktop capture, the unmodified
-  compositor/picker and permission revocation remain unqualified.
-- macOS publication uses the bundled ScreenCaptureKit helper and the system
-  content-sharing picker, with a three-buffer source queue, 1080p output and
-  10 fps. It needs an Apple SDK build and native qualification, including picker
-  cancellation, window closure, permission revocation and packaged identity.
-  Linux compilation does not qualify this path. Windows publication and system
-  audio remain unavailable. H.264 screen negotiation is not implemented; VP8 is
-  the offered codec.
-- Screen selection ends on call/control disconnection and cannot automatically
-  restart after recovery. Stale source callbacks cannot publish into a new share.
-  A call admits at most 32 retired remote screen negotiations; further remote
-  screen offers are ignored until a new call. Concurrent screen broadcasters
-  and conference-scale resource/performance qualification remain outside the
-  supported profile.
-- HPB socket resume preserves mute/camera intent and requires fresh policy before
-  publication resumes. ICE recovery has a finite retry budget and a 15-second
-  peer recovery deadline. The HPB socket retry budget covers consecutive failures;
-  an authenticated connection maintained for 30 seconds renews it. After transport
-  retries are exhausted, an explicit call retry can resume the old socket solely
-  to retire its session. A matched HPB bye or missing-session response and REST
-  call-participant absence are required before fresh admission; failed cleanup
-  remains blocked. Routine event polling does not restart a stopped owner.
-  A rejected HPB resume permits one fresh, scoped admission after cleanup,
-  retaining mute/camera intent and requiring the call
-  to still exist. Subscriptions also wait for HPB in-call readiness; an explicitly
-  rejected subscription can retry within the same bounded recovery window and
-  requires renewed policy. Full
-  network handover and Janus ICE recovery remain unqualified; other continuity
-  loss requires deliberate rejoin. Internal long-poll transport/server failures
-  have three bounded retries, explicit interruption/resume states and fresh policy
-  reconciliation. Lost signaling is not an empty successful poll; abandoned,
-  malformed or exhausted reads close the call.
-  A severed internal poll can remain active on the server for up to 30 seconds;
-  recovery waits for a valid replacement poll rather than claiming continuity
-  from REST success alone.
-- Full HPB process replacement with an existing Talk 25.0.6 web peer currently
-  can fail automatic media recovery in the r35 lab. On a fresh hello the web
-  client's REST call join can precede its new HPB room acknowledgement. HPB
-  2.1.1 restores its subscription gate from backend in-call changes, separately
-  from the participant list it broadcasts. The new web session can therefore
-  appear in-call and publish while HPB still rejects subscriptions to it. The
-  native client waits for its room acknowledgement, makes a fresh admission,
-  publishes and requests offers using the current mapped peer identity; that
-  does not repair the other session's HPB gate. The web client can also retain
-  obsolete peer identities after its fresh hello. Native retries remain bounded
-  and do not bypass server denial or mutate another participant's call flags.
-  An explicit web-peer call leave/rejoin restores AV in the exercised case.
-  This is separate from the qualified interruption/resume of a surviving HPB
-  session; automatic replacement with this peer remains unqualified.
-  After an observed automatic generation replacement, the call view offers an
-  explicit rejoin if peers remain present and no decoded remote audio or video
-  has flowed in that generation for ten seconds. This revalidates admission and
-  consent and retains microphone/camera intent; it does not repair the remote
-  peer's HPB state or promise AV recovery.
-- Guest/federated media and required call E2EE remain unavailable.
-- The call view has adaptive gallery, local focus and a speaking-level-based
-  speaker view. The level is a short-lived indicator from received audio or
-  authorized local microphone samples, not speech recognition or a
-  connection-quality measurement. The dock is inside
-  the main window; it is not a separate always-on-top window. Sidebar avatars
-  come from the current call; other active rooms show the call badge until
-  participant identities are available.
-- The screen stage consumes the media owner’s scoped stream identities and frames.
-  Raised hands and reactions are scoped to
-  projected participants and require advertised server support; their signaling
-  interoperability needs further validation.
-- Moderator mute, end-for-everyone and local-user re-ring requests check current
-  policy and session identity; call-only removal and federated re-ring are not
-  offered. A request receipt does not establish that another client acted on it.
-  Server recording controls require a configured backend, a fresh moderator
-  grant and an ordinary room. They start video recording; audio-only selection
-  and recording-file workflows are not implemented. A configured recorder has
-  not been exercised. Selecting a different capture device stops its current
-  publication and requires the user to enable it again. These controls and
-  automatic speaker selection require native and server interoperability
-  validation.
+- The sidebar has one Activity destination with unread, mentions, threads and
+  reminders. Filters live in the conversation-list menu. Counts reflect bounded
+  account observations; mention flags are not direct-mention counts. Connection
+  status measures time since this client observed failure, not last successful sync.
+- Signed-in users can discover and enter public rooms, including a same-server
+  `/call/<token>` link pasted into open-conversation search. Entry joins the chat
+  session before loading history, requests required passwords separately, and
+  distinguishes lobby waiting from revoked access. Discovery needs `listable-rooms`;
+  listing results have no reliable pre-join member count. Anonymous guest login
+  and OS deep-link registration are unavailable.
+- Complete room lists are limited to 256 rooms per account; larger lists are
+  rejected rather than silently truncated. Session history holds up to 32 rooms
+  with 100 messages each. Eligible durable accounts restore the newest 50 timeline
+  messages per cached room and up to four recently opened thread windows.
+  Inactive rooms are not fully mirrored. Restricted or unknown-policy content
+  stays in memory.
+- Ordinary main/thread drafts persist separately with a 30-day expiry, up to
+  32 entries and 128 KiB per account. Writes are asynchronous; abrupt exit can
+  restore older text. Attachments and private replies stay session-local. Failed
+  saves show session-only retention; unsent drafts are never evicted to make room.
+- The outgoing queue holds at most 64 intents / 512 KiB per account and checks
+  fresh authority before dispatch. Uncertain effects use bounded read-only
+  reconciliation and are never blindly replayed. Failed sends appear above the
+  main composer with recovery actions, rather than in their former timeline
+  position; the thread composer does not show failed records. Schedule creation
+  can remain uncertain because it has no operation correlation.
+- Threads require the server's `threads` capability and actual `isThread` flag.
+  Account-wide discovery lists server-returned subscriptions in known rooms and
+  is session-only. Unread is inferred from room read markers. Reply pages hold
+  50 messages; thread attachments and typing are unavailable. An ordinary message
+  cannot be converted into a thread through the implemented API.
+- Message-level mark unread needs a live-proven preceding message; cached gaps
+  do not establish adjacency. Unread navigation searches a bounded number of
+  pages. Account search shows at most two pages in admitted rooms; offline
+  suggestions use cached history.
+- Markdown supports basic formatting, lists, quotes, links, code and task markers.
+  Tables remain source text; HTML and Markdown images do not execute or load.
+  Rich-editor/IME and semantic accessibility behavior need native qualification.
+- Account presence/status changes are session-bound and are not restored as
+  pending intents after restart. Poll publication/draft changes and room-avatar
+  changes require a connection. Reminders are server-owned: the list is
+  session-only, limited to ten upcoming entries without pagination, and can be
+  incomplete. Translation and summaries require compatible server providers;
+  translated text is session-only. There is no local reminder fallback.
+- Creation offers local-user invitations and returned webinar, presentation and
+  voice-room presets. Other invitation sources and special-purpose creation
+  presets are not offered. Classified/channel/preserved restrictions remain
+  enforced without claiming complete administration parity. Federation supports
+  incoming invitations and text through the server proxy; files, calls and other
+  room tools are unavailable and multi-server interoperability needs validation.
+  Breakout controls lack help-request clearing and restoration of assignment
+  selections. Calendar integration and parts of moderation remain incomplete.
 
-## Messages and background activity
+## Files and media content
 
-- Favorite/archive, room notification-level and poll-vote changes now use the same
-  bounded optimistic outgoing queue as text, thread and reminder intents. Unknown
-  cached permission permits local staging only; dispatch requires fresh authority.
-- Each account has one executing REST operation and at most seven admitted
-  descriptors. User, visible-content and background lanes reserve admission and
-  select queued work in that order, with FIFO within each lane. User work can
-  interrupt disposable background reads; it cannot preempt mutations or call
-  control. The application additionally bounds ordinary HTTP concurrency to eight,
-  with separate call transport lanes. Two local data slots per account keep
-  required outgoing/draft commits independent of the network queue. Queue waits
-  expire after 30/20/15 seconds by lane; transfers retain their longer class limit.
-  After repeated transport failures a versioned, jittered circuit cooldown pauses
-  background avatars, link cards, presence and prefetch while foreground recovery
-  can proceed. Four likely ordinary rooms can be prefetched, one at a time, in a
-  60-second planning window; account changes cancel speculative work.
-- A resume gap over five seconds or a changed local route/source address interrupts
-  stale HTTP/HPB work and requests a fresh newest-page history snapshot before
-  resuming long polling. Retained history stays visible during revalidation;
-  old or failed completions cannot release the catch-up fence. A successful
-  authenticated history or room-list read clears transient reachability feedback,
-  without clearing an authentication failure or renewing permission. A bounded route observation runs every
-  two seconds outside GPUI. This detects source-address and Linux route changes;
-  a handover that preserves both is observed through transport failure/heartbeat,
-  not an OS-specific network API. Recovery never renews media or room authority.
-  Native physical-network and platform sleep/call continuity qualification remains
-  separate from the controlled lab interruption.
-- Account presence/custom-status changes are optimistic and retried within the
-  current authorized session, one per account for at most five minutes. Ambiguous
-  writes are read back before another change can be attempted. These ephemeral
-  status intents are not restored after restart. Uncertainty checks never rewrite
-  an already applied status or renew its expiry. A lost acknowledgement for a
-  relative expiry remains uncertain: matching text cannot prove the timer was
-  installed, so the client does not automatically write it again.
+- Select at most eight attachments, uploaded/shared sequentially with a 32 MiB
+  per-file ceiling before stricter server limits. Original bytes and selected
+  paths stay session-local and expire on scope change or after 30 minutes.
+  Uploaded publication intents can persist; lost share acknowledgements are
+  reconciled without replay. Original attachments are not cached for offline use.
+- The Files browser caches up to eight listings for ten minutes in the current
+  session; search/recent results stop at 200. Sorting covers the current page.
+  DAV support depends on the server. File paste/drop was exercised on Linux X11;
+  image paste and macOS Finder file promises still need native validation.
+  Linux/Windows use Download for outgoing files.
+- macOS PDF preview renders only the first page, up to 4 MiB. Linux/Windows use
+  server thumbnails. Raster previews are bounded; GIF/WebP show still frames.
+  Unsupported or larger content offers browser handoff or download. Link cards
+  depend on the server's reference providers and fetch no arbitrary embedded web
+  content. Locations can open OpenStreetMap deliberately; map tiles are not loaded.
+- The gallery/video player needs native, real-server and packaged-runtime
+  validation. Supported local playback depends on available codecs and is limited
+  to 32 MiB, 1920×1080 and 30 fps; offline viewing uses a cached thumbnail.
+- Voice recording is explicit, in-memory, at most two minutes of 16 kHz mono PCM
+  WAV. Unsent recordings do not survive restart; incoming originals are not
+  available offline. Playback codecs vary by platform; unsupported formats offer
+  download. Incoming waveforms are illustrative, not decoded audio. Physical
+  devices, permissions and mobile interoperability remain unqualified.
 
-- Marking unread from a message requires a live-proven preceding message or an
-  exhausted live history page proving the first message; cached-only gaps do not
-  establish adjacency. This message action requires a connection. Room-level
-  mark unread can be queued offline, but an ambiguous server response is not
-  replayed automatically; the action can be requested again explicitly.
-  Locating an unloaded first unread message reads at most four history pages,
-  plus an exhaustion check, and reports an unavailable result if the boundary
-  cannot be established within that bound.
-- Threads use the Talk `threads` capability and current room permissions. The
-  `isThread` message flag identifies actual threads; `threadId` alone also
-  appears on ordinary messages and does not enable the thread pane. The
-  documented feature flags also govern messaging on unrecognized server
-  versions; those deployments remain unverified. No additional thread-enable
-  configuration key is required. Thread replies and quoted pane replies use
-  the same admitted outgoing queue as the room composer. The
-  account-wide list contains the subscriptions the server returns for rooms
-  already known to the account, in pages of 50. Its last page is retained for
-  the session; the list is discovered again after restart. The account-wide
-  endpoint excludes unfollowed threads, including ones previously participated
-  in; see the upstream [thread service](https://github.com/nextcloud/spreed/blob/stable35/lib/Service/ThreadService.php).
-  Talk 24/25 has no independent thread read marker, so a thread's unread
-  indicator is inferred from the room marker and latest known reply. Each
-  displayed reply page holds at most 50 messages. The thread composer shares
-  the room composer's options menu, with uploads, NextCloud sharing, polls and
-  voice attachments unavailable until a thread-targeted attachment workflow is
-  supported. Typing signaling has no thread identity in the implemented contract;
-  room typing is neither sent from nor displayed inside the thread pane. Replier avatars use available
-  cached replies and the server's most recent activity summary; unopened
-  threads may initially show only one replier.
-  Sending thread replies can use the bounded outgoing queue when a prior
-  capability observation permits it. Thread-page reads retry transient failures
-  up to four times before offering an explicit retry. A thread observed during
-  the current session can have its title or subscription changed offline; the
-  bounded queue revalidates the room when reconnecting. Uncertain effects are
-  checked against the server and are never replayed blindly. Thread settings
-  themselves are not restored from disk as permission authority.
-  The API creates a thread with a new root message; it does not expose an
-  operation to convert an existing ordinary message into a thread. See the
-  upstream [thread controller](https://github.com/nextcloud/spreed/blob/stable35/lib/Controller/ThreadController.php)
-  and [chat controller](https://github.com/nextcloud/spreed/blob/stable35/lib/Controller/ChatController.php).
-- Private replies require a supported server, an eligible local user author and
-  permission to expose the source and open a direct conversation. Reactions and
-  their author lists are capability and permission gated; author observations
-  are bounded and may need a fresh connection.
-- Markdown covers bounded CommonMark, strikethrough and task markers. Tables
-  remain readable source; HTML and Markdown images do not execute or load.
-  The composer supports direct editing of basic marks, headings, lists, task
-  markers, quotes, links and code with hidden syntax and canonical Markdown
-  serialization. Arbitrary Notion blocks, tables and embedded content are absent.
-  Native rich-editor/link/IME interaction still needs platform qualification.
-- Typing uses the active ordinary local room's internal or HPB signaling session
-  only when typing privacy and current room policy permit it. Classified,
-  channel, federated and unknown-policy rooms are excluded. Indicators are
-  ephemeral and expire; they are not an offline history of activity.
-- Direct-conversation presence and custom status are refreshed with the room
-  list when the server enables `user_status`. Recent direct-room status may be
-  restored for five minutes from the existing private, unencrypted ordinary-room
-  cache; it never grants authority and is hidden when stale. The account menu changes availability and
-  edits custom and predefined messages with expiry. Member status is loaded with the
-  room's bounded participant list, and message-author status is shown when that list
-  provides a matching identity. People cards use current room observations; calling
-  a group member first resolves the direct room and checks its call permission. Native
-  accessibility qualification remains separate from UI fixtures.
-- Poll drafts are server-managed and require moderator rights and the advertised
-  capabilities. Using a draft to create a poll keeps the draft. Voter details
-  are shown only when the server supplies them; avatar initials are local fallbacks.
-  Recently viewed poll results are retained in memory for up to five minutes
-  across four rooms, subject to room policy; they do not survive restart and
-  cannot authorize voting or closure. Poll publication and draft changes require
-  a connection and await server confirmation; they are not queued across restart.
-  Native semantic accessibility and full platform behavior remain unqualified.
-- Voice recording is explicitly started, limited to two minutes, and encoded as
-  16 kHz mono PCM WAV in memory. An unsent recording remains available during
-  a temporary disconnection, but retires on scope or permission loss and does
-  not survive restart. Incoming originals are retained only for their player and
-  are not available offline. Playback accepts WAV PCM, Ogg Opus/Vorbis and supported
-  MP4/WebM audio codecs up to 32 MiB. AAC playback uses a native decoder on
-  Linux and macOS; other platforms and unavailable codecs offer download. The
-  deterministic incoming waveform placeholder supports pointer scrubbing and five-second
-  arrow-key seeking; it is not derived from the audio. Recording review retains up to
-  32 time buckets of live level peaks across the recording in memory, not a full decoded waveform. Once playback
-  has started, review supports pointer and five-second arrow-key seeking. Native microphone, speaker,
-  permission and mobile interoperability have not yet been qualified.
-- The quick switcher searches loaded conversation names, up to 16 observed
-  participant names per eligible room, and the server's user directory. Its
-  participant index is session-only and is filled gradually when permitted.
-  The connection status pill reports the time since this client observed the failure,
-  not the last successful synchronization, which the presentation contract does not
-  expose. Sidebar unread and mention filters (in the list's “⋯” menu) and the
-  Aktivität counts are stored or derived per durable account. Eligible
-  cached rooms retain previously reported mention flags; missing or changed
-  observations remain unknown. Room notification edits are optimistic and
-  reconciled with the server. An uncertain write requires a fresh room read.
-- Open-conversation browsing requires `listable-rooms`. The Talk v4 listing
-  does not expose a reliable member count before joining. Signed-in users can
-  enter public rooms from navigation, discovery, or a same-server `/call/<token>`
-  link pasted into the open-conversation search. Entry establishes a chat session
-  before reading history, prompts for a server-required password, and distinguishes
-  lobby waiting from revoked access. Unknown policy stays closed. Anonymous guest
-  login and operating-system deep-link registration remain unavailable. Links
-  must use the active account's exact server and installation path; passwords are
-  entered separately and are not saved.
-- Account-wide message search requires the server's Talk message provider and
-  supported filters. It shows at most two pages and only results for rooms in
-  the currently admitted room list; offline suggestions use the selected cached
-  history. Search dates use the local system timezone and locale formatting,
-  including daylight-saving changes; date filters wait for timezone discovery.
-  Complete document viewers and parts of moderation remain incomplete. Documents can
-  open in the Cloud web view.
-- Link cards resolve at most two HTTP(S) links per eligible message using the
-  NextCloud references endpoint. Up to 64 URLs are held in a session cache for
-  fifteen minutes; negative results expire sooner. Only installation-owned
-  reference-preview image routes are fetched, with bounded decoded image sizes.
-  Provider selection and arbitrary embedded web content are not implemented.
-  Reference cards also depend on the server's providers and outbound access.
-  A resolver may return only the URL as its title, without a description or
-  thumbnail; this does not qualify rich public-site previews in an isolated lab.
-- Conversation creation supports local-directory invitations and the returned
-  webinar, presentation and voice-room presets. Other special-purpose presets
-  and non-user invitation sources are not offered in the creation flow.
-- Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
-  not a complete PDF reader. Linux and Windows use server-provided document
-  thumbnails. If the server's PDF preview provider is disabled, those platforms
-  offer the Cloud web view and download. Other documents use compact file cards
-  with explicit downloads. Online raster previews use originals up to 4 MiB,
-  8192 pixels per dimension and 16 Mi pixels. GIF/WebP render a still frame.
-  Thumbnail fallback uses the same source limits and retains only a small raster;
-  larger or unsupported inputs require the Cloud web view or download.
-- Attachment selection supports up to eight files and sequential upload/share,
-  limited to 32 MiB each before any stricter server limit. Unsent paths are
-  session-local and retire on a room/account change or after thirty minutes.
-  Submission creates immediate session-local chat rows with inline upload
-  progress; a reference-correlated own message replaces each row after sharing.
-  Lost share acknowledgements are reconciled by reading history, never replaying
-  that share. Original bytes and local upload paths remain session-only. Once upload completes,
-  eligible publication intents transfer durably before the session owner releases
-  their caption. The existing-file workflow uses the same durable publication queue.
-  Local raster previews use the same bounded decoder and stay out of disk caches.
-  File-list and image paste and incoming file drops need native qualification on
-  each platform; file-list paste and incoming file drops with captions have
-  been exercised on Linux X11. Image paste still needs separate qualification. Caption and
-  reply/thread/silent metadata require the corresponding server capabilities.
-  Native outgoing file drags use AppKit file promises on macOS and still need
-  Finder qualification; Linux and Windows use the Download action.
-- The account Files browser keeps up to eight recently visited listings in memory
-  for ten minutes, scoped to the account. It can show them while disconnected
-  during the same session; they do not survive restart. Folder paging uses the
-  server's pagination support when available, and sorting applies to the current
-  page. Search and recent results are limited to 200; other DAV responses are
-  bounded to 1,000 entries and a response-size limit. A server that rejects DAV
-  search or favorites disables that section. Eligible existing-file publications are staged durably and reconciled by
-  reference after restart; the browser listing itself remains session-only.
-- The media gallery and local video player are implemented but await native GUI,
-  real-server and packaged-runtime qualification. The player accepts MP4
-  H.264/H.265 with AAC on macOS and WebM VP8/VP9 with Opus, where native decoders
-  are available. Other containers/codecs use the Cloud web view or download.
-  Inputs are limited to 32 MiB, 1920×1080, 30 fps and a 30-minute player lifetime.
-  Playback starts paused. Offline viewing uses a cached thumbnail only.
-- Background discovery has bounded capacity. Calendar integration, all mention
-  and thread-notification policies, and platform-native incoming-call actions
-  remain incomplete. Unknown notification eligibility stays suppressed.
-  While running, admitted accounts poll message/reminder and incoming-call
-  notifications every three seconds on a healthy server; request time,
-  backpressure, server delivery/cron and retry delays add latency. Ordinary
-  message banners require a background window. Initial observation and gaps of
-  60 seconds or more establish a silent baseline rather than replaying history.
-  `occ notification:test-push --talk USER` both stores an
-  `admin_notification_talk` diagnostic in the Notifications API and attempts
-  mobile-device push. Fresh eligible diagnostics now use the ordinary Messages
-  category with fixed local text and no activation target. They need no mobile
-  push registration and can appear in the foreground. Sign in, allow notifications,
-  wait for the initial baseline, then run the command. Minimize/hide the app to
-  test real message banners with a DM, direct mention, incoming direct call, or due personal message reminder from
-  another session; avoid actively reading the receiving conversation elsewhere.
-  `occ notification:generate` creates general administrator notifications,
-  which this Talk-only client does not display. `notify_push` websocket hints
-  are not implemented; bounded polling works without that optional app.
-  The direct-mention badge uses the server's boolean flag alongside the total
-  unread-message count; the server does not expose a direct-mention count.
-  macOS Notifications settings now separate local choices from observed OS
-  authorization and offer an explicit first request or denial guidance. The
-  main-process permission prompt and delivery through the bundled notification helper still require
-  native Mac qualification; Linux fixtures and macOS compilation do not prove it.
-  macOS window closing keeps the application services alive; native close/reopen
-  and notification reception with a hidden window still need Mac qualification.
-  Explicit quit stops background reception.
-- A complete room listing and its eligible durable metadata are bounded to 256
-  rooms per account, including order and unread observations. Larger complete
-  server listings require a future paged-list contract; they are not silently
-  truncated. Inert call-action identities and avatar cleanup allowlists share
-  this bound; they do not increase active-call or media limits. Sidebar
-  customization placements remain separately bounded. HTTP JSON ingress is
-  bounded to 1 MiB, 131,072 structure nodes and 64 levels. Typed endpoint limits
-  reject oversized lists without granting reconciliation authority.
-- Session history retains up to 32 rooms with 100 messages per room. Eligible
-  durable accounts also restore up to 32 ordinary-room histories with the newest 50 timeline messages each, member
-  counts, read-only scalar room settings and deliberately staged outgoing intents
-  from private, unencrypted schema 4 storage. Schemas 1–3 upgrade in place; older
-  clients may reject schema 4. Credential storage is unchanged. Up to four recently opened 50-message thread windows per stored room
-  share the existing cache size and eligibility limits; older windows are dropped
-  first when the account cache is full. Restricted, unknown-policy and session-only
-  content stays in memory. Inactive rooms are not continuously mirrored in full. Unsubmitted ordinary-room main/thread drafts persist separately,
-  up to 32 entries and 128 KiB serialized per account, with a 30-day expiry.
-  Attachments and cross-room private replies remain session-local. Saving is
-  asynchronous: a sudden exit before a write/clear commits can restore older
-  text. Failed or ineligible saves show session-only retention; unsent text is
-  never evicted to admit another draft. Small reencoded previews persist for up to seven days, with
-  at most 24 entries and 4 MiB per account; original attachments are not cached.
-- The outgoing queue is bounded to 64 intents and 512 KiB per account. It
-  revalidates current server authority before dispatch. Read-only uncertainty
-  checks have finite windows, including the latest 200 messages for send/forward
-  correlation. An unresolved effect stays retained and is never blindly replayed.
-  Only pending, queued and uncertain sends are message-list rows. A failed send, edit
-  or schedule leaves the list and appears as one row above the main composer with
-  retry, edit-as-draft and delete or discard; it is not placed at its former position in
-  the timeline, and the thread composer does not show failed records.
-  Scheduled creation has no operation correlation and may remain uncertain.
-- Reminders are server-owned; there is no standalone local OS reminder fallback.
-  The account-wide list is a bounded session cache and does not survive a restart.
-  Talk 24/25 returns at most ten upcoming reminders without
-  pagination; a full result is marked potentially incomplete. A reminder for a
-  room absent from the bounded room list is omitted with the same indication. Notifications without
-  a structured message identifier are suppressed. Notification activation is
-  available on Linux notification daemons with action support and via the macOS
-  helper; native delivery and click-through still need platform qualification.
-  Linux also depends on the distribution's `notify-send` confinement policy:
-  the tested AppArmor profile allowed banner submission but denied
-  `GetCapabilities` and action signals. That policy delivers reminders without
-  click-through until the administrator permits those notification operations.
-- Translated text uses a bounded session cache and does not survive a restart.
-  Translation requires a provider with source-language detection and a target
-  matching the interface locale; task-only translation providers are not used.
-  Summary generation requires a configured server assistant and the server's
-  unread threshold; provider availability varies.
-- Validated location objects render from their geo identifiers and can open
-  OpenStreetMap deliberately; the client does not create locations or fetch map
-  tiles.
-- Incoming federation invitations and text chat use the server proxy;
-  federated calls, files and other room tools are unavailable, and multi-server
-  interoperability needs qualification. Invitation changes require a connection
-  and are not queued across restarts.
-- Breakout switching closes an active call
-  before moving; joining the target call uses the normal call flow. Clearing help
-  requests and restoring existing assignment selections are not implemented.
-  Breakout v1 assigns logged-in users; changing the room count or mode requires
-  removing the existing breakout rooms first.
-- Waiting calls recheck policy, but automatic lobby admission needs real-server
-  qualification. The lobby start time is shown only when room details were loaded.
-- Room-avatar uploads accept regular images up to 8 MiB and 16 million pixels,
-  crop to a centered square and send a bounded PNG. Avatar changes require a
-  connection and are not queued across restarts.
+## Notifications
 
-## Platforms
+- While running, healthy accounts poll message/reminder and incoming-call
+  notifications every three seconds. Server cron/delivery, request time,
+  backpressure and retries add latency. Initial observation and gaps of at least
+  60 seconds establish a silent baseline. Explicit quit stops reception;
+  `notify_push` websocket hints are not implemented.
+- Ordinary message banners require a background window and known eligibility.
+  Unknown policies stay suppressed; not all mention/thread policies or native
+  incoming-call actions are implemented. Fresh `occ notification:test-push --talk
+  USER` diagnostics use fixed local text, can appear in the foreground and need
+  no mobile push registration. General administrator notifications are excluded.
+- macOS separates saved notification choices from observed OS authorization.
+  Native permission prompts, hidden-window reception and click-through still
+  need Mac validation. Linux activation requires a notification daemon and
+  confinement policy that allow actions; banner delivery alone does not prove it.
 
-- macOS publication requires a persistent signing identity: an internal alpha
-  certificate pinned to the app identifier, or a Developer ID Application
-  certificate verified against its Apple team. The internal mode provides no
-  Developer ID, hardened runtime or notarization. Non-publishing CI packages and
-  releases through v0.0.10 remain ad-hoc signed. Moving from an old ad-hoc build,
-  or later changing the signer, can require a new Keychain/TCC approval. Permission
-  retention across updates still needs native qualification; no trust settings,
-  credential ACLs or TCC databases are changed. See the
-  [first-launch instructions](install.md#first-launch-blocked-by-macos).
-- Mac CI checks compilation, package structure, native library paths and
-  signatures. Native login, permissions, devices, PDF rendering and update installation still
-  need platform qualification. Windows is compile-checked only.
-- Native credential storage may be unavailable or report cleanup pending.
-  The explicitly selected private-file fallback is persistent but unencrypted.
-- Local preferences saved by this version use schema 8; older clients cannot open
-  those preferences.
-- macOS profiles upgraded to the persistent volume association cannot be opened
-  by v0.0.8 and older builds. A legacy profile whose mount device value changed
-  needs the explicit storage reassociation action. Copied or replaced directories
-  are not automatically repaired. Native macOS volume lookup and this recovery
-  flow still need qualification on a Mac.
-- Synthetic media and successful compilation do not qualify physical devices,
-  every OS, semantic accessibility or whole-process performance and energy use.
+## Platforms and local storage
 
-Report reproducible problems without credentials, private server details or
-message contents. Security issues follow [SECURITY.md](../SECURITY.md).
+- macOS is the primary target; Linux is a development/packaging target; Windows
+  is compile-only. Compilation/package checks do not qualify native login,
+  Keychain, permissions, devices, PDF rendering, update installation or VoiceOver.
+- macOS alpha publication uses a persistent signing identity. Internal signing
+  is not Developer ID signing or notarization. Moving from older ad-hoc builds
+  or changing signer can require new Keychain/TCC approval; permission retention
+  across updates still needs validation. See [installation](install.md).
+- Native credential storage can be unavailable or leave cleanup pending. The
+  explicitly selected durable private-file fallback is **unencrypted**, as are
+  eligible content caches; providers never migrate silently.
+- Preferences use schema 8 and content caches schema 4; older clients may reject
+  them. macOS profiles with persistent volume association cannot be opened by
+  v0.0.8 or older; changed legacy mount identity needs explicit reassociation.
+- Synthetic media, screenshots and builds establish neither physical-device
+  support nor whole-process performance, energy use or semantic accessibility.
+  Application queue bounds are not hard decoder/OS/GPU memory ceilings.
+
+Report bugs with synthetic reproduction data. Disclose security issues through
+[SECURITY.md](../SECURITY.md).

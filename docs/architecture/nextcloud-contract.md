@@ -56,7 +56,7 @@ and user-status support, the intended user, `shouldNotify`, Do Not Disturb, curr
 room policy and bounded message/call context all gate delivery. Translated subjects
 and notification action URLs cannot grant authority. History/context reads never
 advance read markers or dismiss notifications. See the pinned
-[notification sources](source-evidence.md#a-src-07--notifications).
+[Notifications API v2](https://github.com/nextcloud/notifications/blob/f106a3fedaaca27c54a5b701ad54f8b688e628ec/docs/ocs-endpoint-v2.md).
 
 An empty HTTP 200 list confirms an available source. HTTP 204 means no registered
 notification provider: clear source freshness and wait one hour before probing

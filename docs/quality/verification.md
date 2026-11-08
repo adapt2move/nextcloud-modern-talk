@@ -4,51 +4,52 @@ This document defines verification requirements for claimed product behavior; it
 
 [AMEND-AUTH-STORAGE-01](../product/accounts.md#spec-amendment--amend-auth-storage-01) defines the native/private-file storage requirements. The AUTH cases below specify required coverage; results belong to exact candidate and platform evidence. A requirement alone establishes no provider, platform or feature pass.
 
-## Q.VER-01 — Ordered gates
+## Q.VER-01 — Product and release acceptance
 
-| Gate | Entry and required evidence | What passing permits |
-| --- | --- | --- |
-| `G.SPEC` — Product specification | Stable feature IDs, domain model, observable behavior, acceptance criteria, capability/configuration/permission gates, error states and explicit scope/deferred features; independent review of consistency | Architecture/module/interface bootstrap |
-| `G.BOOT` — Bootstrap | Accepted product baseline; Deep Modules ownership, narrow public interfaces, invariants, state/error/cancellation contracts, dependency direction, resource budgets and test seams; independent reviews below | Delegated product implementation |
-| `G.PRODUCT` — Product increment | Delegated implementation handoff; exact candidate commit/artifact; real behavior and appropriate tests, both supported server profiles for claimed integration, native platform evidence, reviews appropriate to the claimed scope, current limitations | Acceptance of the explicitly listed increment only |
-| `G.RELEASE` — Distributed product | Accepted increment plus complete advertised feature matrix, packaging/signing/update-policy checks, disclosure route, sanitized reproducibility evidence and no blocking findings | The specific release and its stated claims |
+Choose checks for the changed behavior, failure paths and resource lifetime. Public
+claims require actual behavior on the named server and native platform; compilation,
+a screenshot, a mock or an HTTP health check alone cannot establish integration.
+Release acceptance also requires package/signing/update-policy checks, current
+limitations, a disclosure route and no blocking findings.
 
-Do not skip `G.SPEC` by turning screenshots into implementation tasks. Do not skip `G.BOOT` by calling a monolithic UI wrapper an architecture. A stub, mock, HTTP health check or compiling native window must be labelled for what it proves. Publishing a documented bootstrap does not authorize a “working Talk client” or measured-performance claim.
-
-For `G.BOOT`, executable scaffolding, if present, gets appropriate format/compile/interface checks with results recorded; documentation-only work gets document/contract review. Do not manufacture runtime pass results for absent behavior. Product implementation starts only after the bootstrap acceptance decision, not merely after files are written.
-
-Required bootstrap decisions include credential staging/restoration/crash ordering ([Q.SEC-03](security.md#qsec-03--os-vault-contract)), account-rejection classification and generation/cancellation/media shutdown ownership with a finite capture-release deadline ([Q.SEC-05](security.md#qsec-05--logout-revocation-and-failure-lifecycle)), and the complete numeric [policy-freshness contract](security.md#required-bootstrap-policy-decision). The latter must name authoritative sources, propagation/cache assumptions, refresh/expiry/enforcement bounds, suspension/recovery behavior and reconciled control-traffic/wakeup costs for both server families. A hash-only refresh or an unfilled timing/source decision blocks `G.BOOT`. Also assign the frozen-workload schema/owner and lifetime/peak collector interfaces and qualification plan ([Q.PERF-01](performance.md#qperf-01--reference-environment-and-accounting), [Q.PERF-02](performance.md#qperf-02--workload-budgets)); native measurement and adapter qualification remain product gates.
+Credential crash ordering, account-loss classification and local media shutdown
+must preserve [security requirements](security.md). An enforcement claim requires
+finite, reviewed [policy freshness](security.md#required-bootstrap-policy-decision)
+bounds and authoritative sources, including non-hash changes. Performance claims
+require the [frozen workload and complete collector](../architecture/measurement.md).
 
 ## Q.VER-02 — Independent reviews and decision authority
 
-For product acceptance, the owner selects review coverage based on the changed behavior and risks, using the disciplines below. Reviewers must be independent of what they approve, receive the brief and exact candidate, and inspect evidence. One reviewer may cover several disciplines when competent. A small reversible edit does not require four reports or repeated rounds. Do not treat self-review or a green CI result as independent product acceptance.
+The owner chooses review coverage for the changed behavior and risks: architecture
+and lifetime, functionality and compatibility, security, and measured performance
+where claimed. Reviewers inspect the exact candidate and checks, independently of
+what they approve. A small reversible edit does not require four reports or repeated
+rounds. Green CI is not independent product acceptance or an external security audit.
 
-| Discipline | Bootstrap review | Product review |
-| --- | --- | --- |
-| Architecture/modules | Deep Modules hide consequential design decisions; APIs remain small; ownership, errors, lifetime, cancellation, account scoping and native adapters are coherent | Implementation preserves those boundaries; no secret/network/media logic has leaked into views; inspect resource ownership and failure paths |
-| Function/compatibility | Feature IDs and acceptance criteria cover product decisions, degraded states and both target server families | Exercise claimed workflows on real pinned servers/native client, including negative and capability-change cases |
-| Performance | Budgets are measurable; UI work, queue/cache limits, cancellation and profiling points are designed | Inspect release-build traces, resource boundaries, raw runs and regressions against [performance](performance.md) |
-| Coarse security | Threats and credential/TLS/media/privacy interfaces have explicit safe behavior | Inspect actual adapters and error paths, redaction artifacts, permissions, dependencies and negative tests against [security](security.md) |
-
-Use the [review template](verification.md). “Coarse security review” is a scoped engineering review, not a penetration test, external audit or certification. Bootstrap performance/security passes apply to the plan/contracts only.
-
-For a product/release decision, the owner can use the [acceptance template](verification.md) after the assigned verification. Critical/high-impact security findings, unauthorized capture, account leakage, broken core workflows, missing required evidence or unmet advertised budgets block product acceptance. Lower-impact exceptions need an explicit owner, expiry/milestone and narrowed public claim; an exception cannot turn `not run` into `pass`.
+Unauthorized capture, account leakage, broken core workflows, missing required
+checks and unmet advertised budgets block acceptance. Lower-impact exceptions need
+an owner, expiry/milestone and narrowed claim; they cannot turn an unrun test into a pass.
 
 ## Q.VER-03 — Exact candidate and evidence identity
 
-Every review names a full commit SHA, base SHA where relevant, clean/dirty state, artifact SHA-256, toolchain/dependency lock identity, platform and fixture/server manifest. Final acceptance uses a clean committed candidate. Diagnostic runs with local edits also record a patch hash; rerun affected checks after committing the candidate. Before the repository has commits, authors may supply a file-hash inventory for draft review; this is not final commit-bound approval. The manager must obtain confirmation against the final commit before accepting it.
+Record the commit, artifact hash, toolchain/lockfile, platform, fixture/server profile,
+commands, outcomes and limits in the issue, PR or CI artifacts. Diagnostic dirty runs
+also name their patch hash. Changes invalidate affected results until revalidated.
+Findings name severity, reproduction, expected/actual result and affected requirement;
+reviewers inspect fixes against the final candidate. Keep secrets and private paths out
+of public artifacts. Missing, failed and inapplicable checks stay distinguishable.
 
-Each finding records severity, affected requirement/module/feature IDs, reproducible steps, expected/actual result, evidence and scope limits. Remediation names the changed commit and regression evidence. Reviewers recheck the final candidate or explicitly carry forward an earlier finding/result after inspecting the intervening diff; the acceptance commit must match the reviewed commit. Code or dependency changes after review invalidate affected conclusions until revalidated. Do not make reviewers approve mutable branch names or screenshots alone.
+## Q.VER-04 — Support claims and traceability
 
-Keep needed sanitized commands, fixture hashes, logs/traces and outcomes in durable private evidence or scoped CI artifacts with identities/checksums where needed. Do not grow historical report directories in contributor documentation. Mark results `pass`, `fail`, `not run` or `not applicable` with rationale. A tool's successful exit code is not proof that the intended assertion ran.
+[Known limitations](../limitations.md) owns delivered scope; the product requirements
+own intended behavior. Link changed requirements to checks and actual results in the
+PR or release record rather than maintaining a parallel feature-status ledger.
+Distinguish unsupported client behavior, server-disabled behavior and unverified
+integration. Optional recording, federation, SIP, providers and E2EE need separate checks.
 
-## Q.VER-04 — Feature parity traceability
-
-Maintain one authoritative product feature matrix. For each existing product ID, record: source/spec revision; target scope; capability/configuration/permission predicates; owning module/interface; positive and denied/degraded cases; platform; exact NC/Talk/profile; implementation state; test evidence; independent review; remaining limitation. Link quality IDs as cross-cutting requirements instead of duplicating the product catalog.
-
-Required distinctions: `specified`, `bootstrap`, `implemented, unverified`, `verified`, `deferred`, `unsupported by client`, and `unavailable in this server profile`. A disabled server capability is not proof of client support. A truthful unsupported-state UI can pass its own acceptance criterion without passing the absent feature. Optional integrations, external-call services, E2EE, transcription, recording, federation and SIP require separate scope/evidence; do not infer them from chat or basic calls.
-
-For each claimed integrated feature, run the same core scenario on NC34.x/Talk24.x and NC35.x/Talk25.x. Name exact patch versions and metadata-derived capabilities. A backported capability must work where advertised; absence on a newer server must disable/explain the action correctly. Do not infer “all 34.x/35.x verified” from one patch pair. Pin protocol evidence, for example [Talk24 capabilities](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/capabilities.md) and [Talk25 capabilities](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/capabilities.md).
+For claimed integration, exercise the core scenario on both supported server families
+and name exact patches, capabilities, policy and backend versions. One patch pair does
+not verify every 34.x/35.x deployment; backports need their own compatible contract.
 
 ## Q.VER-05 — Mandatory cross-cutting scenarios
 
@@ -57,7 +58,7 @@ These are verification groups, not another product specification. Attach the own
 | Group | Required cases |
 | --- | --- |
 | `V.AUTH` | External-browser login/2FA, cancellation/expiry, app-password rejection, server loss versus wrong credentials, two accounts, locked/missing/denied/corrupt/unavailable native store, unencrypted private-file restart and owner/mode/DACL/path validation, explicit session-only choice, backend-qualified migration/recovery, logout/revocation/deletion failure; uncertain-write and account-loss cases below |
-| `V.ROOM` | 1:1, group, public guest/password access and note-to-self; guest access versus discoverability; Nextcloud groups as invitation sources; presets/forced values; denied admin/moderator actions; unknown type/attribute preservation with safe restrictions |
+| `V.ROOM` | 1:1, group, public guest/password access and note-to-self; guest access versus discoverability; NextCloud groups as invitation sources; presets/forced values; denied admin/moderator actions; unknown type/attribute preservation with safe restrictions |
 | `V.CHAT` | Claimed message/file workflows, pagination, ordering/deduplication, unread state, interruption and expiry; optimistic rollback, queue capacity, staging/dispatch crash boundaries, fresh reconnect validation and read-only uncertainty recovery under MSG-003 |
 | `V.CALL` | Ringing with zero capture; direct-call accept without device-prejoin; voluntary conference join with prejoin; OS permission prompts/denial/revocation, lobby, recording consent, camera/microphone/screen intent, active capture indicator and teardown |
 | `V.MEDIA` | Actual bidirectional audio/video, device switch, screen share, internal signaling and configured HPB/TURN, forced relay, reconnection, participant changes, required/unsupported E2EE and recording combinations |
@@ -71,11 +72,11 @@ A controlled “downgrade” means switching between isolated supported profiles
 
 For a durable chat/cache claim, exercise process restart before and after staging commit, dispatch-marker recovery, failed storage, full capacity without intent eviction, restricted/session-only exclusions, account isolation and logout purge. An unresolved send/forward outside the 200-message read window or uncorrelated scheduled creation must remain retained without another POST. These are acceptance conditions, not evidence that the candidate passed.
 
-The scenarios below are **specified, not run**. They add observable cases to existing quality/product IDs; they are not new claims of implemented behavior. Bootstrap reviews inspect their contracts/test seams. Product evidence uses actual adapters/media/servers where applicable and labels injected faults separately.
+The scenarios below define required failure and lifetime coverage. Record actual results separately, using native adapters/media/servers where applicable and labelled fault injection for otherwise inaccessible states.
 
 ### V.AUTH.STORE — Uncertain storage transitions
 
-Applies to [Q.SEC-03/04](security.md#qsec-03--os-vault-contract) and `AUTH-003/004/005/008/009`, traced through CT-003 and F-003/004/005/009/010/012. Use separate attempted `N` and retained `P`, each with its exact account/profile/backend/store binding; these are nonsecret identities. Apply -01–06 to native and file providers, including cross-provider replacement. Runtime evidence must label actual OS/provider/filesystem tests separately from injected faults and real R34/R35 authorization; static authoring runs none of them.
+Applies to [Q.SEC-03/04](security.md#qsec-03--os-vault-contract) and `AUTH-003/004/005/008/009`, covered by CT-003. Use separate attempted `N` and retained `P`, each with its exact account/profile/backend/store binding; these are nonsecret identities. Apply -01–06 to native and file providers, including cross-provider replacement. Runtime evidence must label actual OS/provider/filesystem tests separately from injected faults and real R34/R35 authorization; static authoring runs none of them.
 
 | Scenario | Stimulus and expected result |
 | --- | --- |
@@ -88,7 +89,7 @@ Applies to [Q.SEC-03/04](security.md#qsec-03--os-vault-contract) and `AUTH-003/0
 | `V.AUTH.STORE-07` | On Linux separately remove the session D-Bus and run a bus without Secret Service; verify absence is not classified as a locked collection or missing credential. Offer durable unencrypted private-file storage. Authorize a synthetic account, choose it, confirm file durability plus backend-qualified eligibility, exit/restart with the service still absent and restore that credential without another browser login solely because of store absence. Verify actual authenticated account binding on R34 and R35 when the adapter exists. No primary-password or master-password/KDF prompt. |
 | `V.AUTH.STORE-08` | On POSIX inject wrong directory/file owner, `0755` directory, `0644` file, extra ACL access, unsafe ancestor, symlink/hard-link/traversal and swapped-path races; also shared/synced/temp locations or unsafe XDG overrides. Reject before secret read/write, never chmod through a link, broaden permissions or overwrite another object. Positive creation has owned `0700` directories/`0600` files from first secret write, including private staging siblings. Check safe repair/retry, retained P and honest session/cancel alternatives. |
 | `V.AUTH.STORE-09` | On Windows inject DACL creation/readback failure, wrong owner SID, null/broad/inherited DACL, junction/reparse redirection, and a filesystem without enforceable ACLs. File mode must not claim privacy or persist there. A read-only flag alone cannot pass. Positive case verifies the owner-restricted DACL on directory, staged and final files before secret bytes are admitted. No portable POSIX-mode assumption, temporary/shared fallback or bypass on ACL failure. |
-| `V.AUTH.STORE-10` | Lock a real Keychain/Secret Service collection; separately deny/dismiss its prompt and deny Windows credential access. Classify using qualified native evidence, with at most one outstanding prompt and no background re-prompt after refusal. A valid memory session continues if still admitted; an inaccessible credential is never copied into a file. Deliberate file/session choice uses available validated memory or fresh browser authorization. No failure automatically changes backend or reports wrong Nextcloud credentials. |
+| `V.AUTH.STORE-10` | Lock a real Keychain/Secret Service collection; separately deny/dismiss its prompt and deny Windows credential access. Classify using qualified native evidence, with at most one outstanding prompt and no background re-prompt after refusal. A valid memory session continues if still admitted; an inaccessible credential is never copied into a file. Deliberate file/session choice uses available validated memory or fresh browser authorization. No failure automatically changes backend or reports wrong NextCloud credentials. |
 | `V.AUTH.STORE-11` | Start with committed file eligibility, restore it, then make the native store available/unlock it and restart again. Keep the file binding/mode and create no native credential. Repeat with session-only: no backend restores. Populate an old native P and an abandoned N, including a colliding generation number in another provider; availability/enumeration never merges generations or reactivates either. A changed/missing store binding requires recovery rather than a guessed default. |
 | `V.AUTH.STORE-12` | Deliberately migrate file→native and native→file, and explicitly save a session-only credential. Reconcile earlier writers and create fresh target N under committed destination intent; atomically commit sole target mode/eligibility only after confirmed storage. Fail/cancel/crash before and after intent, target install, activation and source retirement. P stays intact before authorized retirement; failed migration follows the last committed disposition, and only committed validated cancel-and-retain restores P. Failed source deletion after target activation reports residual cleanup without enabling both. A delayed receipt cannot supersede newer suppression or choice. |
 | `V.AUTH.STORE-13` | Race two processes/account writers and a source/target save; lose the profile lock; inject short writes, disk/quota exhaustion, flush/atomic-install failures and an existing destination. No overwrite of P/collision or overlapping account write; no partial record becomes eligible, cross-volume copy fallback or false saved status. Crash around each file/ledger flush/install boundary. Reacquisition/early absence alone cannot settle a pending writer. Hit 16 KiB record/16-record-account and existing worker/descriptor limits: visible backpressure, no truncation, unbounded retries or reclamation of retained/uncertain items. |
@@ -130,7 +131,7 @@ Applies to [Q.PERF-01/02/07](performance.md#qperf-01--reference-environment-and-
 
 ### V.PERF.WORKLOAD — Frozen and validated workload
 
-Applies to [Q.PERF-02/07/08](performance.md#qperf-02--workload-budgets) and [Q.LAB-05](test-servers.md#qlab-05--reproducibility-evidence).
+Applies to [Q.PERF-02/07/08](performance.md#qperf-02--workload-budgets) and [Q.LAB-05](test-servers.md#qlab-05--reproducibility).
 
 | Scenario | Stimulus and expected result |
 | --- | --- |
@@ -141,18 +142,19 @@ Applies to [Q.PERF-02/07/08](performance.md#qperf-02--workload-budgets) and [Q.L
 
 Unit/contract tests exercise meaningful invariants, protocol parsing and failure transitions. Integration tests exercise adapters and real servers. Native scenario tests exercise OS devices/vault/UI; performance runs use the declared reference hardware. Do not inflate coverage with tests that merely repeat implementation constants or claim a mock is a real server.
 
-The user has authorized disposable Nextcloud/Talk servers. [The lab plan](test-servers.md) defines isolation, versions, secret handling and cleanup. Run services only within their assigned execution scope. Use a local development environment, an isolated container or CI. Clean up disposable services and secret-bearing fixtures after the run. Linux-server evidence cannot substitute for macOS capture/Keychain/performance evidence.
+The user has authorized disposable NextCloud/Talk servers. [The lab plan](test-servers.md) defines isolation, versions, secret handling and cleanup. Run services only within their assigned execution scope. Use a local development environment, an isolated container or CI. Clean up disposable services and secret-bearing fixtures after the run. Linux-server evidence cannot substitute for macOS capture/Keychain/performance evidence.
 
 ## Q.VER-07 — Current-state documentation and handoff
 
-Update current limitations, the feature matrix and public claims when a change affects them; do not add a public task diary for every internal edit. The private handoff records changed behavior, actual backend/native integration, checks run, unrun checks and remaining limitations. Update module/interface docs when implementation changes a contract. Preserve previous evidence with its original commit; do not relabel it as current.
+Update current limitations and public claims when a change affects them; do not add a public task diary for every internal edit. The private handoff records changed behavior, actual backend/native integration, checks run, unrun checks and remaining limitations. Update module/interface docs when implementation changes a contract. Preserve previous evidence with its original commit; do not relabel it as current.
 
 Before publication, inspect documentation, screenshots, fixtures, traces and diagnostic artifacts for credentials, real customer data and private host paths. Confirm that design images/prototypes are identified as design artifacts and provisional budgets as targets. A public EUPL-1.2 project still needs accurate third-party attribution; do not import external source snippets to fill specifications.
 
 Product acceptance needs accurate current-state documentation. Passing tests do not justify misleading support or release claims.
 
-## Q.VER-08 — Closure and review rounds
+## Q.VER-08 — Review closure
 
-When an independent review round is assigned, preserve the original brief, candidate, prior findings, author responses and unresolved objections. New rounds must not discard difficult findings. Track each finding through `open`, `fixed pending verification`, `verified fixed` or `explicitly deferred` with an owner and evidence.
-
-The owner's product/release decision states the gate, exact commit and accepted scope, links the assigned verification, resolves blockers and records permitted exceptions and remaining product gates. Routine documentation/settings work does not trigger another round by this rule. A bootstrap publication may finish with “bootstrap accepted; product unimplemented/unverified.” A product claim may finish only with evidence for that claim. This document itself supplies neither decision.
+When a review is assigned, preserve its brief, candidate, findings and unresolved
+objections in the issue or PR. Rechecks account for earlier findings and intervening
+changes. The owner's acceptance states the exact candidate, scope, checks and remaining
+limits. Routine documentation work does not trigger extra review rounds by this rule.

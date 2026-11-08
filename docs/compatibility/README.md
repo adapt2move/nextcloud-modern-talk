@@ -2,7 +2,9 @@
 
 Target families are NextCloud 34.x / Talk 24.x and NextCloud 35.x / Talk 25.x. Account and messaging integration has been exercised against 34.0.5 / 24.0.6 and 35.0.2 / 25.0.6. This establishes the tested operations on those deployments, not full client parity or support for every optional backend. The [research baseline](baselines-and-sources.md) and executable tests have different purposes.
 
-Read the [feature inventory](feature-inventory.md) for implementation scope, the [known limitations](../limitations.md) for user-facing limits and the [test matrix](test-matrix.md) for required scenarios. Product behavior is canonical in [product/README.md](../product/README.md).
+Read [known limitations](../limitations.md) for delivered scope, the
+[test scenarios](test-matrix.md) for acceptance coverage and
+[product requirements](../product/README.md) for intended behavior.
 
 ## COMP-001
 
@@ -20,7 +22,7 @@ Acceptance: a local attachment preference does not come from the remote host; a 
 
 **Refresh capabilities and policy with bounded freshness.** A changed `X-Nextcloud-Talk-Hash` invalidates the relevant local capability/signaling snapshot; a changed `X-Nextcloud-Talk-Proxy-Hash` invalidates the corresponding host snapshot. Recompute actions and pending form/join validity. Reauthenticate/reconnect triggers a refresh as appropriate. Periodic/full room reconciliation is required because incremental room updates do not report every removal.
 
-Hash invalidation is only one trigger. [Q.SEC-10](../quality/security.md#required-bootstrap-policy-decision) is authoritative for ongoing calls as well as joins: scope fresh/denied/unknown/stale decisions to account, host, room and authorization/call generation, and refresh every required property through a proven source. In the pinned settings, E2EE and grid enforcement can change without a new hash. A matching hash, heartbeat, working RTP or unrelated response cannot renew those values. Before `G.BOOT`, approve source/propagation assumptions and numeric freshness, refresh, request, enforcement and device-release bounds; unfilled bounds or an unobservable required source cannot support an enforcement claim.
+Hash invalidation is only one trigger. [Q.SEC-10](../quality/security.md#required-bootstrap-policy-decision) is authoritative for ongoing calls as well as joins: scope fresh/denied/unknown/stale decisions to account, host, room and authorization/call generation, and refresh every required property through a proven source. In the pinned settings, E2EE and grid enforcement can change without a new hash. A matching hash, heartbeat, working RTP or unrelated response cannot renew those values. For an enforcement claim, document source/propagation assumptions and numeric freshness, refresh, request, enforcement and device-release bounds; unfilled bounds or an unobservable required source cannot support an enforcement claim.
 
 Acceptance: disabling calls, changing forced presets/consent or revoking permission during a dialog invalidates obsolete submission on observation; uninterrupted-call non-hash changes are detected/enforced or safely suspended within the approved bounds. Control loss remains visible even with live media; failed/partial refresh cannot reset expiry, and delayed/old-generation responses cannot renew authority. Unknown/stale evidence enables no new join/publication expansion; existing grants expire under Q.SEC-10, with local leave when membership/required consent/encryption cannot be established. Fresh state alone never restarts capture. An update for one host does not clear unrelated accounts. [CT-004/015/018](test-matrix.md#ct-004) and [V.POLICY.FRESH](../quality/verification.md#vpolicyfresh--ongoing-policy-freshness) require source/expiry/enforcement evidence, including sleep/wake.
 
