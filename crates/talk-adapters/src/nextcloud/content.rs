@@ -58,16 +58,31 @@ impl NextcloudClient {
         placeholder: &Text<128>,
         caps: &Capabilities,
     ) -> Result<api::chat::RichObject, PortError> {
+        Ok(self
+            .attachment_with_kind(c, message, placeholder, caps)
+            .await?
+            .1)
+    }
+    /// The attachment with the message type that carries it, from one message read.
+    async fn attachment_with_kind(
+        &mut self,
+        c: &OperationContext,
+        message: MessageId,
+        placeholder: &Text<128>,
+        caps: &Capabilities,
+    ) -> Result<(Option<String>, api::chat::RichObject), PortError> {
         let room = self.content_room(c, message.conversation, caps).await?;
         if room.classified || room.sensitive {
             return Err(self.error(ErrorKind::PermissionDenied));
         }
-        self.target(c, message)
-            .await?
+        let target = self.target(c, message).await?;
+        let kind = target.kind.clone();
+        let object = target
             .rich
             .into_iter()
             .find(|o| o.kind == "file" && o.placeholder == placeholder.as_str())
-            .ok_or_else(|| self.error(ErrorKind::NotFound))
+            .ok_or_else(|| self.error(ErrorKind::NotFound))?;
+        Ok((kind, object))
     }
     pub(super) async fn content(
         &mut self,
@@ -166,18 +181,18 @@ impl NextcloudClient {
                 message,
                 placeholder,
             } => {
-                let target = self.target(c, message).await?;
-                if target.kind.as_deref() != Some("voice-message") {
-                    return Err(self.error(ErrorKind::Unsupported));
-                }
-                let object = self.attachment(c, message, &placeholder, caps).await?;
+                let (kind, object) = self
+                    .attachment_with_kind(c, message, &placeholder, caps)
+                    .await?;
+                let voice = kind.as_deref() == Some("voice-message");
+                let mime = object.mime_type.as_deref().unwrap_or_default();
                 // Android's AAC-in-MP4 recorder currently names files .mp3;
                 // its DAV MIME may therefore be audio/mpeg. The native player
                 // still identifies the container from bounded bytes.
                 // https://github.com/nextcloud/talk-android/blob/master/app/src/main/java/com/nextcloud/talk/chat/data/io/MediaRecorderManager.kt
-                if !matches!(
-                    object.mime_type.as_deref(),
-                    Some(
+                let allowed = if voice {
+                    matches!(
+                        mime,
                         "audio/wav"
                             | "audio/x-wav"
                             | "audio/ogg"
@@ -189,13 +204,21 @@ impl NextcloudClient {
                             | "audio/x-m4a"
                             | "video/mp4"
                     )
-                ) {
+                } else {
+                    // An ordinary audio attachment: whatever the server calls audio,
+                    // within the same size bound as other media. The player decides
+                    // from the bytes whether it can decode it.
+                    mime.starts_with("audio/") || mime == "application/ogg"
+                };
+                if !allowed {
                     return Err(self.error(ErrorKind::Unsupported));
                 }
-                if object
-                    .size
-                    .is_some_and(|size| size > api::files::MAX_FILE_BYTES)
-                {
+                let limit = if voice {
+                    api::files::MAX_FILE_BYTES
+                } else {
+                    api::files::MAX_FILE_BYTES.min(api::content::MAX_VIDEO_BYTES as u64)
+                };
+                if object.size.is_some_and(|size| size > limit) {
                     return Err(self.error(ErrorKind::TooLarge));
                 }
                 let raw = object

@@ -284,6 +284,15 @@ pub(super) fn attachments(snapshot: &mut PresentationSnapshot) {
             id: Some(text("105")),
             link: None,
         },
+        RichObject {
+            placeholder: text("audio"),
+            kind: text("file"),
+            name: text("Interview-Mara-Fischer.mp3"),
+            mime_type: Some(text("audio/mpeg")),
+            size: Some(3_250_000),
+            id: Some(text("106")),
+            link: None,
+        },
     ]);
     snapshot.messages = page(
         snapshot

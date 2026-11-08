@@ -2,6 +2,13 @@
 //! Views never resolve a URL, decode remote bytes, or report transfer success.
 mod browser;
 pub(in crate::presentation) mod gallery;
+
+/// An attachment the server describes as audio; it gets the in-app player.
+pub(in crate::presentation) fn audio_file(object: &talk_core::ui::messaging::RichObject) -> bool {
+    object.mime_type.as_ref().is_some_and(|mime| {
+        mime.as_str().starts_with("audio/") || mime.as_str() == "application/ogg"
+    })
+}
 pub(in crate::presentation) mod groups;
 mod voice_scrub;
 mod window;
@@ -1329,6 +1336,25 @@ impl Desktop {
         object: &talk_core::ui::messaging::RichObject,
         cx: &Context<Self>,
     ) -> gpui::Stateful<Div> {
+        self.audio_player_card(reference, object, false, cx)
+    }
+    /// An audio file shared as an ordinary attachment: the voice player plus its
+    /// name and size, with the download always at hand.
+    pub(super) fn audio_file_card(
+        &self,
+        reference: AttachmentRef,
+        object: &talk_core::ui::messaging::RichObject,
+        cx: &Context<Self>,
+    ) -> gpui::Stateful<Div> {
+        self.audio_player_card(reference, object, true, cx)
+    }
+    fn audio_player_card(
+        &self,
+        reference: AttachmentRef,
+        object: &talk_core::ui::messaging::RichObject,
+        named: bool,
+        cx: &Context<Self>,
+    ) -> gpui::Stateful<Div> {
         use talk_core::ui::content::PlaybackState;
         let playback = self
             .snapshot
@@ -1461,10 +1487,30 @@ impl Desktop {
                     LocalAction::Content(Action::Download(reference.clone())),
                     cx,
                 )
-                .opacity(if failed { 1. } else { 0. })
+                .opacity(if failed || named { 1. } else { 0. })
                 .group_hover(group.clone(), |s| s.opacity(1.))
                 .focus(|s| s.opacity(1.)),
             );
+        let title = named.then(|| {
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_1()
+                .child(self.scaled_icon("file-audio", 16., self.theme.muted))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .text_ellipsis()
+                        .child(object.name.as_str().to_owned()),
+                )
+                .child(self.hint(&super::attachments::file_detail(
+                    self.locale,
+                    object.name.as_str(),
+                    object.size,
+                )))
+        });
         div()
             .id(scoped_id(
                 "voice-card",
@@ -1481,6 +1527,7 @@ impl Desktop {
             .p_2()
             .rounded(px(8.))
             .bg(self.theme.subtle)
+            .children(title)
             .child(row)
             .when(failed, |d| {
                 d.child(self.hint(self.l("Wiedergabe nicht verfügbar. Lade die Datei herunter.")))

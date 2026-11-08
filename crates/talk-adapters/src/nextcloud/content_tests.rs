@@ -595,6 +595,72 @@ async fn original_video_reads_exact_bytes_only_from_authenticated_account_dav() 
     }
 }
 
+async fn audio_result(server: &Server) -> Result<ProtocolReply, PortError> {
+    let r = runtime();
+    let mut client = client(&server.origin, r.clone());
+    let id = bind(&mut client);
+    client
+        .request(
+            context(&r),
+            ProtocolRequest::Content {
+                operation: OperationId::from_local(903),
+                command: C::VoiceAudio {
+                    message: MessageId {
+                        conversation: id,
+                        sequence: 7,
+                    },
+                    placeholder: Text::new("file").unwrap(),
+                },
+            },
+        )
+        .await
+}
+
+#[tokio::test]
+async fn an_ordinary_audio_attachment_plays_from_account_dav_and_other_files_do_not() {
+    let original = b"RIFF synthetic audio container";
+    for mime in ["audio/wav", "audio/mpeg", "audio/flac", "audio/x-aiff"] {
+        let server = Server::start(vec![
+            Reply::data(features()),
+            Reply::data(room()),
+            Reply::data(json!([attachment_message(mime)])),
+            binary(200, mime, original),
+        ])
+        .await;
+        let result = audio_result(&server).await;
+        let result = result.unwrap();
+        assert!(
+            matches!(result, ProtocolReply::Content { result: R::VoiceAudio(bytes), .. }
+            if bytes.as_slice() == original),
+            "{mime}"
+        );
+    }
+    for (mime, size, expected) in [
+        ("image/png", json!(100), ErrorKind::Unsupported),
+        ("video/mp4", json!(100), ErrorKind::Unsupported),
+        ("application/pdf", json!(100), ErrorKind::Unsupported),
+        (
+            "audio/mpeg",
+            json!(nextcloud_talk_api::content::MAX_VIDEO_BYTES + 1),
+            ErrorKind::TooLarge,
+        ),
+    ] {
+        let mut message = attachment_message(mime);
+        message["messageParameters"]["file"]["size"] = size;
+        let server = Server::start(vec![
+            Reply::data(features()),
+            Reply::data(room()),
+            Reply::data(json!([message])),
+        ])
+        .await;
+        assert_eq!(
+            audio_result(&server).await.unwrap_err().kind,
+            expected,
+            "{mime}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn original_video_preflights_size_supported_mime_and_verified_path() {
     for (mime, field, value, expected) in [

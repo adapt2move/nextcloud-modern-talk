@@ -355,6 +355,8 @@ impl Desktop {
                 };
                 if m.metadata.voice_message {
                     content.child(self.voice_message_card(reference, object, cx))
+                } else if crate::presentation::content::audio_file(object) {
+                    content.child(self.audio_file_card(reference, object, cx))
                 } else {
                     content.child(self.attachment_card(reference, object, cx))
                 }

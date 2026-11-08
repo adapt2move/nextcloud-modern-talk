@@ -31,6 +31,13 @@ pub(super) enum Control {
     Speed(u8),
 }
 
+/// An ordinary attachment the server describes as audio.
+fn playable_audio(object: &talk_core::ui::messaging::RichObject) -> bool {
+    object.mime_type.as_ref().is_some_and(|mime| {
+        mime.as_str().starts_with("audio/") || mime.as_str() == "application/ogg"
+    })
+}
+
 impl Accounts {
     fn voice_descriptor(&self, reference: &AttachmentRef) -> Option<CachedAttachment> {
         if self.snapshot.active_account != Some(reference.context.account)
@@ -53,7 +60,6 @@ impl Accounts {
             )
             .find(|m| {
                 m.local_id == reference.message
-                    && m.metadata.voice_message
                     && !m.metadata.deleted
                     && m.metadata
                         .expires_at
@@ -65,6 +71,10 @@ impl Accounts {
             .as_slice()
             .iter()
             .find(|o| o.kind.as_str() == "file" && o.placeholder == reference.placeholder)?;
+        // A voice message, or an ordinary attachment the server calls audio.
+        if !message.metadata.voice_message && !playable_audio(object) {
+            return None;
+        }
         Some(CachedAttachment {
             placeholder: object.placeholder.clone(),
             name: object.name.clone(),
@@ -99,10 +109,10 @@ impl Accounts {
                 .any(|message| {
                     message.local_id == reference.message
                         && !message.metadata.deleted
-                        && message.metadata.voice_message
                         && message.metadata.rich.as_slice().iter().any(|object| {
                             object.placeholder == reference.placeholder
                                 && object.kind.as_str() == "file"
+                                && (message.metadata.voice_message || playable_audio(object))
                         })
                 })
     }
