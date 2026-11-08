@@ -294,8 +294,8 @@ impl Desktop {
             .px(px(12.))
             .pt(px(14.))
             .pb(px(10.))
-            .border_r_1()
-            .border_color(t.border)
+            // No divider on the right: the floating content card carries its own
+            // border and shadow, so a sidebar hairline reads as a stray line.
             .children(
                 (!t.reduced_transparency).then(|| super::controls::glass(t.sidebar, t.dark, 0.)),
             )
