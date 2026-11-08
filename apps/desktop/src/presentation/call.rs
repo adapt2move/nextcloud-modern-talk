@@ -1420,10 +1420,9 @@ impl Desktop {
                 self.pill_button_with_icon(
                     "leave-call",
                     ("Verlassen", "phone-down"),
-                    ButtonStyle::StageDanger,
+                    (ButtonStyle::StageDanger, 22.),
                     true,
                     LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))),
-                    22.,
                     cx,
                 )
                 .min_w(px(120.))

@@ -1371,10 +1371,9 @@ impl Desktop {
         &self,
         id: impl Into<ElementId>,
         content: (&'static str, &'static str),
-        style: ButtonStyle,
+        (style, radius): (ButtonStyle, f32),
         availability: impl Into<Availability>,
         action: LocalAction,
-        radius: f32,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
         let availability = availability.into();
