@@ -71,6 +71,12 @@ class PolicyTests(unittest.TestCase):
         self.check("    runs-on: macos-26", "    if: false\n    runs-on: macos-26",
                    file="release.yml")
 
+    def test_publication_requires_publisher_and_no_local_notes_file(self):
+        self.check('"$VERSION_TAG" --publish', '"$VERSION_TAG" --notes notes.md --publish',
+                   file="release.yml")
+        self.check('"$VERSION_TAG" --publish', '"$VERSION_TAG"', file="release.yml")
+        self.check("tools/release/publish.py", "other-publisher.py", file="release.yml")
+
     def test_only_unconditional_native_teardown_may_have_a_step_condition(self):
         self.check("        if: always()", "        if: inputs.publish", file="release.yml")
 

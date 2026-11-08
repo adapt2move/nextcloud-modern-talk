@@ -35,6 +35,8 @@ tagging a release. See [CI policy](docs/ci.md).
 Write public documentation in English and use NextCloud as the project brand. Keep
 installation, development and limitations current. Put implementation rationale beside
 code; use issues, PRs and Git history for task status and historical reports.
+Write clear PR titles and descriptions: GitHub generates release notes from merged
+pull requests on [GitHub Releases](https://github.com/adapt2move/nextcloud-modern-talk/releases).
 
 Contribute only material you can distribute under the applicable terms. Preserve
 [EUPL-1.2](LICENSE), [third-party notices](NOTICE.md), asset licenses and source provenance.

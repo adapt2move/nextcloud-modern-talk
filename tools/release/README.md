@@ -28,11 +28,11 @@ Python 3.11+ and `dpkg-deb` are needed for the Linux packaging fixtures. These t
 
 The [manual workflow](../../.github/workflows/release.yml) binds an existing version tag to its exact mainline commit. Its publisher uses the official `gh` CLI. Packages are verified before a draft is created, then uploaded and downloaded to verify the served bytes before publication. Failures leave a draft; inspect it before a manual retry. Do not overwrite an existing release or move a published tag.
 
-The release body comes from [the current changelog](../../docs/changelog.md).
-Describe only changes since the previous release, followed by version-bound
-links to [installation](../../docs/install.md) and
-[known limitations](../../docs/limitations.md). Keep setup instructions,
-full feature inventories and outstanding work on those separate pages.
+GitHub generates release notes from merged pull requests via
+`gh release create --generate-notes`. The publisher prepends links to installation
+and known limitations at the release tag, so each release points to its matching documents.
+No local notes file is required. Keep setup instructions, full feature inventories
+and outstanding work on those separate pages.
 
 [actions.json](actions.json) contains action pins. [package-policy.json](package-policy.json) records the composition included by the package. Keep this policy aligned with the actual shipping source; it is not a substitute for runtime tests. [candidate.py](candidate.py) checks local tag/commit/origin identity. Evidence and intermediate reports stay outside contributor documentation.
 

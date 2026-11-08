@@ -39,7 +39,7 @@ The [storage amendment](accounts.md#spec-amendment--amend-auth-storage-01) super
 Each requirement has a stable ID (`DOM-*`, `AUTH-*`, `CONV-*`, `MSG-*`, `CONTENT-*`, `CALL-*`, `MOD-*`, `INT-*`, `DESK-*`, `STATE-*`, `JNY-*`, `COMP-*`). Test scenarios are `CT-*`. IDs must not be reused for another behavior. Acceptance paragraphs state observable outcomes, including failure behavior; they are not assertions that tests already exist.
 
 Document delivered scope in [known limitations](../limitations.md) and release changes in
-the [changelog](../changelog.md). Integration claims require reproducible checks naming
+[GitHub Releases](https://github.com/adapt2move/nextcloud-modern-talk/releases). Integration claims require reproducible checks naming
 the client revision, exact server/Talk patches, OS, capabilities, policy and backend.
 A mock, screenshot or successful compilation establishes only its stated scope.
 

@@ -88,7 +88,7 @@ def remote_tag(commit, tag, command=gh):
     raise ValueError("Unsupported tag chain")
 
 
-def publish(directory, commit, tag, notes, command=gh):
+def publish(directory, commit, tag, command=gh):
     arguments(commit, tag)
     files, expected = assets(directory, commit, tag)
     # Copy the verified bytes to a private snapshot before the first mutation.
@@ -100,11 +100,15 @@ def publish(directory, commit, tag, notes, command=gh):
             shutil.copyfile(original, upload / name)
             if sha(upload / name) != expected[name]:
                 raise ValueError("Input changed during snapshot")
-        note = temp / "notes.md"
-        note.write_text(Path(notes).read_text())
+        # GitHub CLI prepends supplied notes to its generated release notes.
+        # Bind documentation to this release rather than the moving main branch.
+        docs = f"https://github.com/{REPOSITORY}/blob/{tag}/docs"
+        header = (f"[Installation]({docs}/install.md) · "
+                  f"[Known limitations]({docs}/limitations.md)\n\n")
         remote_tag(commit, tag, command)
         command("release", "create", tag, "--repo", REPOSITORY, "--verify-tag", "--target", commit,
-                "--draft", "--prerelease", "--title", f"NextCloud Modern Talk {tag} Alpha", "--notes-file", str(note))
+                "--draft", "--prerelease", "--title", f"NextCloud Modern Talk {tag} Alpha",
+                "--generate-notes", "--notes", header)
         command("release", "upload", tag, *[str(upload / name) for name in sorted(files)], "--repo", REPOSITORY)
         command("release", "download", tag, "--repo", REPOSITORY, "--dir", str(download))
         if {p.name for p in download.iterdir()} != set(expected):
@@ -122,12 +126,11 @@ if __name__ == "__main__":
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--tag", required=True)
-    parser.add_argument("--notes", type=Path, required=True)
     parser.add_argument("--publish", action="store_true")
     args = parser.parse_args()
     validate_local(args.commit, args.tag)
     assets(args.directory, args.commit, args.tag)
     if args.publish:
-        print(publish(args.directory, args.commit, args.tag, args.notes))
+        print(publish(args.directory, args.commit, args.tag))
     else:
         print("Packages verified; no GitHub mutation requested.")

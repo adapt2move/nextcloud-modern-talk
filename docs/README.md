@@ -4,7 +4,7 @@
 | --- | --- |
 | [Install](install.md) | Downloads, first launch and updates |
 | [Known limitations](limitations.md) | Supported profile and remaining gaps |
-| [Changelog](changelog.md) | Release changes |
+| [Release notes](https://github.com/adapt2move/nextcloud-modern-talk/releases) | Release changes |
 | [Development](development.md) | Prerequisites, builds and tests |
 | [Architecture](architecture/README.md) | Modules, ownership and data flow |
 | [Backend lab](backend-lab.md) | Disposable synthetic NextCloud servers |

@@ -226,7 +226,9 @@ Select the smallest relevant package scope for a change. Negative boundary fixtu
 [CI](ci.md) runs the standard check in one Linux job. Windows/macOS compilation
 and macOS package validation are manual checks required before tagging a release.
 The [release tooling guide](../tools/release/README.md) describes standalone
-workflow/package checks and their limits.
+workflow/package checks and their limits. Release notes are generated on
+[GitHub Releases](https://github.com/adapt2move/nextcloud-modern-talk/releases);
+no local release-notes file needs updating.
 
 ## Documentation check
 

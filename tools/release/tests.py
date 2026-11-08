@@ -7,8 +7,10 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import runpy
 import shutil
 import struct
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -19,6 +21,7 @@ from build import dependency_notices, macos_linkage, notice_supplement
 from package import REQUIRED_NOTICES, assemble, sha, validate
 from macos_tests import MacRuntimeTests, MacPackageTests, PersistentSigningTests
 from vendor import GPUI_ARCHIVE, verify_gpui
+from publication_tests import COMMIT, TAG, fixture as publication_fixture
 
 
 def fixture(path, target="x86_64-unknown-linux-gnu"):
@@ -48,6 +51,21 @@ def fixture(path, target="x86_64-unknown-linux-gnu"):
 
 def save(path, spec):
     (path / "input.json").write_text(json.dumps(spec, indent=2) + "\n")
+
+
+class PublicationCliFixtures(unittest.TestCase):
+    def test_verify_only_needs_no_notes_file_and_does_not_contact_github(self):
+        with tempfile.TemporaryDirectory(prefix="nmt-publication-cli-") as tmp:
+            root = Path(tmp)
+            publication_fixture(root)
+            args = ["publish.py", "--directory", str(root), "--commit", COMMIT, "--tag", TAG]
+            output = io.StringIO()
+            with patch.object(sys, "argv", args), contextlib.redirect_stdout(output), \
+                    patch("candidate.validate_local") as preflight, \
+                    patch("subprocess.check_output", side_effect=AssertionError("Unexpected GitHub operation")):
+                runpy.run_path(str(Path(__file__).with_name("publish.py")), run_name="__main__")
+            preflight.assert_called_once_with(COMMIT, TAG)
+            self.assertIn("Packages verified; no GitHub mutation requested.", output.getvalue())
 
 
 class MacLinkageFixtures(unittest.TestCase):

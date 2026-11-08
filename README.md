@@ -11,7 +11,7 @@ Built in Rust with GPUI: no WebView, no Electron.
 
 [**Download**](https://github.com/adapt2move/nextcloud-modern-talk/releases) ·
 [Install guide](docs/install.md) ·
-[Changelog](docs/changelog.md) ·
+[Release notes](https://github.com/adapt2move/nextcloud-modern-talk/releases) ·
 [Known limitations](docs/limitations.md)
 
 <br>
@@ -96,7 +96,7 @@ develop without production accounts.
 
 ## Documentation
 
-- [Documentation index](docs/README.md), [changelog](docs/changelog.md) and [known limitations](docs/limitations.md)
+- [Documentation index](docs/README.md), [release notes](https://github.com/adapt2move/nextcloud-modern-talk/releases) and [known limitations](docs/limitations.md)
 - [Product requirements](docs/product/README.md) and [compatibility contract](docs/compatibility/README.md)
 - [Architecture](docs/architecture/README.md) and [design reference](docs/design/README.md)
 - [CI policy](docs/ci.md), [release tooling](tools/release/README.md) and [security reporting](SECURITY.md)
