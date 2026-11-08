@@ -112,3 +112,21 @@ sequence also verifies nonselected DM discovery, a direct mention, a due reminde
 created by the actual server background job, unread preservation and incoming
 direct-call discovery/decline. Native macOS authorization, helper delivery, Focus
 and window-close/reopen behavior still require a native Mac run.
+
+## Signed-in public-room entry
+
+Run `python3 tests/lab/public_room.py --profile r35 --output /absolute/new/results`
+(and separately with `r34`) on the disposable VM. It creates public, password,
+lobby and listed rooms as one synthetic user, checks that another user has only
+pre-join guest-like metadata and cannot read history, then runs the typed adapter
+through admission, history, sending and membership leave. Incorrect/missing
+passwords and lobby waiting have distinct results; entry grants no call handle.
+The public room is unlisted, so its password is not bypassed by directory eligibility.
+
+For a Linux native interaction check, first build the desktop with `dev-probes`,
+then add `--native-binary /absolute/path/to/talk-desktop`. The optional Xvfb/Mesa
+check uses real mouse/key input to paste a same-server link into discovery, join
+with a password, read history and send a message. It requires xdotool, ImageMagick,
+Tesseract, Xvfb and D-Bus. Screenshots contain only the disposable fixture. This
+is Linux native interaction evidence, not macOS/Windows, accessibility or media
+qualification. The lab removes its private profile and server data on completion.

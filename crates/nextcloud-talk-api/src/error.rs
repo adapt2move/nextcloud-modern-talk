@@ -8,6 +8,8 @@ pub enum ErrorKind {
     Deadline,
     Busy,
     PermissionDenied,
+    PasswordRequired,
+    Lobby,
     /// HTTP 403 without a valid OCS refusal; not evidence of revoked credentials.
     ServerAccessDenied,
     ReauthenticationRequired,

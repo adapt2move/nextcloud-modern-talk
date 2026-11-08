@@ -816,6 +816,7 @@ pub(super) fn model() -> Accounts {
         discover_probe_generation: 0,
         discovery_retry: None,
         discovery_join: None,
+        room_open_generation: 0,
         reference_owner: references::Owner::default(),
         reference_generation: 0,
         notices: notifications::Notices::default(),

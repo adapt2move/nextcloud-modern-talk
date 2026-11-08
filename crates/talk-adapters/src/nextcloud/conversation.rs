@@ -846,6 +846,10 @@ impl NextcloudClient {
             self.settle_action(operation, reply.as_ref().err());
             reply?;
             self.rooms.retain(|r| r.id != id);
+            if self.chat_session == Some(id) {
+                self.chat_session = None;
+                self.chat_join_uncertain = false;
+            }
             return Ok(ConversationResult::Left);
         }
         if command == C::GuestLink {

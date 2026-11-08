@@ -118,6 +118,8 @@ pub(super) fn kind(k: api::ErrorKind) -> ErrorKind {
         api::ErrorKind::Deadline => ErrorKind::Deadline,
         api::ErrorKind::Busy => ErrorKind::Busy,
         api::ErrorKind::PermissionDenied => ErrorKind::PermissionDenied,
+        api::ErrorKind::PasswordRequired => ErrorKind::PasswordRequired,
+        api::ErrorKind::Lobby => ErrorKind::Lobby,
         api::ErrorKind::ReauthenticationRequired => ErrorKind::ReauthenticationRequired,
         api::ErrorKind::Malformed => ErrorKind::Malformed,
         api::ErrorKind::Uncertain => ErrorKind::Uncertain,
@@ -284,6 +286,12 @@ impl Transport {
     }
     pub(super) fn scope(&self) -> AccountScope {
         self.scope
+    }
+    pub(super) fn conversation_link_token(
+        &self,
+        link: &str,
+    ) -> Result<api::models::RoomToken, PortError> {
+        self.api.conversation_link_token(link).map_err(error)
     }
     pub(super) fn host(&self) -> HostId {
         self.host

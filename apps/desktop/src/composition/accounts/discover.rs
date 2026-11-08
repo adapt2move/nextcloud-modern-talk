@@ -468,6 +468,12 @@ impl Accounts {
         }) else {
             return;
         };
+        let admission_blocked = match &result {
+            Err(IdentityError::Request(
+                kind @ (ErrorKind::PasswordRequired | ErrorKind::Lobby),
+            )) => Some(*kind),
+            _ => None,
+        };
         let mut joined = None;
         let completion = match result {
             Ok(RuntimeReply::Protocol(ProtocolReply::OpenConversations(found)))
@@ -490,8 +496,7 @@ impl Accounts {
                         description: room.description.clone(),
                         participants: room.participants,
                         join: match room.password_required {
-                            Some(false) => Decision::Allowed,
-                            Some(true) => Decision::Denied,
+                            Some(_) => Decision::Allowed,
                             None => Decision::Unknown,
                         },
                     }));
@@ -543,6 +548,17 @@ impl Accounts {
             if transition.is_some() && self.snapshot.selected == Some(context) {
                 self.snapshot.selected = None;
                 let _ = self.open(context);
+            }
+        } else if let (Some(kind), Some(context)) = (admission_blocked, joining) {
+            if self.snapshot.selected == Some(context) {
+                self.discovery_join = transition;
+                self.snapshot.message_panel =
+                    Some(talk_core::ui::messaging::MessagePanel::new(context));
+                self.complete_open(
+                    context,
+                    self.room_open_generation,
+                    Err(IdentityError::Request(kind)),
+                );
             }
         } else if let Some(transition) = transition {
             self.rollback_optimistic_join(transition);

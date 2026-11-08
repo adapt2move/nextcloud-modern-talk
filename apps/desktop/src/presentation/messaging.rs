@@ -46,6 +46,7 @@ pub(crate) enum Action {
     MenuChoice(menu::Target, menu::Choice),
     Forward(forward::Action),
     RetryHistory,
+    JoinRoom,
     RetryContext { request: RequestId, target: u128 },
     Reply(u128),
     PrivateReply(u128),
@@ -1704,6 +1705,16 @@ impl Desktop {
             Action::MenuChoice(target, choice) => {
                 self.choose_message_menu(target, choice, window, cx)
             }
+            Action::JoinRoom => {
+                if let Ok(password) =
+                    Text::new(self.room_ui.join_password.read(cx).content.as_str())
+                {
+                    self.submit_message(MessageAction::JoinRoom(password));
+                    self.room_ui
+                        .join_password
+                        .update(cx, |input, _| input.reset());
+                }
+            }
             Action::RetryHistory => {
                 self.request_older_history(true);
             }
@@ -2211,12 +2222,16 @@ impl Desktop {
             ContentState::Ready | ContentState::Loading | ContentState::Offline
         ) && let Some(context) = self.snapshot.selected
         {
-            body = body.child(div().px_3().py_2().child(self.collection_feedback(
-                state,
-                "retry-content",
-                LocalAction::Intent(UiIntent::Refresh(context)),
-                cx,
-            )));
+            body = body.child(div().px_3().py_2().child(
+                self.room_entry_feedback(context, cx).unwrap_or_else(|| {
+                    self.collection_feedback(
+                        state,
+                        "retry-content",
+                        LocalAction::Intent(UiIntent::Refresh(context)),
+                        cx,
+                    )
+                }),
+            ));
         }
         if let Some(panel) = self
             .snapshot
@@ -2287,6 +2302,49 @@ impl Desktop {
         }
         body
     }
+    fn room_entry_feedback(&self, context: ConversationRef, cx: &Context<Self>) -> Option<Div> {
+        use talk_core::ui::{UnavailableReason, conversation::RemoteState};
+        let reason = match self.snapshot.message_panel.as_ref()?.history {
+            RemoteState::Failed(_, reason) => reason,
+            _ => return None,
+        };
+        let mut body = div().flex().items_center().gap_2();
+        match reason {
+            UnavailableReason::PasswordRequired => {
+                body = body
+                    .child(self.hint(self.l("Dieses Gespräch benötigt ein Passwort.")))
+                    .child(
+                        self.input_surface(&self.room_ui.join_password, cx)
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.room_ui.join_password.clone()),
+                    )
+                    .child(self.button(
+                        "join-room-password",
+                        "Beitreten",
+                        ButtonStyle::Primary,
+                        self.active_account_connected(),
+                        LocalAction::MessageIn(context, Action::JoinRoom),
+                        cx,
+                    ));
+            }
+            UnavailableReason::Lobby => {
+                body = body
+                    .child(self.hint(self.l("Die Lobby ist aktiv. Bitte warte auf die Freigabe.")))
+                    .child(self.button(
+                        "retry-room-lobby",
+                        "Erneut laden",
+                        ButtonStyle::Quiet,
+                        self.active_account_connected(),
+                        LocalAction::Intent(UiIntent::Refresh(context)),
+                        cx,
+                    ));
+            }
+            _ => return None,
+        }
+        Some(body)
+    }
+
     fn message_history(
         &self,
         header_inset: gpui::Pixels,

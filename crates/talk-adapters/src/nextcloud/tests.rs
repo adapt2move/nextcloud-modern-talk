@@ -19,6 +19,8 @@ mod read_tests;
 mod reconcile_tests;
 #[path = "references_tests.rs"]
 mod references_tests;
+#[path = "room_access_tests.rs"]
+mod room_access_tests;
 #[path = "search_tests.rs"]
 mod search_tests;
 #[path = "status_tests.rs"]

@@ -898,6 +898,12 @@ pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
 
 pub fn error_label(error: SubmitError) -> Option<&'static str> {
     Some(match error {
+        SubmitError::Unavailable(UnavailableReason::PasswordRequired) => {
+            "Dieses Gespräch benötigt ein Passwort."
+        }
+        SubmitError::Unavailable(UnavailableReason::Lobby) => {
+            "Die Lobby ist aktiv. Bitte warte auf die Freigabe."
+        }
         SubmitError::Unavailable(UnavailableReason::Connection(failure)) => {
             connection_failure_copy(failure).1
         }

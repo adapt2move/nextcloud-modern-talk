@@ -1000,6 +1000,11 @@ impl NextcloudClient {
                 self.message_capabilities(&room, &data, caps)?,
             ));
         }
+        if wire::integer(data.get("lobbyState")) == Some(1)
+            && wire::integer(data.get("permissions")).is_none_or(|permissions| permissions & 8 == 0)
+        {
+            return Err(self.error(ErrorKind::Lobby));
+        }
         self.message_action(feature(&command), &room, &data, caps)?;
         if matches!(
             command,

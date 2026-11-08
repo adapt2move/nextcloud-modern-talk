@@ -481,6 +481,36 @@ impl Transport {
         })
     }
 
+    pub(crate) fn conversation_link_token(
+        &self,
+        link: &str,
+    ) -> Result<crate::models::RoomToken, PortError> {
+        let url = url::Url::parse(link).map_err(|_| self.error(ErrorKind::Malformed))?;
+        if !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(self.error(ErrorKind::WrongScope));
+        }
+        let token = crate::models::RoomToken::parse(url.path().rsplit('/').next().unwrap_or(""))
+            .map_err(|kind| self.error(kind))?;
+        for route in [
+            format!("call/{}", token.as_str()),
+            format!("index.php/call/{}", token.as_str()),
+        ] {
+            if self
+                .binding
+                .origin
+                .endpoint(&route)
+                .is_ok_and(|expected| expected == url)
+            {
+                return Ok(token);
+            }
+        }
+        Err(self.error(ErrorKind::WrongScope))
+    }
+
     pub(crate) fn public_room_link(
         &self,
         token: &crate::models::RoomToken,
@@ -1112,7 +1142,16 @@ fn classify_ocs(
     Err(match effective {
         // A v1-style HTTP200 auth code is not authoritative on the pinned v2 route.
         401 | 997 if account_probe => ErrorKind::Malformed,
-        401 | 997 | 403 | 412 => ErrorKind::PermissionDenied,
+        403 if ocs
+            .get("data")
+            .and_then(|data| data.get("error"))
+            .and_then(serde_json::Value::as_str)
+            == Some("password") =>
+        {
+            ErrorKind::PasswordRequired
+        }
+        412 => ErrorKind::Lobby,
+        401 | 997 | 403 => ErrorKind::PermissionDenied,
         404 => ErrorKind::NotFound,
         409 => ErrorKind::Conflict,
         413 => ErrorKind::TooLarge,

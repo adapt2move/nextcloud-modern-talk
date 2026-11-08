@@ -20,6 +20,7 @@ mod reads;
 mod references;
 mod reminders;
 mod removal;
+mod room_access;
 mod search;
 mod startup;
 mod status;
@@ -75,6 +76,7 @@ enum Purpose {
     Search(RequestId, AccountScope, bool),
     Discover(RequestId, AccountScope, Option<ConversationRef>),
     DiscoverProbe(AccountScope, u64),
+    Open(ConversationRef, u64),
     ParticipantIndex(ConversationRef, u64),
     Reference(ConversationRef, u128, u16, u64),
     Room(RequestId, ConversationRef, OperationId, conversations::Work),
@@ -217,6 +219,7 @@ pub struct Accounts {
     discover_probe_generation: u64,
     discovery_retry: Option<discover::Retry>,
     discovery_join: Option<discover::OptimisticJoin>,
+    room_open_generation: u64,
     reference_owner: references::Owner,
     reference_generation: u64,
     notices: notifications::Notices,
@@ -296,6 +299,7 @@ impl Accounts {
             discover_probe_generation: 0,
             discovery_retry: None,
             discovery_join: None,
+            room_open_generation: 0,
             reference_owner: references::Owner::default(),
             reference_generation: 0,
             notices: notifications::Notices::default(),
@@ -534,6 +538,7 @@ impl Accounts {
         self.dirty = true;
     }
     fn clear_content(&mut self) {
+        self.room_open_generation = self.room_open_generation.saturating_add(1);
         self.retire_references();
         self.clear_attachment_work();
         self.cancel_csv_file();
@@ -1036,6 +1041,7 @@ impl Accounts {
             Purpose::Discover(request, account, joining) => {
                 self.complete_discovery(request, account, joining, result)
             }
+            Purpose::Open(context, generation) => self.complete_open(context, generation, result),
             Purpose::DiscoverProbe(account, generation) => {
                 self.complete_discovery_probe(account, generation, result)
             }
@@ -1595,6 +1601,7 @@ impl Accounts {
             .discovery_join
             .as_ref()
             .is_some_and(|join| join.context == context)
+            && self.pending.iter().any(|pending| matches!(pending.purpose, Purpose::Discover(_, _, Some(joining)) if joining == context))
         {
             if self.snapshot.selected != Some(context) {
                 self.clear_content();
@@ -1612,7 +1619,16 @@ impl Accounts {
         if !self.select_conversation(context)? {
             return Ok(());
         }
-        self.start_messages(context)?;
+        if self.public_room(context)
+            || self
+                .discovery_join
+                .as_ref()
+                .is_some_and(|join| join.context == context)
+        {
+            self.start_open(context, None)?;
+        } else {
+            self.start_messages(context)?;
+        }
         self.snapshot.content_panel.context = Some(context);
         let _ = self.start_poll(RequestId(0), protocol::content::PollCommand::Capabilities);
         self.touch();
@@ -2593,6 +2609,12 @@ fn submit_error(e: IdentityError) -> SubmitError {
         IdentityError::Request(ErrorKind::Busy | ErrorKind::RateLimited) => SubmitError::Busy,
         IdentityError::Request(ErrorKind::WrongScope | ErrorKind::Cancelled) => {
             SubmitError::StaleScope
+        }
+        IdentityError::Request(ErrorKind::PasswordRequired) => {
+            SubmitError::Unavailable(UnavailableReason::PasswordRequired)
+        }
+        IdentityError::Request(ErrorKind::Lobby) => {
+            SubmitError::Unavailable(UnavailableReason::Lobby)
         }
         IdentityError::Request(ErrorKind::PermissionDenied) => {
             SubmitError::Unavailable(UnavailableReason::PermissionDenied)

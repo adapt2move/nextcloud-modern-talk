@@ -426,6 +426,8 @@ fn error_name(error: ErrorKind) -> &'static str {
         ErrorKind::Cancelled => "cancelled",
         ErrorKind::Deadline => "deadline",
         ErrorKind::Busy => "busy",
+        ErrorKind::PasswordRequired => "password_required",
+        ErrorKind::Lobby => "lobby",
         ErrorKind::PermissionDenied => "permission_denied",
         ErrorKind::ReauthenticationRequired => "reauthentication_required",
         ErrorKind::Malformed => "malformed",

@@ -97,6 +97,8 @@ pub(super) fn copy(error: MessageActionError) -> &'static str {
             talk_core::ui::presentation::ConnectionFailure::AccessDenied,
         ) => "Server verweigert den Zugriff.",
         UnavailableReason::Connection(failure) => super::state::connection_failure_copy(failure).1,
+        UnavailableReason::PasswordRequired => "Dieses Gespräch benötigt ein Passwort.",
+        UnavailableReason::Lobby => "Die Lobby ist aktiv. Bitte warte auf die Freigabe.",
         UnavailableReason::PermissionDenied => "Keine Berechtigung für diese Aktion.",
         UnavailableReason::ReauthenticationRequired => "Bitte erneut anmelden.",
         UnavailableReason::Unsupported => "Auf diesem Server nicht verfügbar.",
