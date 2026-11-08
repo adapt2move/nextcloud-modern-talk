@@ -1,126 +1,73 @@
-# Direct calls and conferences
+# Calls
 
-This document defines direct-call and conference behavior. The [known limitations](../limitations.md) record implemented scope and limitations. Protocol evidence: [call, signaling, recording, constants, and capability sources](../compatibility/baselines-and-sources.md#protocol-sources). Every criterion below is a release requirement for the relevant supported path, not a report of successful tests.
+Call entry and controls stay inside the conversation workspace. Every supported path follows [security Q.SEC-10](../quality/security.md#required-bootstrap-policy-decision) and the [compatibility gates](../compatibility/README.md); see [known limitations](../limitations.md#servers-and-calls) for the actual media profile.
 
 ## CALL-001
 
-**Incoming direct call: accept directly.** In a direct conversation, ringing shows the caller, account/server context, accept, decline, and dismiss. Default **“Annehmen”** accepts audio, with camera off. If video is supported, a separate **“Mit Video annehmen”** action can explicitly request it. Respect `start-without-media`, OS permissions, and publishing restrictions. The acceptance control communicates its media intent accessibly.
-
-Accept changes to the in-call surface with a connecting state. It never routes through the **“Bereit, wenn du es bist.”** conference device-prejoin screen. A required OS prompt, recording-consent dialog, or security explanation may interrupt connection; these are specific requirements, not a generic device check. Ringing and dismissed notifications do not open capture devices, request their OS permissions, or publish media. Direct-call capture waits for the applicable consent/security gates. An incoming notification must not steal focus and turn an unrelated Enter/Space keystroke into acceptance.
-
-Acceptance: for an allowed, authorized direct audio call, one accept action begins connection and publishes only the explicitly requested, permitted microphone stream after all gates pass. Camera remains off. If policy says start without media, acceptance connects without publishing and offers in-call controls. Notification acceptance and in-app acceptance behave identically and create at most one call attempt.
-
-Incoming calls have a separate local notification policy and native presentation/action capability. Where special native call UI or actions are unsupported, show that limitation alongside any ordinary OS banner/sound fallback; successful fallback delivery does not satisfy native-call acceptance. Expose Accept/Decline only when connected to the admitted current call owner. Revalidate account runtime, conversation and current invitation at activation; an ended or replaced call cancels queued notification work and cannot be accepted from a stale banner. Conference-participation notices use important-notices policy and open the voluntary prejoin route in CALL-004, never direct-call acceptance. Ringing, notification tests and notification display confer no capture authority.
+Incoming direct calls ring without capture or focus theft. Explicit Accept enters the connecting call surface, defaulting to audio/camera off and respecting start-without-media. It does not open conference device prejoin. OS, consent and security gates still apply. Native notification actions require a live current-call dispatcher and the same validation as in-app acceptance; stale banners cannot
+join.
 
 ## CALL-002
 
-**Direct-call permission and device failures.** On explicit accept, request only permissions needed for the selected media. Microphone denial yields a receive-only call when the server/media path permits it, with “Mikrofon nicht verfügbar”, an in-call settings/retry action, and leave. If receive-only participation cannot work, show a blocked connection with retry/leave. Camera denial falls back to permitted audio/receive-only with a visible explanation. No camera prompt is needed for audio acceptance.
-
-Acceptance: first-use OS prompt, prior denial, policy-managed denial, no device, and a device becoming busy are each covered. The UI never shows microphone/camera as live when capture failed. Retrying permission is deliberate; it does not repeat prompts on every reconnect. Opening System Settings never constitutes permission grant. Returning from settings rechecks both authorization and whether the call still exists.
+Request only permissions needed by the explicit action. Denied/busy/missing devices show truthful recovery; receive-only is offered only when actually supported. Audio accept never prompts for camera. Settings handoff is not a grant; recheck permission and current call before use, without repeated reconnect prompts.
 
 ## CALL-003
 
-**Direct-call cancellation, duplicate events, and races.** Bind each incoming invitation and accept attempt to its account, conversation, observed call state, and a local generation. Refresh stale invitations using the supported call-notification state and room/session APIs. Do not fabricate a standalone accept/decline endpoint or assume a notification ID is a universally available call-instance ID.
-
-| Event | Required outcome |
-| --- | --- |
-| Caller cancels while ringing | Stop ringing, invalidate accept, show ended/missed as appropriate; no capture |
-| Caller cancels during an OS prompt or consent | Invalidate the attempt; late approval cannot join or publish |
-| Accept and cancel cross in flight | Reconcile server state; immediately leave any obsolete successful join, stop capture, and show ended |
-| Duplicate notification/accept action | Reuse one live attempt; do not create another session/media pipeline |
-| Accepted on another device | Dismiss stale ringing when confirmed; do not claim this device connected |
-| Decline/dismiss with network loss | Stop local ringing; report uncertain server synchronization without claiming a global hangup |
-| Old response after another incoming call | Ignore it for the new call; never transfer its consent or devices |
-| User already in another call | Show explicit stay/switch/decline choices; no hidden second capture or automatic hangup |
-
-Acceptance: once cancellation/end is observed, no late callback may publish media or auto-start a new call. Before joining an accepted invitation, revalidate the observed call; acceptance must not intentionally start a new call after cancellation. The join API can also start calls, so atomic race handling is an interoperability proof obligation ([CT-012](../compatibility/test-matrix.md#ct-012)); if the native/protocol combination cannot satisfy it, record a release blocker rather than claim race-free acceptance. A user may deliberately call back through a separate action.
+Bind invitations and attempts to account, room, observed call and generation. Cancel/end invalidates pending OS/consent callbacks; duplicate accepts share one attempt. Reconcile crossed accept/cancel and leave an obsolete successful join without publication. Never intentionally restart an ended call through accept. Existing other calls require an explicit choice. Protocol atomicity remains an
+interoperability obligation in [CT-012](../compatibility/test-matrix.md#ct-012).
 
 ## CALL-004
 
-**Voluntary conference prejoin.** An explicit conference, webinar or presentation “Beitreten”/“Konferenz starten” action opens **“Bereit, wenn du es bist.”** Show room/account, microphone, camera, selected devices, preview/test where authorized, and final join. Initial media intent honors server start-without-media and user settings; preview capture requires an explicit action and OS permission. Cancel stops preview capture and leaves the conversation available.
-
-Acceptance: selecting a room, restoring a window, receiving a conference notification, or opening a link never starts capture or joins a call. A conference notification action opens prejoin; a direct-call acceptance does not. The final join revalidates current policy and devices. A deliberate headphone shortcut for a Huddle/voice room or an ordinary group chat follows CALL-005 directly, preserving all required gates without the generic device-prejoin screen.
+Voluntary conference/webinar/presentation join opens device prejoin (“Bereit, wenn du es bist.” in German), followed by fresh gates and final join. Preview requires explicit action and OS permission; cancel stops it. Room selection, restore, ringing and links never join a call or start capture.
 
 ## CALL-005
 
-**Outgoing direct calls and start/join restrictions.** A deliberate direct “Anrufen” action, or headphone start/join in a Huddle or ordinary group chat, starts the in-call connecting/ringing surface without a conference prejoin. Selecting a room remains navigation only. The group-chat shortcut defaults to audio intent subject to saved mute/device state and server policy; it never enables camera or screen sharing. A local sidebar “Channels” group does not override the real Channel preset's call prohibition. Clearly communicate audio/video intent. Resolve call-enabled policy, `canStartCall`, start/join/publish permissions, lobby, room attributes, active-call state, and backend readiness independently. Silent start is an explicit, separately gated conference choice.
-
-Acceptance: a participant allowed to join but not start can join an active allowed call, but cannot start one after it ends. A server-wide start-call restriction, channel, or read-only room blocks the forbidden action even for a familiar role label. Ring timeout/cancel ends the local attempt and capture; an unanswered call is not shown as connected.
+Deliberate direct calling and the Huddle/ordinary-group headphone action enter the audio flow without generic prejoin, preserving mute intent and all gates. Start, join and each publication permission are independent. Real Channel rooms prohibit calls for every role; a local category name changes no server semantics.
 
 ## CALL-006
 
-**In-call controls and native media.** Provide mute, camera on/off, device choice, participants, speaker/focus/gallery layouts, call chat, elapsed time, connection state, and leave. Label local preview versus transmitted media accurately. Observed restrictions invalidate affected grants at once and are enforced within the approved bound; unseen changes follow [Q.SEC-10's ongoing freshness contract](../quality/security.md#required-bootstrap-policy-decision). A moderator can stop publication but never remotely activate another user's microphone/camera. Leaving releases capture and the current call session while preserving conversation membership.
-
-Acceptance: joining, signaling ready, and actual media connected are distinguishable. Switching accounts/windows does not lose active-call controls. Media loss displays reconnecting/degraded. During uninterrupted calls, effective permissions, consent, E2EE and grid policy require authoritative refresh even when the capability hash is unchanged. Unknown/stale policy grants no new join or publication expansion; existing grants expire and suspend affected publication/subscriptions under Q.SEC-10, even if media still flows. Numeric freshness/enforcement/device-release bounds and source mapping must be reviewed before these cases can pass. Cross-client media, internal/external signaling, TURN and grid enforcement need real checks; screenshots and codec availability are insufficient.
+Keep mute, camera, devices, participants, layouts, chat, connection state and leave reachable, with preview and transmission distinct. Moderator actions cannot turn on another user's devices. Require fresh scoped membership, permission, consent, encryption and grid evidence during calls, including changes without hash updates. Failed/partial reads, heartbeats and RTP cannot renew grants. Expiry
+suspends affected publication/subscriptions; unresolved membership/consent/encryption requires local leave. Enforcement claims require reviewed numeric freshness/stop/release bounds.
 
 ## CALL-007
 
-**Choose devices and process audio safely.** Select microphone, camera, and supported output device; show system-default separately from a specific device. Handle unplug/replug, sleep, Bluetooth changes, and device busy states without claiming capture from a missing source. Provide tested echo cancellation, noise suppression, and level behavior where the native media engine supports them; expose limitations rather than decorative toggles.
-
-Acceptance: device loss visibly stops the affected stream. Switching to a different physical microphone/camera requires a known user-approved selection/fallback policy and must not silently unmute. Mute remains muted across reconnects. Unsupported output routing or effects are clearly unavailable. Virtual background/blur and uploads are optional, require native processing and relevant server policy, and must fail without leaking an unintended camera stream.
+Device loss stops the affected stream. Device changes require approved selection and explicit enablement, never silent unmute or source migration. Expose audio processing, output routing or camera effects only when implemented; missing blur must not be represented by a decorative toggle or leak unintended video.
 
 ## CALL-008
 
-**Screen sharing.** Require explicit share action, source picker, OS screen-capture authorization, and publish-screen permission. Distinguish entire display, window, and any actually supported application/audio-sharing options. Preview source metadata without implying hidden windows cannot appear. Show a persistent sharing indicator and stop control; changing source is deliberate.
-
-Interactive setup automatically requests each supported permission once on entering its step, then advances only on an observed grant. Privacy retains explicit checks, supported requests and OS-settings actions with guidance. A macOS restart handoff resumes at setup completion while preserving the actual observed permission states. Chat remains usable without microphone, camera or screen grants. Checking or opening Settings never starts capture. macOS screen-capture preflight can confirm authorization; a negative result is not enough to distinguish a first request from denial. Windows capture-picker consent and Linux ScreenCast portal consent belong to the selected sharing session, not a permanent global switch. An unavailable portal or native capture adapter remains unavailable, including on X11; do not infer a grant from desktop type alone. See [Apple screen preflight](https://developer.apple.com/documentation/coregraphics/cgpreflightscreencaptureaccess()), [Windows capture picker](https://learn.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture), and [ScreenCast portal lifecycle](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html).
-
-The initial native stream profile uses one VP8 screen rendition, up to
-1920×1080 at 10 fps, favoring text resolution over frame rate. A receiver treats
-a screen as an independent stream belonging to its participant; failure or stop
-of that stream cannot end the audio/camera call. A disconnected selection is
-retired and recovery requires a new explicit share action and source selection.
-Platform availability and qualification are recorded in [known limitations](../limitations.md#servers-and-calls).
-
-Acceptance: cancel/denial publishes nothing. Closing the shared window, losing permission, ending the call, or being removed stops capture. A share cannot migrate automatically to another display/window. System audio is offered only if implemented and verified for that OS/media path; microphone audio is a separate control. Incoming remote shares have native resize/fullscreen/focus behavior.
+Screen publication needs explicit share, source selection, OS consent and publish permission, with persistent indicator and Stop. Cancel, source loss, authority loss or call end stops capture. Never migrate sources or restart a share on recovery. The initial profile is one VP8 screen up to 1920×1080/10 fps, separate from camera and audio. System audio is offered only on a qualified path;
+portal/picker consent is session-specific where applicable. Permission checks/onboarding never capture.
 
 ## CALL-009
 
-**Recording consent and status.** Resolve fresh instance policy, room `recordingConsent`, classified state and the compatible join contract before joining:
-
-| Established policy | Required behavior |
-| --- | --- |
-| Ordinary room; instance requires consent | Require explicit, initially unselected consent regardless of the room default. |
-| Ordinary room; instance delegates to room policy | Require consent when the room requires it. |
-| Ordinary room; instance disables the consent requirement | Do not invent required consent from the room default alone; keep actual recording status visible. |
-| Verified classified room under the reviewed compatible contract | Recording is prohibited. The pinned Talk25 controller skips recording-consent validation **even when instance-wide consent is required**; do not show a misleading permission-to-record prompt or submit fabricated consent. This exception never authorizes recording and is not inferred solely from a name/version. |
-| Fresh response with missing or unknown consent mode | For ordinary rooms, require explicit consent conservatively. This does not imply agreement or permit recording in classified rooms. |
-| Conflicting classified/recording state, failed fetch or stale policy evidence | Resolve it before join; do not infer the classified exception from missing evidence. Retry failed fetches without granting media authority. |
-
-The [pinned consent implementation](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Controller/CallController.php#L305-L320) establishes the exception, distinct from the [classified restrictions](conversations.md#conv-004). If an actual endpoint requires consent contrary to the expected exception, stop and reconcile/report the discrepancy; do not automatically assent or bypass refusal. Other required OS/security gates remain applicable. For ordinary required consent, declining keeps the user out. A direct call uses a specific consent dialog in its accept flow, never device-prejoin. Joining or disabling a camera is not consent.
-
-Acceptance: publish no media before applicable consent/security gates pass. Test ordinary required/declined consent and verified classified plus global-required consent separately; the latter has no recording-consent prompt and no recording control. Show starting/active/stopping/failed or unknown recording status from current evidence; missing data is not “not recording”. Apply [Q.SEC-10](../quality/security.md#required-bootstrap-policy-decision) to mid-call changes, including those without a changed hash: invalidate on observation, enforce within the approved bound and leave locally when required consent cannot be established at expiry. Consent belongs to the account/room/call generation and policy; a refresh, reconnect or late callback cannot transfer it to a new call.
+Require explicit initially unselected recording consent wherever instance/room policy requires it. An ordinary fresh but unknown consent mode conservatively requires consent; failed/stale policy grants nothing. Verified classified rooms prohibit recording and, under the established compatible contract, skip the inapplicable consent prompt even with global-required consent. Never infer that
+exception from a name/version or fabricate assent after an unexpected refusal. Consent is scoped to account/room/call generation and policy; changed consent closes the old media owner and requires explicit rejoin. Unknown status is not “not recording”.
 
 ## CALL-010
 
-**Control server recordings.** Starting/stopping requires `recording-v1`, configured recording support/backend, actual role/permission, and room policy. Explain that this is a server recording. Render resulting recordings and permissions as shared content, including processing, failed upload, and available file states. Audio-only/video options depend on the backend. The recording backend's chunked-upload API is not a desktop-client feature.
-
-Acceptance: a request timeout does not claim recording stopped; reconcile status. A failed backend is visible to all affected native participants when status is available. Classified rooms always prohibit recording under the verified contract, independently of consent defaults or E2EE. E2EE/recording combinations separately follow tested policy. The client does not substitute an undisclosed local recording.
+Server recording controls require current moderator authority, recording capability, backend and room policy. Show actual starting/active/stopping/failed/unknown status; a timeout cannot mean stopped. Classified rooms never record. No undisclosed local fallback; audio-only and resulting-file workflows require their own implementation.
 
 ## CALL-011
 
-**Enforce real call E2EE conditionally.** `call-end-to-end-encryption` and its configuration advertise signaling/policy, not proof of native media encryption. The native engine must implement the compatible encryption/key lifecycle, verify the negotiated state, and surface its actual protection. Transport encryption is not labeled E2EE, and call E2EE says nothing about chat/file storage.
-
-Acceptance: if encryption is required and unsupported, negotiation fails, keys cannot be established, or participants/backends are incompatible, block/leave the affected call with a clear reason. Never downgrade silently. Enforce a newly observed requirement within [Q.SEC-10's approved bound](../quality/security.md#required-bootstrap-policy-decision); full ongoing refresh must include non-hash E2EE changes. Stale/unknown required encryption cannot sustain a call past grant expiry. Fresh policy does not substitute for verified negotiated protection. Recording, SIP, federation, and transcription combinations require their own tested policy matrix; a successful ordinary call does not validate them.
+Call E2EE is currently unsupported. Block required encryption or unknown required protection; never downgrade. Transport encryption, classified privacy and chat/file storage are distinct. Future support requires compatible key lifecycle and verified negotiated media protection, not merely a capability or encrypted flag.
 
 ## CALL-012
 
-**Hands, call reactions, and layout.** Show speaking, hand-raised order/state, mute/video state, focus/gallery, and supported ephemeral call reactions. Use the server's supported reaction list; no option when absent/empty. Respect enforced grid limits and expose accessible participant controls without relying on color or hover.
-
-Acceptance: lost/reordered signaling converges with current participant state; disconnect clears stale speaking/reaction indicators. Grid enforcement follows [Q.SEC-10](../quality/security.md#required-bootstrap-policy-decision), including non-hash changes and expiry: restrict the affected video subscriptions/rendering within the approved bound instead of treating a working media connection as fresh policy. Keyboard and assistive technology can raise/lower hand, focus a participant/share, and leave. Layout changes never silently activate media.
+Hands, speaking indicators and call reactions use actual supported signaling and reaction lists. Reconcile lost/reordered updates and retire stale indicators. Layouts enforce grid policy without enabling capture and keep participant/share focus and leave available by keyboard and assistive technology.
 
 ## CALL-013
 
-**Transcription, captions, and translation.** Offer live transcription/translation only when advertised, configured, permitted, and supported by the native signaling/media path. Distinguish live captions from a saved transcript and from a recording. Show selected source/target language, processing state, errors, and any required consent/provider disclosure. Do not capture locally or upload to a separate provider as an implicit fallback.
-
-Acceptance: disabled provider, unsupported language, delayed or partial captions, provider failure, and E2EE/classified conflicts produce explicit outcomes. Generated captions are labeled and accessible, can be hidden without implying the server stopped processing, and do not become authoritative chat messages unless a supported deliberate action shares them.
+Live captions/transcription/translation remain unavailable without a complete native provider/signaling path. If offered, disclose processing and required consent, label generated output and distinguish hidden captions from stopped server processing. No implicit local capture or client-selected external provider fallback.
 
 ## CALL-014
 
-**Reconnect and end predictably.** On network/control loss, show degraded/reconnecting with bounded retry/cancel even if media transport still works. Policy/control failure cannot renew grants. Under [Q.SEC-10](../quality/security.md#required-bootstrap-policy-decision), stop affected capture/publication by its original expiry plus the approved enforcement bound if complete renewal fails; a source invalidated by disconnect takes effect on observation. Leave locally when membership, required consent or encryption cannot be established; narrow grid restrictions affect subscriptions/rendering. Local stop never waits for a leave acknowledgement. Sleep/wake checks elapsed expiry before resuming.
+Bound recovery and cancel on control loss even while RTP flows. Expiry and account revocation stop local media independently of remote leave. Wake checks elapsed expiry before use. Recovery needs fresh call-existence, membership, consent, security and device evidence plus valid continuity/user intent. Retain mute/camera-off; retire screen selection. Account reauthorization or unverified continuity
+requires deliberate rejoin. Never resurrect ended calls or transfer old callbacks/consent; ordinary leave preserves conversation membership. End-for-everyone is separately authorized and confirmed.
 
-Confirmed authorization loss of the call's account executes [AUTH-007](accounts.md#auth-007) regardless of live media: invalidate the runtime generation, disable publication, stop/release local capture within the approved device-release deadline, discard queued unsent media and reject late policy/join/media/reconnect callbacks. Best-effort remote leave is independent; another account's session remains intact.
+## Moderation and conditional call tools
 
-Recovery requires fresh call-existence, membership, permission, consent, encryption and device checks plus valid continuity/user intent. Preserve mute/camera-off state; fresh policy alone cannot unmute, enable a camera or restart a stopped share. After account reauthorization or unverified continuity loss, require deliberate rejoin. A rejected HPB session resume during an accepted call may make one fresh admission attempt in a new call generation after old-session cleanup. This attempt requires fresh evidence that the call still exists, plus membership, publish permissions, consent, encryption and device checks; it cannot start an ended call. Retain microphone/camera intent, retire screen selection, and never transfer recording consent or old callbacks. Failure remains visibly blocked and does not replay admission indefinitely. An accepted direct call's continuity recovery never introduces conference prejoin; a new conference/webinar/presentation join uses CALL-004, while deliberate Huddle and ordinary group audio rejoin follows CALL-005's direct entry with the same required gates. Show advertised duration policy without promising an exact server end time.
-
-Acceptance: a call ended during outage cannot be resurrected. Observed membership removal invalidates local media authority and stops capture within the approved enforcement/release bounds. [V.AUTH.LOSS](../quality/verification.md#vauthloss--confirmed-account-authorization-loss) and [V.POLICY.FRESH](../quality/verification.md#vpolicyfresh--ongoing-policy-freshness) cover active media with confirmed account loss, surviving RTP with failed control refresh, dropped leave responses, sleep/late callbacks and intent-preserving recovery. Record actual stop times against the approved numeric bounds. End-for-everyone remains a separate authorized action with confirmation; ordinary leave cannot end others' call.
+- **MOD-001:** Lobby is a waiting/admission state. Publish no unauthorized conference media; timed admission follows server state and fresh effective policy, not role guesses or a local clock alone.
+- **MOD-002:** Gate mute, removal, bans, roles and publish restrictions separately; never remotely unmute. Re-ring needs effective START_CALL, current active-call participation and an eligible absent attendee, not moderator status alone. Success may be a no-op and proves no delivered ring; uncertain requests never loop automatically.
+- **MOD-003:** Breakouts retain parent/child identities. Configure/move/broadcast/help only through supported gates; transitions validate destination consent and permissions, avoid duplicate publication and never retarget drafts. Retain confirmed assignments on failure.
+- **MOD-004:** Attendance export requires actual authority and excludes classified/hidden data. Keep CSV invite import separate; validate destinations and encode cells safely. Exports do not prove attention.
+- **INT-003:** SIP is conditional on actual configuration and authority; PINs are sensitive. Validate dial-out destination, reconcile uncertainty without redialing and never infer E2EE. Classified rooms prohibit SIP.

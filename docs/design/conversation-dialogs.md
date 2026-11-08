@@ -1,6 +1,6 @@
 # Conversation header and dialogs
 
-This is the design contract for conversation controls, governed by [CONV-004–010](../product/conversations.md#conv-004) and [CALL-004–005](../product/calls.md#call-004).
+This is the design contract for conversation controls, governed by [CONV-004–010](../product/messaging.md#conv-004) and [CALL-004–005](../product/calls.md#call-004).
 
 ## Header
 
