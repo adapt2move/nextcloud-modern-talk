@@ -220,7 +220,49 @@ impl Desktop {
             );
         }
         let selected = self.snapshot.selected;
+        if action == "open-thread"
+            && let Some((context, root)) = selected.and_then(|context| {
+                self.snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .find(|message| message.metadata.thread == Some(message.local_id))
+                    .map(|message| (context, message.local_id))
+            })
+        {
+            self.handle(LocalAction::Thread(context, root), window, cx);
+            self.thread_composer.focus_handle(cx).focus(window);
+        }
+        if action == "thread-state" {
+            return self.snapshot.message_panel.as_ref().map_or_else(
+                || "absent".to_owned(),
+                |panel| {
+                    format!(
+                        "{:?} {} {} {}",
+                        panel.thread_state,
+                        panel.thread_messages.as_slice().len(),
+                        panel
+                            .thread_messages
+                            .as_slice()
+                            .iter()
+                            .filter(|row| {
+                                row.body.as_str() == "Native thread reply"
+                                    && row.local_id <= u128::from(u64::MAX)
+                            })
+                            .count(),
+                        self.thread_composer.read(cx).content.is_empty()
+                    )
+                },
+            );
+        }
         let intent = match action {
+            "open-thread-room" => self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .find(|room| room.title.as_str() == "A native thread fixture")
+                .map(|room| UiIntent::OpenConversation(room.context)),
             "open0" | "open1" => self
                 .snapshot
                 .conversations

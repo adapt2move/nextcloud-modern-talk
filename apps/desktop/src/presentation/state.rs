@@ -898,6 +898,12 @@ pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
 
 pub fn error_label(error: SubmitError) -> Option<&'static str> {
     Some(match error {
+        SubmitError::Unavailable(UnavailableReason::PasswordRequired) => {
+            "Dieses Gespräch benötigt ein Passwort."
+        }
+        SubmitError::Unavailable(UnavailableReason::Lobby) => {
+            "Die Lobby ist aktiv. Bitte warte auf die Freigabe."
+        }
         SubmitError::Unavailable(UnavailableReason::Connection(failure)) => {
             connection_failure_copy(failure).1
         }
@@ -921,10 +927,10 @@ pub fn error_label(error: SubmitError) -> Option<&'static str> {
             "Bitte erneut anmelden. Dein Text wurde nicht gesendet."
         }
         SubmitError::Unavailable(UnavailableReason::Unconfigured) => {
-            "Diese Aktion ist in diesem Client noch nicht verfügbar."
+            "Die Aktion konnte nicht gestartet werden. Bitte neu laden und erneut versuchen."
         }
         SubmitError::Unavailable(UnavailableReason::Unsupported) => {
-            "Diese Funktion ist in diesem Client noch nicht verfügbar."
+            "Diese Aktion ist für dieses Ziel derzeit nicht verfügbar."
         }
     })
 }
@@ -2081,6 +2087,61 @@ pub(super) mod tests {
             }
         ));
         assert_eq!(drafts.text(c), "");
+    }
+
+    #[test]
+    fn pane_editor_admission_and_receipts_preserve_the_independent_room_draft() {
+        use talk_core::ui::messaging::{ComposeTarget, MessageAction};
+        #[derive(Default)]
+        struct Capture(Vec<UiIntent>);
+        impl NativeDesktopPort for Capture {
+            fn try_submit(&mut self, intent: UiIntent) -> Result<(), SubmitError> {
+                self.0.push(intent);
+                Ok(())
+            }
+            fn take_snapshot(&mut self) -> Option<PresentationSnapshot> {
+                None
+            }
+        }
+        let c = context(1);
+        let mut room = Drafts::default();
+        room.save(c, "Unsent room draft").unwrap();
+        let mut pane = Drafts::thread_editor();
+        let target = ComposeTarget {
+            thread: Some(7),
+            reply_to: Some(8),
+            ..Default::default()
+        };
+        assert!(pane.set_target(c, target.clone()));
+        pane.save(c, "Quoted pane reply").unwrap();
+        let mut port = Capture::default();
+        let request = pane.send(c, Decision::Allowed, &mut port).unwrap();
+        assert!(
+            matches!(&port.0[0], UiIntent::Message { context, action: MessageAction::Send { body, target: sent }, .. }
+            if *context == c && body.as_str() == "Quoted pane reply" && sent == &target)
+        );
+        assert_eq!(
+            pane.send(c, Decision::Allowed, &mut port),
+            Err(SubmitError::Busy)
+        );
+        assert_eq!(port.0.len(), 1);
+        let mut retired = c;
+        retired.account.runtime = talk_core::ui::RuntimeGeneration::from_local(99);
+        assert!(!pane.complete(SubmissionResult {
+            request,
+            context: retired,
+            result: Completion::Queued
+        }));
+        assert_eq!(pane.text(c), "Quoted pane reply");
+        assert!(pane.complete(SubmissionResult {
+            request,
+            context: c,
+            result: Completion::Queued
+        }));
+        assert_eq!(pane.text(c), "");
+        assert_eq!(pane.target(c).thread, Some(7));
+        assert!(pane.target(c).reply_to.is_none());
+        assert_eq!(room.text(c), "Unsent room draft");
     }
     #[test]
     fn unknown_kind_policy_or_mismatched_call_generation_never_opens_prejoin() {

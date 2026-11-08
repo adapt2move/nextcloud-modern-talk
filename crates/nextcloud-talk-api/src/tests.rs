@@ -1146,3 +1146,64 @@ async fn internal_poll_recovery_exhaustion_closes_route() {
     assert!(stop.is_closed());
     assert_eq!(server.count(), 7);
 }
+
+#[tokio::test]
+async fn conversation_links_are_bound_to_the_accounts_origin_and_installation_path() {
+    let server = Server::start(vec![]).await;
+    let runtime = NetworkRuntime::new(ClockId::from_key(1));
+    let client = Client::new(
+        AppCredential::new(
+            ServerOrigin::loopback(&format!("{}/nextcloud/", server.origin)).unwrap(),
+            Zeroizing::new("synthetic-user".into()),
+            Zeroizing::new("synthetic-password".into()),
+            None,
+        ),
+        runtime,
+        scope(),
+        OriginId::from_key(1),
+        Cancellation::default(),
+    )
+    .unwrap();
+    for path in [
+        "nextcloud/call/testroom",
+        "nextcloud/index.php/call/testroom",
+    ] {
+        assert!(
+            client
+                .conversation_link_token(&format!("{}/{path}", server.origin))
+                .is_ok()
+        );
+    }
+    for link in [
+        format!("{}/call/testroom", server.origin),
+        format!("{}/nextcloud/call/testroom?password=secret", server.origin),
+        format!("{}/nextcloud/call/testroom#fragment", server.origin),
+        "https://unrelated.invalid/nextcloud/call/testroom".into(),
+        format!("{}/nextcloud/call/INVALID", server.origin),
+    ] {
+        assert!(client.conversation_link_token(&link).is_err());
+    }
+    assert_eq!(
+        server.count(),
+        0,
+        "link parsing never contacts the supplied destination"
+    );
+}
+
+#[test]
+fn absent_ice_configuration_is_not_a_security_gate() {
+    for value in [
+        json!({"signalingMode":"internal"}),
+        json!({"signalingMode":"internal","stunservers":null,"turnservers":null,"future-setting":true}),
+        json!({"signalingMode":"internal","stunservers":[],"turnservers":[]}),
+    ] {
+        let settings = models::SignalingSettings::decode(&value).unwrap();
+        assert_eq!(settings.mode, models::SignalingMode::Internal);
+        assert!(settings.ice_servers.is_empty());
+    }
+    assert!(models::SignalingSettings::decode(&json!({"signalingMode":"external"})).is_err());
+    assert!(
+        models::SignalingSettings::decode(&json!({"signalingMode":"internal","turnservers":{}}))
+            .is_err()
+    );
+}

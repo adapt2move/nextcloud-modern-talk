@@ -51,6 +51,4 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Todavía no se ha cargado el contenido. Comprueba la conexión y vuelve a intentarlo.",
     ),
     ("Kein Zugriff.", "No access.", "Sin acceso."),
-    ("Wird aktualisiert …", "Refreshing…", "Actualizando…"),
-    ("Wird geladen …", "Loading…", "Cargando…"),
 ];

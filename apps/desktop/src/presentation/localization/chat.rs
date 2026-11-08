@@ -227,7 +227,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Reply in thread …",
         "Responder en el hilo …",
     ),
-    ("In 30 Minuten", "In 30 minutes", "Dentro de 30 minutos"),
     ("In einer Stunde", "In one hour", "Dentro de una hora"),
     ("Inline-Code", "Inline code", "Código en línea"),
     ("JJJJ-MM-TT HH:MM", "YYYY-MM-DD HH:MM", "AAAA-MM-DD HH:MM"),
@@ -242,7 +241,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No tienes permiso para esta acción.",
     ),
     ("Kursiv", "Italic", "Cursiva"),
-    ("Mit 👍 reagieren", "React with 👍", "Reaccionar con 👍"),
     ("Morgen um 09:00", "Tomorrow at 09:00", "Mañana a las 09:00"),
     (
         "Nachricht geplant.",
@@ -265,16 +263,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El próximo lunes a las 09:00",
     ),
     ("Nächster Entwurf", "Next draft", "Siguiente borrador"),
-    (
-        "Offline · Entwürfe werden nicht automatisch gesendet.",
-        "Offline · Drafts will not be sent automatically.",
-        "Sin conexión · Los borradores no se enviarán automáticamente.",
-    ),
     ("Planen", "Schedule", "Programar"),
     (
         "Planung fehlgeschlagen",
         "Scheduling failed",
         "Error al programar",
+    ),
+    (
+        "Planung nicht gespeichert",
+        "Schedule not saved",
+        "Programación no guardada",
     ),
     ("Reaktion hinzufügen", "Add reaction", "Añadir reacción"),
     (
@@ -283,16 +281,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Las reacciones no están disponibles en este momento.",
     ),
     ("Senden fehlgeschlagen", "Sending failed", "Error al enviar"),
-    (
-        "Thread breiter",
-        "Widen thread pane",
-        "Ampliar panel del hilo",
-    ),
-    (
-        "Thread schmaler",
-        "Narrow thread pane",
-        "Estrechar panel del hilo",
-    ),
     (
         "Threads sind derzeit nicht verfügbar.",
         "Threads are currently unavailable.",
@@ -320,6 +308,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Forwarding is currently unavailable.",
         "Reenviar no está disponible en este momento.",
     ),
+    ("Wird erneut versucht …", "Retrying…", "Reintentando…"),
     ("Wird gesendet …", "Sending…", "Enviando…"),
     (
         "Wird leise gesendet",
@@ -352,6 +341,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Volver a cargar mensajes anteriores",
     ),
     ("Änderung fehlgeschlagen", "Edit failed", "Error al editar"),
+    (
+        "Änderung nicht gespeichert",
+        "Edit not saved",
+        "Cambio no guardado",
+    ),
     (
         "Öffne zuerst das Nachrichtenfeld.",
         "Open the message composer first.",

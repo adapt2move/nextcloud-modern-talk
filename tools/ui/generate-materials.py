@@ -35,19 +35,8 @@ def generate():
         # light glass tint is composited over a black background.
         noise.extend((value, value, value, 6))
 
-    def grid(color):
-        data = bytearray()
-        for y in range(SIDE):
-            for x in range(SIDE):
-                # A tiny rounded, 4.7%-opacity dot per 16 logical pixels.
-                dot = abs(x % 16 - 8) + abs(y % 16 - 8) <= 1
-                data.extend((*color, 12 if dot else 0))
-        return data
-
     return {
         "grain.png": png(noise),
-        "grid-light.png": png(grid((53, 111, 193))),
-        "grid-dark.png": png(grid((159, 199, 255))),
     }
 
 

@@ -17,11 +17,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No hay hilos seguidos.",
     ),
     (
-        "Neue Threads können nicht geplant werden.",
-        "New threads cannot be scheduled yet.",
-        "Los hilos nuevos aún no se pueden programar.",
-    ),
-    (
         "Neuen Thread beginnen",
         "Start a new thread",
         "Iniciar un hilo nuevo",
@@ -64,7 +59,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Loading the start of the thread …",
         "Cargando el inicio del hilo …",
     ),
-    ("Thread-Optionen", "Thread options", "Opciones del hilo"),
     ("Thread-Titel", "Thread title", "Título del hilo"),
     ("Threads", "Threads", "Hilos"),
     (

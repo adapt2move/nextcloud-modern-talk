@@ -7,8 +7,8 @@ use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, ImageSource, Window, div, img, prelude::*, px};
 use talk_core::ui::UserIntent;
 use talk_core::ui::presentation::{
-    CallStage, CallTileId, CallTileKind, MediaState, RequiredGate, ScreenShareFailure,
-    ScreenShareState, UiIntent,
+    CallPolicyReason, CallStage, CallTileId, CallTileKind, MediaState, RequiredGate,
+    ScreenShareFailure, ScreenShareState, UiIntent,
 };
 
 // Sixteen remote cameras, the local camera, and one screen stage may coexist.
@@ -388,10 +388,7 @@ impl Desktop {
                     "Zustimmung zur Aufzeichnung erforderlich",
                     "Der Server kann Audio und Video aufzeichnen. Ohne Zustimmung kein Beitritt.",
                 ),
-                RequiredGate::SecurityPolicy => (
-                    "Sicherheitsvorgabe noch nicht erfüllt",
-                    "Die Sicherheitsvorgaben für diesen Anruf sind noch nicht erfüllt.",
-                ),
+                RequiredGate::CallPolicy(gate) => policy_gate_copy(gate),
                 RequiredGate::Lobby => (
                     "Du wartest im Warteraum",
                     "Der Beitritt wird erst fortgesetzt, wenn diese Voraussetzung erfüllt ist.",
@@ -405,23 +402,13 @@ impl Desktop {
                     .items_center()
                     .justify_center()
                     .child(
-                        self.style_card(div(), super::controls::CardStyle::Raised)
+                        self.notice(BannerRole::Warning, self.l(title), Some(self.l(description)), Some("lock"))
                             .w_full()
                             .max_w(px(480.))
-                            .p_6()
-                            .bg(if t.dark { t.stage_panel } else { t.surface })
-                            .border_1().border_color(if t.dark { gpui::rgb(0x52677f).into() } else { t.border })
-                            .text_color(if t.dark { t.stage_text } else { t.text })
-                            .flex()
-                            .flex_col()
-                            .gap_4()
-                            .child(
-                                div()
-                                    .text_size(self.sp(20.))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(self.l(title)),
-                            )
-                            .child(div().text_size(self.sp(14.)).text_color(if t.dark { t.stage_text } else { t.muted }).child(self.l(description)))
+                            .when(matches!(gate, RequiredGate::CallPolicy(_)), |d| {
+                                d.child(self.button("retry-call-policy", "Erneut verbinden", ButtonStyle::Secondary, true,
+                                    LocalAction::Intent(UiIntent::ReconnectCall(call.scope)), cx))
+                            })
                             .when(gate == RequiredGate::Lobby, |d| {
                                 let timer = self.snapshot.conversation_panel.as_ref()
                                     .filter(|p| !p.details_stale && p.context.account == call.scope.account && p.context.conversation == call.scope.conversation)
@@ -1450,7 +1437,6 @@ impl Desktop {
                     .flex()
                     .flex_col()
                     .bg(t.stage)
-                    .children(self.materials.layer(super::controls::Texture::PatternDark, t.reduced_transparency))
                     .children(self.materials.layer(super::controls::Texture::Card, t.reduced_transparency))
                     .text_color(t.stage_text)
                     .child(
@@ -1836,8 +1822,104 @@ fn sharing_label(state: ScreenShareState) -> Option<&'static str> {
     }
 }
 
+fn policy_gate_copy(gate: CallPolicyReason) -> (&'static str, &'static str) {
+    match gate {
+        CallPolicyReason::RecordingConsentRejoin => (
+            "Aufzeichnungsrichtlinie geändert",
+            "Tritt erneut bei, um deine Zustimmung zur geänderten Aufzeichnungsrichtlinie zu bestätigen.",
+        ),
+        CallPolicyReason::RequiredEncryption => (
+            "Ende-zu-Ende-Verschlüsselung erforderlich",
+            "Dieser Anruf erfordert Ende-zu-Ende-Verschlüsselung, die dieser Client noch nicht unterstützt.",
+        ),
+        CallPolicyReason::CallsDisabled => (
+            "Anrufstart deaktiviert",
+            "Der Server erlaubt keinen neuen Anruf. Einem laufenden Anruf kannst du beitreten.",
+        ),
+        CallPolicyReason::RoomRestricted => (
+            "Anruf in diesem Gespräch nicht erlaubt",
+            "In Kanälen, schreibgeschützten Gesprächen und Notizen an dich selbst sind Anrufe nicht erlaubt.",
+        ),
+        CallPolicyReason::JoinForbidden => (
+            "Keine Berechtigung zum Beitritt",
+            "Bitte die Moderation, dir die Berechtigung zum Beitritt zu geben.",
+        ),
+        CallPolicyReason::StartForbidden => (
+            "Keine Berechtigung zum Anrufstart",
+            "Bitte die Moderation, den Anruf zu starten oder deine Berechtigungen zu ändern.",
+        ),
+        CallPolicyReason::ClassifiedRecording => (
+            "Aufzeichnungsstatus widerspricht vertraulichem Gespräch",
+            "In vertraulichen Gesprächen sind Aufzeichnungen verboten. Bitte die Moderation, den Status zu prüfen.",
+        ),
+        CallPolicyReason::PendingSignaling => (
+            "Verbinde …",
+            "Die Signalisierungseinstellungen konnten nicht bestätigt werden. Versuche es erneut.",
+        ),
+        CallPolicyReason::IncompatiblePolicy => (
+            "Serverrichtlinie nicht unterstützt",
+            "Die Gesprächs- oder Serverrichtlinie ist nicht kompatibel. Prüfe die Servereinstellungen und versuche es erneut.",
+        ),
+        CallPolicyReason::PendingPolicy => (
+            "Verbinde …",
+            "Aktuelle Anrufberechtigungen werden abgerufen. Ohne Bestätigung wird kein Anruf verbunden.",
+        ),
+        CallPolicyReason::MembershipLost => (
+            "Verbindung zum Gespräch wird erneuert",
+            "Deine Sitzung im Gespräch konnte nicht bestätigt werden. Versuche es erneut.",
+        ),
+        CallPolicyReason::SignalingUnsupported => (
+            "Signalisierung nicht unterstützt",
+            "Die Signalisierung dieses Servers wird noch nicht unterstützt.",
+        ),
+        CallPolicyReason::MediaUnavailable => (
+            "Anrufmedien nicht verfügbar",
+            "Die Medienverbindung ist nicht verfügbar. Versuche es erneut.",
+        ),
+        CallPolicyReason::NotAuthorized => (
+            "Anruf nicht autorisiert",
+            "Die Anmeldung oder Anrufzuordnung ist nicht mehr gültig. Öffne das Gespräch erneut.",
+        ),
+    }
+}
+
 #[cfg(test)]
 mod media_contract_tests {
+    #[test]
+    fn policy_gate_reasons_have_english_and_spanish_copy() {
+        use super::*;
+        for reason in [
+            CallPolicyReason::RecordingConsentRejoin,
+            CallPolicyReason::RequiredEncryption,
+            CallPolicyReason::CallsDisabled,
+            CallPolicyReason::RoomRestricted,
+            CallPolicyReason::JoinForbidden,
+            CallPolicyReason::StartForbidden,
+            CallPolicyReason::ClassifiedRecording,
+            CallPolicyReason::PendingSignaling,
+            CallPolicyReason::IncompatiblePolicy,
+            CallPolicyReason::PendingPolicy,
+            CallPolicyReason::MembershipLost,
+            CallPolicyReason::SignalingUnsupported,
+            CallPolicyReason::MediaUnavailable,
+            CallPolicyReason::NotAuthorized,
+        ] {
+            let (title, description) = policy_gate_copy(reason);
+            for key in [title, description] {
+                for locale in [
+                    talk_core::preferences::Locale::English,
+                    talk_core::preferences::Locale::Spanish,
+                ] {
+                    assert_ne!(
+                        crate::presentation::localization::text(locale, key),
+                        key,
+                        "{key}"
+                    );
+                }
+            }
+        }
+    }
+
     use super::*;
     #[test]
     fn share_controls_and_copy_follow_the_authoritative_state() {

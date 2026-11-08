@@ -6,6 +6,24 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Servers and calls
 
+- Call protocol selection uses advertised `conversation-v4` and `signaling-v3`,
+  not an allowlist of NextCloud major versions. Lab coverage remains NC34/Talk24
+  and NC35/Talk25; accepting compatible capabilities is not qualification of
+  every newer server. Call E2EE is unsupported: it blocks only when the server
+  advertises `call-end-to-end-encryption` and its configuration does not
+  explicitly disable it, matching the official web client's feature guard.
+  Unknown consent modes require explicit agreement in ordinary rooms;
+  classified conversations never submit recording consent. Missing optional
+  recording/reaction settings disable those controls. Missing room or participant labels
+  do not block calls. Missing grid settings
+  suspend remote video until the limit is known rather than blocking audio calls.
+  Omitted or null ICE server lists mean no configured STUN/TURN servers;
+  malformed supplied settings remain unavailable. Failed policy reads retry without authorizing media. The call card and local
+  diagnostics distinguish missing evidence from an actual prohibition. A changed
+  consent requirement during a live call closes the old media owner and offers
+  explicit rejoin with fresh consent, rather than accepting consent for a closed generation.
+
+
 - Exercised server baselines are NextCloud 34.0.5 / Talk 24.0.6 and NextCloud
   35.0.2 / Talk 25.0.6. HPB checks use Talk 25.0.6, signaling 2.1.1 and Janus 1.3.0.
 - TURN over TCP/TLS is unavailable in the pinned async engine; live TURN
@@ -153,6 +171,12 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   plus an exhaustion check, and reports an unavailable result if the boundary
   cannot be established within that bound.
 - Threads use the Talk `threads` capability and current room permissions. The
+  `isThread` message flag identifies actual threads; `threadId` alone also
+  appears on ordinary messages and does not enable the thread pane. The
+  documented feature flags also govern messaging on unrecognized server
+  versions; those deployments remain unverified. No additional thread-enable
+  configuration key is required. Thread replies and quoted pane replies use
+  the same admitted outgoing queue as the room composer. The
   account-wide list contains the subscriptions the server returns for rooms
   already known to the account, in pages of 50. Its last page is retained for
   the session; the list is discovered again after restart. The account-wide
@@ -224,13 +248,22 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - The quick switcher searches loaded conversation names, up to 16 observed
   participant names per eligible room, and the server's user directory. Its
   participant index is session-only and is filled gradually when permitted.
-  Sidebar unread and mention filters are stored per durable account. Eligible
+  The connection status pill reports the time since this client observed the failure,
+  not the last successful synchronization, which the presentation contract does not
+  expose. Sidebar unread and mention filters (in the list's “⋯” menu) and the
+  Aktivität counts are stored or derived per durable account. Eligible
   cached rooms retain previously reported mention flags; missing or changed
   observations remain unknown. Room notification edits are optimistic and
   reconciled with the server. An uncertain write requires a fresh room read.
 - Open-conversation browsing requires `listable-rooms`. The Talk v4 listing
-  does not expose a reliable member count before joining; protected or unknown
-  password states cannot yet be joined through the directory.
+  does not expose a reliable member count before joining. Signed-in users can
+  enter public rooms from navigation, discovery, or a same-server `/call/<token>`
+  link pasted into the open-conversation search. Entry establishes a chat session
+  before reading history, prompts for a server-required password, and distinguishes
+  lobby waiting from revoked access. Unknown policy stays closed. Anonymous guest
+  login and operating-system deep-link registration remain unavailable. Links
+  must use the active account's exact server and installation path; passwords are
+  entered separately and are not saved.
 - Account-wide message search requires the server's Talk message provider and
   supported filters. It shows at most two pages and only results for rooms in
   the currently admitted room list; offline suggestions use the selected cached
@@ -290,6 +323,22 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Background discovery has bounded capacity. Calendar integration, all mention
   and thread-notification policies, and platform-native incoming-call actions
   remain incomplete. Unknown notification eligibility stays suppressed.
+  While running, admitted accounts poll message/reminder and incoming-call
+  notifications every three seconds on a healthy server; request time,
+  backpressure, server delivery/cron and retry delays add latency. Ordinary
+  message banners require a background window. Initial observation and gaps of
+  60 seconds or more establish a silent baseline rather than replaying history.
+  `occ notification:test-push --talk USER` both stores an
+  `admin_notification_talk` diagnostic in the Notifications API and attempts
+  mobile-device push. Fresh eligible diagnostics now use the ordinary Messages
+  category with fixed local text and no activation target. They need no mobile
+  push registration and can appear in the foreground. Sign in, allow notifications,
+  wait for the initial baseline, then run the command. Minimize/hide the app to
+  test real message banners with a DM, direct mention, incoming direct call, or due personal message reminder from
+  another session; avoid actively reading the receiving conversation elsewhere.
+  `occ notification:generate` creates general administrator notifications,
+  which this Talk-only client does not display. `notify_push` websocket hints
+  are not implemented; bounded polling works without that optional app.
   The direct-mention badge uses the server's boolean flag alongside the total
   unread-message count; the server does not expose a direct-mention count.
   macOS Notifications settings now separate local choices from observed OS
@@ -325,6 +374,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   revalidates current server authority before dispatch. Read-only uncertainty
   checks have finite windows, including the latest 200 messages for send/forward
   correlation. An unresolved effect stays retained and is never blindly replayed.
+  Only pending, queued and uncertain sends are message-list rows. A failed send, edit
+  or schedule leaves the list and appears as one row above the main composer with
+  retry, edit-as-draft and delete or discard; it is not placed at its former position in
+  the timeline, and the thread composer does not show failed records.
   Scheduled creation has no operation correlation and may remain uncertain.
 - Reminders are server-owned; there is no standalone local OS reminder fallback.
   The account-wide list is a bounded session cache and does not survive a restart.

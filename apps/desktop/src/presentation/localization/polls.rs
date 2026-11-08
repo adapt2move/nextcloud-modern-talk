@@ -9,11 +9,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Anonym", "Anonymous", "Anónima"),
     ("Anonym abstimmen", "Anonymous voting", "Votación anónima"),
     (
-        "Anonym abstimmen (Ergebnisse erst nach Abschluss)",
-        "Anonymous voting (results appear after closing)",
-        "Votación anónima (resultados al finalizar)",
-    ),
-    (
         "Aufnahme abspielen",
         "Play recording",
         "Reproducir grabación",
@@ -22,11 +17,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Aufnahme bereit zum Senden",
         "Recording ready to send",
         "Grabación lista para enviar",
-    ),
-    (
-        "Aufnahme fehlgeschlagen",
-        "Recording failed",
-        "La grabación falló",
     ),
     ("Aufnahme läuft", "Recording", "Grabando"),
     ("Aufnahme prüfen", "Review recording", "Revisar grabación"),
@@ -154,11 +144,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Micrófono no disponible. Comprueba el dispositivo seleccionado.",
     ),
     (
-        "Mikrofon wird vorbereitet …",
-        "Preparing microphone…",
-        "Preparando micrófono…",
-    ),
-    (
         "Mikrofonzugriff verweigert. Erlaube den Zugriff in den Systemeinstellungen.",
         "Microphone access denied. Allow access in system settings.",
         "Acceso al micrófono denegado. Permítelo en los ajustes del sistema.",
@@ -191,12 +176,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Send voice message",
         "Enviar mensaje de voz",
     ),
-    (
-        "Sprachnachricht wird geladen …",
-        "Loading voice message…",
-        "Cargando mensaje de voz…",
-    ),
-    ("Stimme abgeben", "Submit vote", "Enviar voto"),
     ("Stimme zurückziehen", "Withdraw vote", "Retirar voto"),
     ("Stimmen anzeigen", "Show voters", "Mostrar votantes"),
     ("Stimmen ausblenden", "Hide voters", "Ocultar votantes"),

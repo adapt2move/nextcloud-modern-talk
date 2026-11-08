@@ -228,7 +228,6 @@ impl Desktop {
             Overlay::ContentPreview => ("Dateivorschau", 820.),
             Overlay::CreatePoll => ("Umfrage erstellen", 620.),
             Overlay::PollDetails => ("Umfragedetails", 620.),
-            Overlay::Reminders => ("Erinnerungen", 560.),
             Overlay::Federation => ("Föderierte Einladungen", 620.),
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!("settings handled above"),
@@ -280,7 +279,6 @@ impl Desktop {
             Overlay::ContentPreview => unreachable!("media viewer handled above"),
             Overlay::CreatePoll => self.poll_creation_body(cx),
             Overlay::PollDetails => self.poll_details_body(cx),
-            Overlay::Reminders => self.account_reminders_body(cx),
             Overlay::Federation => self.federation_body(cx),
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!(),
@@ -849,7 +847,9 @@ impl Desktop {
         .px_3()
     }
     fn thread_body(&self, cx: &Context<Self>) -> Div {
-        let mut body = div().flex().flex_col();
+        // The first row's hover toolbar overlaps its top edge; the scroll region
+        // clips what lies above it, so keep that overhang inside the pane.
+        let mut body = div().flex().flex_col().pt(px(24.));
         let Some((context, root)) = self
             .thread_parent
             .filter(|(context, _)| Some(*context) == self.snapshot.selected)

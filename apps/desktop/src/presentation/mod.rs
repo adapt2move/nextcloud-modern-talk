@@ -36,7 +36,7 @@ mod selectable;
 mod settings;
 mod settings_pages;
 mod shell;
-mod sidebar;
+pub(super) mod sidebar;
 mod state;
 mod switcher;
 pub mod theme;
@@ -49,7 +49,8 @@ use gpui::{
     Window, div, prelude::*, px,
 };
 use input::TextInput;
-use state::{CallEntry, Drafts, call_entry, valid_snapshot};
+pub(crate) use state::valid_snapshot;
+use state::{CallEntry, Drafts, call_entry};
 use std::time::Instant;
 
 const CALL_CLOCK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
@@ -82,14 +83,13 @@ pub enum Overlay {
     ContentPreview,
     CreatePoll,
     PollDetails,
-    Reminders,
     Federation,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SidebarDestination {
     Conversations,
-    Threads,
-    Inbox,
+    /// One bounded view for what needs attention: unread, mentions, threads, reminders.
+    Activity,
     Archive,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -159,6 +159,8 @@ pub enum LocalAction {
     ThreadNotification(i8),
     OpenReminder(ConversationRef, u128),
     Destination(SidebarDestination),
+    ActivityFilter(sidebar::Activity),
+    ToggleSidebarMenu(sidebar::Menu),
     CollapseSection(sidebar::Section),
     SidebarFilter(talk_core::preferences::navigation::SidebarFilter),
     SidebarRoomNotifications(ConversationRef),
@@ -200,6 +202,8 @@ pub enum LocalAction {
     ReloadAccountPreferences,
     AccountPreference(talk_core::preferences::account::AccountPreferenceChange),
     ToggleOwnStatus,
+    ToggleConnectionDetails,
+    RetryConnection,
     EditStatusMessage,
     ToggleStatusEmoji,
     ToggleStatusExpiry,
@@ -274,8 +278,6 @@ use crate::presentation::probes::Probe;
 /// Prepared, bounded decorative images; composition owns decoding the embedded assets.
 pub struct MaterialImages {
     pub grain: Option<gpui::ImageSource>,
-    pub light: Option<gpui::ImageSource>,
-    pub dark: Option<gpui::ImageSource>,
 }
 
 pub struct InitialView {
@@ -291,7 +293,7 @@ pub struct InitialView {
     pub start_with_call_dock: bool,
     pub start_with_call_devices: bool,
     pub onboarding: bool,
-    pub threads_fixture: bool,
+    pub sidebar_fixture: sidebar::Fixture,
     pub thread_options_fixture: bool,
     pub room_menu_fixture: bool,
     pub new_thread_fixture: bool,
@@ -333,6 +335,8 @@ pub struct Desktop {
     motion_trigger: Option<motion::MotionTrigger>,
     unread_pop: Option<(ConversationRef, Instant)>,
     toolbar_hover: motion::HoverMotion,
+    /// The message toolbar that currently holds keyboard focus, recorded each frame.
+    toolbar_focus: std::rc::Rc<std::cell::RefCell<Option<gpui::ElementId>>>,
     dialog_motion: motion::DialogMotion,
     motion_frames: std::rc::Rc<std::cell::Cell<u64>>,
     emoji_picker_pending: Option<(ConversationRef, u64)>,
@@ -397,6 +401,8 @@ pub struct Desktop {
     pub overlay: Option<Overlay>,
     startup_account_dialog: bool,
     destination: SidebarDestination,
+    activity: sidebar::Activity,
+    sidebar_menu: Option<sidebar::Menu>,
     collapsed_sections: [bool; 5],
     room_menu: Option<(ConversationRef, &'static str)>,
     archive_request: u64,
@@ -450,6 +456,7 @@ pub struct Desktop {
     account_preference_request: u64,
     account_preference_error: Option<talk_core::preferences::account::AccountPreferenceError>,
     own_status_open: bool,
+    connection_details_open: bool,
     own_status_editing: bool,
     own_status_emoji_open: bool,
     own_status_expiry_open: bool,
@@ -527,7 +534,7 @@ impl Desktop {
             start_with_call_dock,
             start_with_call_devices,
             onboarding,
-            threads_fixture,
+            sidebar_fixture,
             thread_options_fixture,
             room_menu_fixture,
             new_thread_fixture,
@@ -654,7 +661,7 @@ impl Desktop {
         let room_ui = conversation_dialog::RoomUi::new(theme, cx);
         let account_search_ui = account_search::AccountSearchUi::new(theme, cx);
         let discovery_search =
-            cx.new(|cx| TextInput::new("Freigegebene Gespräche suchen …", 256, theme, cx));
+            cx.new(|cx| TextInput::new("Gespräche suchen oder Link einfügen …", 256, theme, cx));
         let message_ui = messaging::MessageUi::new(cx);
         let content_ui =
             content::ContentUi::new(theme, snapshot.active_account, snapshot.selected, cx);
@@ -747,6 +754,7 @@ impl Desktop {
             motion_trigger: None,
             unread_pop: None,
             toolbar_hover: motion::HoverMotion::default(),
+            toolbar_focus: Default::default(),
             dialog_motion: motion::DialogMotion::default(),
             motion_frames: Default::default(),
             emoji_picker_pending: None,
@@ -798,11 +806,9 @@ impl Desktop {
             },
             overlay: initial_overlay,
             startup_account_dialog,
-            destination: if development && threads_fixture {
-                SidebarDestination::Threads
-            } else {
-                SidebarDestination::Conversations
-            },
+            destination: sidebar_fixture.destination(),
+            activity: sidebar_fixture.activity(),
+            sidebar_menu: sidebar_fixture.menu(),
             collapsed_sections: [false; 5],
             room_menu: fixture_sidebar_menu.or(initial_room_menu),
             archive_request: 0,
@@ -852,6 +858,7 @@ impl Desktop {
             account_preference_request: 0,
             account_preference_error: None,
             own_status_open: development && matches!(probe, Probe::Status | Probe::StatusMessage),
+            connection_details_open: development && probe == Probe::ConnectionDetails,
             own_status_editing: development && probe == Probe::StatusMessage,
             own_status_emoji_open: false,
             own_status_expiry_open: false,
@@ -1482,6 +1489,11 @@ impl Desktop {
         self.refresh_creation(cx);
         self.refresh_account_search_jump();
         self.refresh_discovery();
+        if previous != self.snapshot.selected {
+            self.room_ui
+                .join_password
+                .update(cx, |input, _| input.reset());
+        }
         self.refresh_room_dialog(cx);
         self.refresh_message_ui_after_rebind(
             selected_rebind && self.message_ui.editing.is_some(),
@@ -1498,6 +1510,7 @@ impl Desktop {
             self.room_menu = None;
             self.permission_ui.microphone_ready = false;
             self.destination = SidebarDestination::Conversations;
+            self.sidebar_menu = None;
             self.collapsed_sections = [false; 5];
             self.stop_device_preview(cx);
             self.feedback = None;
@@ -1939,6 +1952,8 @@ impl Desktop {
                     return;
                 }
                 self.own_status_open = false;
+                self.connection_details_open = false;
+                self.sidebar_menu = None;
                 self.own_status_editing = false;
                 if overlay == Overlay::RecordingConsent {
                     if call::consent::scope(&self.snapshot).is_none() {
@@ -1993,11 +2008,6 @@ impl Desktop {
                     self.return_focus = window.focused(cx);
                 }
                 self.overlay = Some(overlay);
-                if overlay == Overlay::Reminders
-                    && let Some(scope) = self.snapshot.active_account
-                {
-                    self.submit(UiIntent::RefreshAccountReminders(scope));
-                }
                 if overlay == Overlay::Federation
                     && let Some(scope) = self.snapshot.active_account
                 {
@@ -2529,12 +2539,10 @@ impl Desktop {
                     self.release_unread_hold(context);
                     self.retire_emoji_picker();
                     self.navigation_open = false;
-                    if matches!(
-                        self.destination,
-                        SidebarDestination::Inbox | SidebarDestination::Threads
-                    ) {
+                    if self.destination == SidebarDestination::Activity {
                         self.destination = SidebarDestination::Conversations;
                     }
+                    self.sidebar_menu = None;
                     if self.overlay == Some(Overlay::Search) {
                         self.overlay = None;
                         self.root_focus.focus(window);
@@ -2588,7 +2596,23 @@ impl Desktop {
                     self.root_focus.focus(window);
                 }
             }
-            LocalAction::Destination(destination) => self.destination = destination,
+            LocalAction::Destination(destination) => {
+                self.destination = destination;
+                self.sidebar_menu = None;
+                if destination == SidebarDestination::Activity {
+                    self.refresh_activity(self.activity);
+                }
+            }
+            LocalAction::ActivityFilter(filter) => {
+                self.activity = filter;
+                self.refresh_activity(filter);
+            }
+            LocalAction::ToggleSidebarMenu(menu) => {
+                self.sidebar_menu = (self.sidebar_menu != Some(menu)).then_some(menu);
+                self.own_status_open = false;
+                self.connection_details_open = false;
+                self.room_menu = None;
+            }
             LocalAction::SendThread => self.send_thread_draft(cx),
             LocalAction::ToggleThreadOptions => {
                 self.thread_options_open = !self.thread_options_open
@@ -2643,11 +2667,14 @@ impl Desktop {
                 }
             }
             LocalAction::CollapseSection(section) => self.collapse_sidebar_section(section, cx),
-            LocalAction::SidebarFilter(filter) => self.edit_navigation(
-                talk_core::preferences::navigation::RemoteNavigationSupport::Unsupported,
-                talk_core::preferences::navigation::NavigationEdit::SetFilter(filter),
-                cx,
-            ),
+            LocalAction::SidebarFilter(filter) => {
+                self.sidebar_menu = None;
+                self.edit_navigation(
+                    talk_core::preferences::navigation::RemoteNavigationSupport::Unsupported,
+                    talk_core::preferences::navigation::NavigationEdit::SetFilter(filter),
+                    cx,
+                )
+            }
             LocalAction::SidebarRoomNotifications(context) => {
                 self.room_menu = None;
                 if self.save_thread_draft(cx)
@@ -3028,6 +3055,15 @@ impl Desktop {
             LocalAction::StartDevice(kind) => self.start_device_preview(kind),
             LocalAction::StopDevice(kind) => self.stop_one_device(kind, cx),
             LocalAction::ToggleOwnStatus => self.toggle_own_status(window, cx),
+            LocalAction::ToggleConnectionDetails => {
+                self.connection_details_open = !self.connection_details_open;
+                self.own_status_open = false;
+                self.room_menu = None;
+            }
+            LocalAction::RetryConnection => {
+                self.connection_details_open = false;
+                self.retry_connection();
+            }
             LocalAction::EditStatusMessage => self.edit_status_message(window, cx),
             LocalAction::ToggleStatusExpiry => {
                 self.own_status_expiry_open = !self.own_status_expiry_open
@@ -3317,12 +3353,26 @@ impl Desktop {
             }
             cx.stop_propagation();
         } else if action == Some(ActionId::Close) {
+            if self.connection_details_open {
+                self.connection_details_open = false;
+                if let Some(focus) = self.control_focus.current(&"connection-status".into()) {
+                    focus.focus(window);
+                }
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
             if self.own_status_open {
                 self.own_status_open = false;
                 self.own_status_editing = false;
                 if let Some(focus) = self.control_focus.current(&"own-status-menu".into()) {
                     focus.focus(window);
                 }
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
+            if self.sidebar_menu.take().is_some() {
                 cx.notify();
                 cx.stop_propagation();
                 return;
@@ -3385,7 +3435,7 @@ impl Desktop {
             cx.stop_propagation();
         } else if self.composer_available()
             && !self.onboarding_open
-            && self.destination != SidebarDestination::Inbox
+            && self.destination != SidebarDestination::Activity
             && action == Some(ActionId::ConversationSearch)
         {
             self.handle(
@@ -3736,7 +3786,7 @@ impl Render for Desktop {
             input.theme = t;
             input.text_scale = f32::from(self.scale) / 100.;
             input.interactive = self.overlay == Some(Overlay::Discover) && !incoming;
-            input.set_placeholder(self.l("Freigegebene Gespräche suchen …"));
+            input.set_placeholder(self.l("Gespräche suchen oder Link einfügen …"));
         });
         for input in self.room_ui.inputs() {
             input.update(cx, |i, _| {
@@ -3750,6 +3800,22 @@ impl Render for Desktop {
                     );
             });
         }
+        self.room_ui.join_password.update(cx, |input, _| {
+            input.set_placeholder(self.l("Passwort des Gesprächs"));
+            input.clipboard_export_allowed = false;
+            input.interactive = self.overlay.is_none()
+                && !incoming
+                && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                    matches!(
+                        panel.history,
+                        talk_core::ui::conversation::RemoteState::Failed(
+                            _,
+                            talk_core::ui::UnavailableReason::PasswordRequired
+                        )
+                    )
+                });
+        });
+
         self.configure_member_inputs(incoming, cx);
         if self.overlay == Some(Overlay::Create) {
             self.room_ui
@@ -4042,14 +4108,6 @@ impl Render for Desktop {
             .text_size(self.sp(14.))
             .line_height(self.sp(22.))
             .bg(t.chrome())
-            .children(self.materials.layer(
-                if t.dark {
-                    controls::Texture::PatternDark
-                } else {
-                    controls::Texture::PatternLight
-                },
-                t.reduced_transparency,
-            ))
             .children(
                 self.materials
                     .layer(controls::Texture::Grain, t.reduced_transparency),
@@ -4144,7 +4202,6 @@ impl Render for Desktop {
             .on_key_down(cx.listener(Self::key))
             .child(self.pointer_modality(cx))
             .child(self.window_chrome(window, shell_visible, cx))
-            .children(self.connection_banner())
             .child(
                 div()
                     .relative()

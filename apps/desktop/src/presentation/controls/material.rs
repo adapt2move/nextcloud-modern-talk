@@ -6,6 +6,8 @@ use gpui::{
 };
 
 const TILE: f32 = 128.;
+/// Backdrop blur radius in points for every floating glass surface.
+const BACKDROP_BLUR: f32 = 8.;
 const LIGHT_GLASS_ALPHA: f32 = 0.87;
 const DARK_GLASS_ALPHA: f32 = 0.88;
 // A window cannot create an unbounded number of retained decorative views.
@@ -25,9 +27,9 @@ pub(in crate::presentation) fn glass_corners(
     canvas(
         |_, _, _| (),
         move |bounds, (), window, _| {
-            // A compact blur keeps moving content visibly softened through the
-            // accessible tint instead of washing it into an indistinct flat fill.
-            let supported = window.paint_backdrop(bounds, corners, px(4.));
+            // The blur must be wide enough to dissolve text behind the surface
+            // into a soft tone; a narrow blur leaves legible ghost lines.
+            let supported = window.paint_backdrop(bounds, corners, px(BACKDROP_BLUR));
             let fill = if supported {
                 tint.opacity(if dark {
                     DARK_GLASS_ALPHA
@@ -111,8 +113,6 @@ pub(in crate::presentation) enum Texture {
     Grain,
     Card,
     Tile,
-    PatternLight,
-    PatternDark,
 }
 
 struct Layer {
@@ -142,17 +142,34 @@ impl Render for Layer {
                 // native 128-point tile without stretching.
                 let tile_width = TILE.max(width / columns as f32);
                 let tile_height = TILE.max(height / rows as f32);
+                // Neighboring tiles must meet on the same device pixel. A
+                // fractional edge is antialiased twice and draws a faint seam
+                // at every tile boundary, so snap each edge once, in absolute
+                // window coordinates, and derive both neighbors from it.
+                let scale = window.scale_factor().max(1.);
+                let snap = |at: f32| (at * scale).round() / scale;
+                let (left, top) = (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
                 for row in 0..rows {
                     for column in 0..columns {
                         let x = column as f32 * tile_width;
                         let y = row as f32 * tile_height;
-                        let tile = Bounds::new(
-                            point(bounds.origin.x + px(x), bounds.origin.y + px(y)),
-                            size(
-                                px(tile_width.min(width - x)),
-                                px(tile_height.min(height - y)),
-                            ),
-                        );
+                        let x0 = snap(left + x);
+                        let y0 = snap(top + y);
+                        let x1 = if column + 1 == columns {
+                            snap(left + width)
+                        } else {
+                            snap(left + x + tile_width)
+                        };
+                        let y1 = if row + 1 == rows {
+                            snap(top + height)
+                        } else {
+                            snap(top + y + tile_height)
+                        };
+                        if x1 <= x0 || y1 <= y0 {
+                            continue;
+                        }
+                        let tile =
+                            Bounds::new(point(px(x0), px(y0)), size(px(x1 - x0), px(y1 - y0)));
                         let corner = |at_corner| px(if at_corner { radius } else { 0. });
                         let radii = Corners {
                             top_left: corner(row == 0 && column == 0),
@@ -216,30 +233,20 @@ pub(in crate::presentation) struct Materials {
     grain: Pool,
     card: Pool,
     tile: Pool,
-    pattern_light: Pool,
-    pattern_dark: Pool,
 }
 
 impl Materials {
     pub fn new(images: MaterialImages, cx: &mut Context<Desktop>) -> Self {
-        let MaterialImages { grain, light, dark } = images;
+        let MaterialImages { grain } = images;
         Self {
             grain: Pool::new(grain.clone(), 0., 8, cx),
             card: Pool::new(grain.clone(), 16., 8, cx),
             tile: Pool::new(grain, 12., 24, cx),
-            pattern_light: Pool::new(light, 0., 4, cx),
-            pattern_dark: Pool::new(dark, 0., 4, cx),
         }
     }
 
     pub fn begin_frame(&self) {
-        for pool in [
-            &self.grain,
-            &self.card,
-            &self.tile,
-            &self.pattern_light,
-            &self.pattern_dark,
-        ] {
+        for pool in [&self.grain, &self.card, &self.tile] {
             pool.reset();
         }
     }
@@ -252,8 +259,6 @@ impl Materials {
             Texture::Grain => &self.grain,
             Texture::Card => &self.card,
             Texture::Tile => &self.tile,
-            Texture::PatternLight => &self.pattern_light,
-            Texture::PatternDark => &self.pattern_dark,
         }
         .next()
     }

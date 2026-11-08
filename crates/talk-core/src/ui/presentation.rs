@@ -432,13 +432,32 @@ pub struct ParticipantView {
     pub call_camera: Option<bool>,
 }
 
+/// Bounded presentation reasons, projected by composition from the policy owner.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallPolicyReason {
+    RecordingConsentRejoin,
+    RequiredEncryption,
+    CallsDisabled,
+    RoomRestricted,
+    JoinForbidden,
+    StartForbidden,
+    ClassifiedRecording,
+    PendingSignaling,
+    IncompatiblePolicy,
+    PendingPolicy,
+    MembershipLost,
+    SignalingUnsupported,
+    MediaUnavailable,
+    NotAuthorized,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RequiredGate {
     MicrophonePermission,
     CameraPermission,
     ScreenPermission,
     RecordingConsent,
-    SecurityPolicy,
+    CallPolicy(CallPolicyReason),
     Lobby,
 }
 

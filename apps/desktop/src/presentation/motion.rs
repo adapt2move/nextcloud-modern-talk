@@ -138,27 +138,83 @@ pub(super) struct MotionTrigger {
     pub admitted: Instant,
 }
 
-/// One visible toolbar admission per window; moving within a row does not
-/// restart it, and a late leave from an older row cannot clear the new one.
+/// Which message row owns the hover toolbar. The pointer may occupy the row
+/// body or the toolbar itself, which overlaps the row's top edge and so lies
+/// outside the row's own hit area. Either part keeps the toolbar visible; a late
+/// leave from an older row cannot clear the new owner. Reduced Motion keeps the
+/// ownership (visibility is behavior) and only drops the reveal admission.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum HoverPart {
+    Row,
+    Toolbar,
+}
 #[derive(Default)]
 pub(super) struct HoverMotion {
+    /// Row whose toolbar began revealing, and when; moving within it never restarts.
     target: Option<(ElementId, Instant)>,
+    /// The single row currently occupied by the pointer: (id, in row, in toolbar).
+    active: Option<(ElementId, bool, bool)>,
 }
 impl HoverMotion {
     pub fn update(&mut self, id: &ElementId, hovered: bool, reduced: bool, now: Instant) -> bool {
-        if reduced {
-            return self.target.take().is_some();
+        self.set(id, HoverPart::Row, hovered, reduced, now)
+    }
+
+    pub fn update_toolbar(
+        &mut self,
+        id: &ElementId,
+        hovered: bool,
+        reduced: bool,
+        now: Instant,
+    ) -> bool {
+        self.set(id, HoverPart::Toolbar, hovered, reduced, now)
+    }
+
+    fn set(
+        &mut self,
+        id: &ElementId,
+        part: HoverPart,
+        hovered: bool,
+        reduced: bool,
+        now: Instant,
+    ) -> bool {
+        let current = self
+            .active
+            .as_ref()
+            .is_some_and(|(active, ..)| active == id);
+        if !current {
+            if !hovered {
+                return false;
+            }
+            self.active = Some((
+                id.clone(),
+                part == HoverPart::Row,
+                part == HoverPart::Toolbar,
+            ));
+            self.target = (!reduced).then(|| (id.clone(), now));
+            return true;
         }
-        let current = self.target.as_ref().is_some_and(|(target, _)| target == id);
-        if hovered && !current {
-            self.target = Some((id.clone(), now));
-            true
-        } else if !hovered && current {
+        let Some((_, row, toolbar)) = self.active.as_mut() else {
+            return false;
+        };
+        let previous = match part {
+            HoverPart::Row => std::mem::replace(row, hovered),
+            HoverPart::Toolbar => std::mem::replace(toolbar, hovered),
+        };
+        if previous == hovered {
+            return false;
+        }
+        if !*row && !*toolbar {
+            self.active = None;
             self.target = None;
-            true
-        } else {
-            false
         }
+        true
+    }
+
+    pub fn visible(&self, id: &ElementId) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|(active, ..)| active == id)
     }
 
     pub fn admission(&self, id: &ElementId, now: Instant) -> Option<Instant> {
@@ -170,6 +226,7 @@ impl HoverMotion {
 
     pub fn clear(&mut self) {
         self.target = None;
+        self.active = None;
     }
 }
 impl MotionTrigger {
@@ -426,6 +483,25 @@ impl Desktop {
             !self.reduced_motion,
             self.motion_frame_counter(),
         )
+        .into_any_element()
+    }
+
+    /// The hover toolbar eases down four points while it fades in; it keeps
+    /// its stable identity so a press that spans the reveal is not discarded.
+    pub(super) fn reveal_toolbar(
+        &self,
+        id: ElementId,
+        element: Div,
+        observed: Option<Instant>,
+    ) -> AnyElement {
+        reveal::ActionReveal::new(
+            id,
+            element,
+            observed,
+            !self.reduced_motion,
+            self.motion_frame_counter(),
+        )
+        .kind(reveal::Kind::Toolbar)
         .into_any_element()
     }
 
@@ -732,7 +808,47 @@ mod tests {
         assert!(hover.update(&second, true, false, now + CONTROL));
         assert!(!hover.update(&first, false, false, now + CONTROL));
         assert_eq!(hover.admission(&second, now + CONTROL), Some(now + CONTROL));
-        assert!(hover.update(&second, true, true, now + CONTROL));
-        assert_eq!(hover.admission(&second, now + CONTROL), None);
+        assert!(hover.visible(&second) && !hover.visible(&first));
+    }
+
+    #[test]
+    fn the_toolbar_overhang_keeps_its_row_visible_in_either_event_order() {
+        let now = Instant::now();
+        let above = ElementId::from("above");
+        let row = ElementId::from("row");
+        let mut hover = HoverMotion::default();
+        // Pointer climbs from the row body into its own toolbar: the row's
+        // leave arrives while the toolbar still holds the toolbar open.
+        assert!(hover.update(&row, true, false, now));
+        assert!(hover.update_toolbar(&row, true, false, now));
+        hover.update(&row, false, false, now);
+        assert!(hover.visible(&row));
+        assert!(hover.update_toolbar(&row, false, false, now));
+        assert!(!hover.visible(&row));
+        // Pointer crosses from the row above into this row's toolbar, which
+        // overlaps it. Neither arrival order may strand or steal visibility.
+        assert!(hover.update(&above, true, false, now));
+        assert!(hover.update_toolbar(&row, true, false, now));
+        assert!(!hover.update(&above, false, false, now));
+        assert!(hover.visible(&row) && !hover.visible(&above));
+        assert!(hover.update_toolbar(&row, false, false, now));
+        assert!(!hover.visible(&row));
+        assert!(hover.update(&above, true, false, now));
+        assert!(hover.visible(&above));
+    }
+
+    #[test]
+    fn reduced_motion_keeps_toolbar_ownership_but_never_admits_a_reveal() {
+        let now = Instant::now();
+        let row = ElementId::from("row");
+        let mut hover = HoverMotion::default();
+        assert!(hover.update(&row, true, true, now));
+        assert!(hover.visible(&row));
+        assert_eq!(hover.admission(&row, now), None);
+        assert!(hover.update(&row, false, true, now));
+        assert!(!hover.visible(&row));
+        hover.update(&row, true, false, now);
+        hover.clear();
+        assert!(!hover.visible(&row) && hover.admission(&row, now).is_none());
     }
 }

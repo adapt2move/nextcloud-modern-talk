@@ -185,6 +185,20 @@ For a change not signaled to the client, the decision must derive the maximum ex
 
 The pinned settings mark both `call_end_to_end_encryption` and `grid_videos_limit_enforced` as not changing the Talk version hash. Therefore hash-triggered refresh alone is insufficient during an uninterrupted call. The current-room API exposes per-participant permissions and recording-consent state; the bootstrap must verify the complete source mapping for both families. [Talk25 settings](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/settings.md), [Talk24 conversation API](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/conversation.md), [Talk25 conversation API](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/conversation.md)
 
+The call admission adapter follows the official client's capability guard:
+`call-end-to-end-encryption` absent means E2EE is not enabled; when advertised,
+`config.call.end-to-end-encryption: false` disables it and an omitted value
+requires it. Unknown non-boolean values are conservatively treated as required,
+not as proof that unsupported encryption is safe. An unknown recording-consent
+mode in a successfully fetched policy requires explicit consent for ordinary
+rooms; this client deliberately chooses the stricter outcome rather than
+upstream Config's unknown-value fallback to disabled. Neither fallback renews
+missing/stale evidence. Classified attributes and inactive recording must still
+be established independently. The authoritative sources, original request-based
+expiry and enforcement obligations above remain unchanged. Protocol compatibility
+is capability-based; server version labels alone neither grant nor deny calls.
+See [call source mapping](../../crates/talk-adapters/src/nextcloud/call_policy.rs).
+
 Recording consent must be explicit where required, tied to the relevant call/policy and not preselected. Show recording transitions and stop/re-evaluate affected actions when policy changes. Do not infer absence of recording from missing optional data. The pinned Talk call API documents a consent parameter and refusal when required consent is missing. [Talk25 call API](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/call.md)
 
 `call-end-to-end-encryption` advertises signaling support, not proof that this native client encrypts media end to end. The reviewed Talk settings associate call E2EE with the high-performance backend. A required policy that the client cannot satisfy blocks joining/publishing with an explanation; never silently downgrade. Claims require native interoperability evidence for negotiation, key distribution/rotation, participant changes and failure handling. Ordinary transport encryption, chat/file encryption and call E2EE must have distinct labels. Verify recording/E2EE combinations against the exact server and engine; do not invent compatibility. [Talk24 capabilities](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/capabilities.md), [Talk25 settings](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/settings.md)

@@ -18,7 +18,7 @@ mod translation;
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
     collection::CollectionState,
-    controls::{Availability, Skeleton, scoped_id},
+    controls::{Availability, BannerRole, Skeleton, scoped_id},
     input::TextInput,
 };
 use gpui::{
@@ -46,6 +46,7 @@ pub(crate) enum Action {
     MenuChoice(menu::Target, menu::Choice),
     Forward(forward::Action),
     RetryHistory,
+    JoinRoom,
     RetryContext { request: RequestId, target: u128 },
     Reply(u128),
     PrivateReply(u128),
@@ -680,7 +681,7 @@ impl Desktop {
                     self.overlay,
                 )
             } else {
-                self.destination != super::SidebarDestination::Inbox
+                self.destination != super::SidebarDestination::Activity
             };
         self.settle_pin_scroll_for_reduced_motion();
         self.message_ui
@@ -1704,6 +1705,16 @@ impl Desktop {
             Action::MenuChoice(target, choice) => {
                 self.choose_message_menu(target, choice, window, cx)
             }
+            Action::JoinRoom => {
+                if let Ok(password) =
+                    Text::new(self.room_ui.join_password.read(cx).content.as_str())
+                {
+                    self.submit_message(MessageAction::JoinRoom(password));
+                    self.room_ui
+                        .join_password
+                        .update(cx, |input, _| input.reset());
+                }
+            }
             Action::RetryHistory => {
                 self.request_older_history(true);
             }
@@ -2203,20 +2214,22 @@ impl Desktop {
             };
         } else if state.initial_loading() || context_pending {
             body = body.child(self.collection_skeleton(Skeleton::Messages, "messages"));
+        } else if let Some(context) = self.snapshot.selected
+            && let Some(unavailable) = self.room_unavailable(state, context, cx)
+        {
+            // One calm, centered explanation instead of a banner over a blank
+            // timeline. The retained draft and the header stay in place.
+            body = body.child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(unavailable),
+            );
         } else {
             body = body.child(div().flex_1());
-        }
-        if !matches!(
-            self.snapshot.content,
-            ContentState::Ready | ContentState::Loading | ContentState::Offline
-        ) && let Some(context) = self.snapshot.selected
-        {
-            body = body.child(div().px_3().py_2().child(self.collection_feedback(
-                state,
-                "retry-content",
-                LocalAction::Intent(UiIntent::Refresh(context)),
-                cx,
-            )));
         }
         if let Some(panel) = self
             .snapshot
@@ -2287,6 +2300,69 @@ impl Desktop {
         }
         body
     }
+    pub(super) fn room_entry_feedback(
+        &self,
+        context: ConversationRef,
+        cx: &Context<Self>,
+    ) -> Option<Div> {
+        use talk_core::ui::{UnavailableReason, conversation::RemoteState};
+        let panel = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| p.context == context)?;
+        let reason = match panel.history {
+            RemoteState::Failed(_, reason) => reason,
+            _ => return None,
+        };
+        let mut body = self
+            .banner_frame(BannerRole::Warning)
+            .w_full()
+            .max_w(px(720.))
+            .flex_wrap()
+            .gap_y_2()
+            .child(self.scaled_icon("lock", 16., BannerRole::Warning.foreground(self.theme)));
+        match reason {
+            UnavailableReason::PasswordRequired => {
+                body = body
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.l("Dieses Gespräch benötigt ein Passwort.")),
+                    )
+                    .child(
+                        self.input_surface(&self.room_ui.join_password, cx)
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.room_ui.join_password.clone()),
+                    )
+                    .child(self.button(
+                        "join-room-password",
+                        "Beitreten",
+                        ButtonStyle::Primary,
+                        self.active_account_connected(),
+                        LocalAction::MessageIn(context, Action::JoinRoom),
+                        cx,
+                    ));
+            }
+            UnavailableReason::Lobby => {
+                body = body
+                    .child(self.hint(self.l("Die Lobby ist aktiv. Bitte warte auf die Freigabe.")))
+                    .child(self.button(
+                        "retry-room-lobby",
+                        "Erneut laden",
+                        ButtonStyle::Quiet,
+                        self.active_account_connected(),
+                        LocalAction::Intent(UiIntent::Refresh(context)),
+                        cx,
+                    ));
+            }
+            _ => return None,
+        }
+        Some(body)
+    }
+
     fn message_history(
         &self,
         header_inset: gpui::Pixels,
@@ -3132,7 +3208,6 @@ impl Desktop {
             }
         }
         rows.extend(self.message_deadline_card_on(false, cx));
-        rows.extend(self.failed_draft_card(cx));
         rows
     }
     fn quote_marker(&self) -> Div {

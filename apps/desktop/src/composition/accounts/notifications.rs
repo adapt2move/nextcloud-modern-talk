@@ -21,10 +21,13 @@ struct MessageNotice {
 #[derive(Default)]
 pub(super) struct Notices {
     messages: VecDeque<MessageNotice>,
+    server_tests: VecDeque<(AccountScope, u64, Instant)>,
 }
 impl Notices {
     pub(super) fn retain_accounts(&mut self, scopes: &[AccountScope]) {
         self.messages.retain(|n| scopes.contains(&n.scope));
+        self.server_tests
+            .retain(|(scope, _, _)| scopes.contains(scope));
     }
     pub(super) fn remove_room(&mut self, context: ConversationRef) {
         self.messages
@@ -32,6 +35,7 @@ impl Notices {
     }
     fn remove_account(&mut self, scope: AccountScope) {
         self.messages.retain(|n| n.scope != scope);
+        self.server_tests.retain(|(s, _, _)| *s != scope);
     }
     fn push(&mut self, scope: AccountScope, value: protocol::MessageNotice, now: Instant) {
         if value.conversation.account != scope.account
@@ -87,6 +91,14 @@ impl Accounts {
             if value.changed {
                 self.background
                     .invalidate(scope, background::Observation::Rooms, Instant::now());
+            }
+            for &id in value.server_tests.as_slice() {
+                if self.notices.server_tests.len() == CAPACITY {
+                    self.notices.server_tests.pop_front();
+                }
+                self.notices
+                    .server_tests
+                    .push_back((scope, id, Instant::now()));
             }
             for notice in value.notices.as_slice() {
                 self.notices.push(scope, notice.clone(), Instant::now());
@@ -163,6 +175,32 @@ impl Accounts {
         background: bool,
         locale: Locale,
     ) -> Option<NotificationEvent> {
+        while let Some(&(scope, id, received)) = self.notices.server_tests.front() {
+            if received.elapsed() >= LIFETIME
+                || self.current(scope).is_err()
+                || self.suppress_account_notifications(scope)
+                || !self
+                    .background
+                    .source(scope, background::Observation::Messages, Instant::now())
+            {
+                self.notices.server_tests.pop_front();
+                continue;
+            }
+            return Some(NotificationEvent {
+                request: talk_core::preferences::RequestId(0),
+                kind: NotificationKind::ServerTest {
+                    scope,
+                    id: NotificationId(id),
+                },
+                title: text(crate::presentation::localization::text(
+                    locale,
+                    "Testbenachrichtigung",
+                )),
+                body: text("NextCloud Talk"),
+                minimized: background,
+                eligible: true,
+            });
+        }
         loop {
             let notice = self.notices.messages.front()?;
             let current = self
@@ -234,6 +272,17 @@ impl Accounts {
         }
     }
     pub(in crate::composition) fn settle_message_notification(&mut self, kind: NotificationKind) {
+        if let NotificationKind::ServerTest { scope, id } = kind {
+            if self
+                .notices
+                .server_tests
+                .front()
+                .is_some_and(|(s, n, _)| *s == scope && *n == id.0)
+            {
+                self.notices.server_tests.pop_front();
+            }
+            return;
+        }
         let matches = self.notices.messages.front().is_some_and(|n| match kind {
             NotificationKind::Message {
                 scope,
@@ -330,6 +379,7 @@ mod tests {
             source: protocol::NotificationSourceState::Available,
             scope: context.account,
             notices: page([notice(context, 43)]),
+            server_tests: page([900]),
             changed: true,
         };
         model.complete_message_notifications(
@@ -342,6 +392,7 @@ mod tests {
             model.notices.messages.is_empty(),
             "an unadmitted runtime cannot supply alerts"
         );
+        assert!(model.notices.server_tests.is_empty());
     }
     #[test]
     fn repeated_live_hints_neither_emit_nor_clear_queued_notifications() {

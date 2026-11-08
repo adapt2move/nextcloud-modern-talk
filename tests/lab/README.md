@@ -72,6 +72,14 @@ configure Janus or exercise media. See the [backend lab guide](../../docs/backen
 
 Browser authorization, revoked-credential/callback races, guest/file/federation workflows, most preset restrictions, Keychain fallback, GPUI, accessibility, WebRTC/audio/video/screen sharing, E2EE, HPB media/TURN, recording, native performance and full parity remain **not tested here**. No native client or full compatibility pass is implied by these harness commands.
 
+`thread_reply.py --state PRIVATE_STATE --binary DEV_PROBES_BINARY --output NEW_DIRECTORY`
+uses a running development profile to open a real thread through native GPUI,
+type a reply with X11 keyboard input, press Enter, and assert one canonical
+reply both on the server and in the pane with the editor cleared. It retains
+before/after images and content-free probe state. Run one profile at a time.
+This separate Linux Xvfb/Mesa interaction check does not qualify macOS input,
+native semantic accessibility or production TLS.
+
 The recovery relay also accepts fixed `latency-1500` / `latency-4000` modes,
 `slow-poll` (four seconds on forward chat/signaling polls), and deterministic
 `intermittent` read faults cycling 502, 504 and dropped connections. Each mode
@@ -81,3 +89,44 @@ completion samples per mode to each profile's `latency.json`. Failed requests
 remain samples; these numbers are not native UI feedback or frame timings.
 `python3 tests/lab/test_resilience.py` checks the relay without Docker; the full
 check includes it. Only the released-server lab establishes the backend result.
+
+## Notification delivery
+
+The profile explicitly enables the Notifications app bundled in the digest-pinned
+server image and records its installed version and integrity. Optional
+`notify_push` is not provisioned: this client uses bounded polling, and the
+notification probe establishes no websocket or mobile push-proxy claim.
+
+On a running owned development profile:
+
+```sh
+CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 python3 tests/lab/notifications.py \
+  --state /run/nmtlab-PRINTED-IDENTITY/state.json --output /tmp/new-notification-evidence
+```
+
+The probe creates a synthetic direct room and private fixtures, runs the production
+account adapter, and triggers `occ notification:test-push --talk` after its silent
+baseline. It asserts that a new diagnostic object exists in API v2, reaches the
+adapter without mobile registration and does not replay. The existing background
+sequence also verifies nonselected DM discovery, a direct mention, a due reminder
+created by the actual server background job, unread preservation and incoming
+direct-call discovery/decline. Native macOS authorization, helper delivery, Focus
+and window-close/reopen behavior still require a native Mac run.
+
+## Signed-in public-room entry
+
+Run `python3 tests/lab/public_room.py --profile r35 --output /absolute/new/results`
+(and separately with `r34`) on the disposable VM. It creates public, password,
+lobby and listed rooms as one synthetic user, checks that another user has only
+pre-join guest-like metadata and cannot read history, then runs the typed adapter
+through admission, history, sending and membership leave. Incorrect/missing
+passwords and lobby waiting have distinct results; entry grants no call handle.
+The public room is unlisted, so its password is not bypassed by directory eligibility.
+
+For a Linux native interaction check, first build the desktop with `dev-probes`,
+then add `--native-binary /absolute/path/to/talk-desktop`. The optional Xvfb/Mesa
+check uses real mouse/key input to paste a same-server link into discovery, join
+with a password, read history and send a message. It requires xdotool, ImageMagick,
+Tesseract, Xvfb and D-Bus. Screenshots contain only the disposable fixture. This
+is Linux native interaction evidence, not macOS/Windows, accessibility or media
+qualification. The lab removes its private profile and server data on completion.

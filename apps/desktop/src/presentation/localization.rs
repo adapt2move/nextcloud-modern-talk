@@ -25,7 +25,9 @@ mod reaction_authors;
 mod recovery;
 mod reference;
 mod resources;
+mod room_access;
 mod search_navigation;
+mod shell;
 mod sidebar_notifications;
 mod threads;
 mod typing;
@@ -58,11 +60,13 @@ pub fn text(locale: Locale, key: &str) -> &str {
         discovery::MESSAGES,
         reference::MESSAGES,
         search_navigation::MESSAGES,
+        shell::MESSAGES,
         sidebar_notifications::MESSAGES,
         resources::MESSAGES,
         threads::MESSAGES,
         unread::MESSAGES,
         recovery::MESSAGES,
+        room_access::MESSAGES,
         updates::MESSAGES,
         onboarding::MESSAGES,
         own_status::MESSAGES,
@@ -282,11 +286,13 @@ mod tests {
         for catalog in [
             account_search::MESSAGES,
             search_navigation::MESSAGES,
+            shell::MESSAGES,
             sidebar_notifications::MESSAGES,
             resources::MESSAGES,
             threads::MESSAGES,
             unread::MESSAGES,
             recovery::MESSAGES,
+            room_access::MESSAGES,
             conversation::MESSAGES,
             call::MESSAGES,
             creation::MESSAGES,

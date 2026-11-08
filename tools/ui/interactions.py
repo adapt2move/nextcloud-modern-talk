@@ -18,6 +18,41 @@ def normalized(value):
     return ' '.join(text.split())
 
 
+def ink(image, box, env):
+    """Fraction of non-background pixels in a crop (x, y, width, height)."""
+    x, y, width, height = box
+    result = run(['convert', str(image), '-crop', f'{width}x{height}+{x}+{y}', '+repage',
+                  '-colorspace', 'gray', '-threshold', '92%', '-format', '%[fx:1-mean]', 'info:'], env)
+    return float(result.stdout.strip() or 0)
+
+
+def ocr_crop(image, box, env):
+    """Normalized text of one region, enlarged for the small native UI font."""
+    x, y, width, height = box
+    crop = image.with_name(f'{image.stem}-crop.png')
+    run(['convert', str(image), '-crop', f'{width}x{height}+{x}+{y}', '+repage', '-resize', '300%',
+         '-colorspace', 'gray', '-auto-level', str(crop)], env)
+    text = normalized(run(['tesseract', str(crop), 'stdout', '--psm', '6'], env).stdout)
+    crop.unlink()
+    return text
+
+
+def differs(first, second, box, env, fuzz='8%'):
+    """Pixels of a crop that differ between two captures beyond a tolerance
+    that absorbs the subtle row tint but not text, icons or the toolbar."""
+    x, y, width, height = box
+    crops = []
+    for index, image in enumerate((first, second)):
+        crop = image.with_name(f'{image.stem}-diff{index}.png')
+        run(['convert', str(image), '-crop', f'{width}x{height}+{x}+{y}', '+repage', str(crop)], env)
+        crops.append(crop)
+    result = subprocess.run(['compare', '-metric', 'AE', '-fuzz', fuzz, str(crops[0]), str(crops[1]), 'null:'],
+                            env=env, text=True, capture_output=True)
+    for crop in crops:
+        crop.unlink()
+    return int(float((result.stdout + result.stderr).split()[0]))
+
+
 def exercise(scenario, env, xid, out, label, large=False):
     checks = []
     step = 0
@@ -140,22 +175,6 @@ def exercise(scenario, env, xid, out, label, large=False):
                 run(image_args + ['-auto-level', '-threshold', '75%', str(field_path)], env)
                 text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
             field_path.unlink(missing_ok=True)
-        if scenario in ('chat', 'busy') and 'NO MATCH' in required and (width, height) == (1280, 800):
-            # Whole-window OCR can treat the focused switcher input as a graphic.
-            # Read its actual contents relative to the visible dialog heading.
-            headings = [word for word in words if normalized(word['text']) == 'suchen'
-                        and int(word['left']) >= 260 and int(word['top']) >= 200]
-            if headings:
-                heading = min(headings, key=lambda word: int(word['top']))
-                x, y = int(heading['left']) + 13, int(heading['top']) + 60
-                field_path = out / f'{label}-ocr-switcher-field.png'
-                image_args = ['convert', str(path), '-crop', f'640x42+{x}+{y}', '+repage',
-                              '-resize', '400%', '-colorspace', 'gray']
-                if '-dark-' in label:
-                    image_args.append('-negate')
-                run(image_args + ['-auto-level', str(field_path)], env)
-                text += ' ' + normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
-                field_path.unlink()
         if 'Antwortoption' in required and poll_option_hits(path, words):
             text += ' antwortoption'
         for term in required:
@@ -309,8 +328,10 @@ def exercise(scenario, env, xid, out, label, large=False):
         if scenario in ('chat','prejoin','settings'):
             run(['xdotool','mousemove','--window',xid,'600','430','click','--repeat','35','--delay','35','5'],env)
             if scenario=='chat':
-                expect('200% composer reachable by native scrolling',['Senden','Nachricht an Produktteam'])
-                click('schreiben');type_text('LARGEDRAFT');key('Return')
+                # The send control is an arrow icon; reachability is proved by native
+                # typing and submission below, rather than OCR of its tooltip.
+                expect('200% composer reachable by native scrolling',['Nachricht an Produktteam'])
+                click('Nachricht', xmin=30, ymin=500);type_text('LARGEDRAFT');key('Return')
                 expect('200% failed submission retains draft',['LARGEDRAFT','Nicht gesendet'])
             elif scenario=='prejoin':
                 expect('200% explicit conference join remains reachable',['Jetzt', 'teil'])
@@ -359,7 +380,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('send-later cancellation returns focus to the composer', ['Notizen morgen teilen.X'])
     elif scenario == 'thread-message-tools':
         expect('thread translation and account navigation coexist',
-               ['Design review', 'Das passt', 'Original anzeigen', 'Threads', 'Erinnerungen'])
+               ['Design review', 'Das passt', 'Original anzeigen', 'Aktivität', 'Gespräche'])
         click('anzeigen', xmin=950, ymin=300)
         expect('thread translation can return to its original', ['Das klingt gut.'], ['Das passt'])
         click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1030,700))
@@ -367,7 +388,8 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect_settled('thread tools preserve an unsent reply', ['THREADTOOLS'])
         run(['xdotool', 'mousemove', '--window', xid, '1100', '322'], env)
         time.sleep(.4)
-        run(['xdotool', 'mousemove', '--window', xid, '1242', '295', 'click', '1'], env)
+        # The toolbar straddles the hovered row's top edge at its content's right edge.
+        run(['xdotool', 'mousemove', '--window', xid, '1224', '270', 'click', '1'], env)
         expect('thread message menu exposes reminder and cached translation', ['Später erinnern', 'Übersetzung anzeigen'])
         click('erinnern', xmin=900)
         expect('thread reminder uses the shared calendar inside the pane',
@@ -376,7 +398,7 @@ def exercise(scenario, env, xid, out, label, large=False):
              'click', '--repeat', '12', '--delay', '70', '5'], env)
         expect_settled('thread reminder presets and submit remain reachable by native scrolling',
                        ['In 20 Minuten', 'THREADTOOLS'], footer_height=500)
-        click('Erinnern', xmin=890, ymin=600, inspected_point=(1280,800,932,632))
+        click('Erinnern', xmin=890, ymin=560, inspected_point=(1280,800,1215,607))
         run(['xdotool', 'mousemove', '--window', xid, '1150', '550',
              'click', '--repeat', '6', '--delay', '70', '5'], env)
         expect_settled('unavailable fixture clock reports failure and retains the thread draft',
@@ -387,7 +409,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('Nachricht', xmin=280, ymin=650, inspected_point=(1280,800,400,700))
         type_text('MAINCALENDAR')
         expect_settled('main and thread composers retain independent drafts', ['MAINCALENDAR', 'THREADTOOLSX'])
-        click('send-later', inspected_point=(1280,800,768,742))
+        click('send-later', inspected_point=(1280,800,769,715))
         expect('main send-later stays beside the open thread', ['Nachricht planen', 'Design review', 'THREADTOOLSX'])
         key('Escape')
         type_text('X')
@@ -627,18 +649,34 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('ctrl+k')
         expect_settled('quick switcher input is mounted', ['Mit Pfeiltasten'])
         type_text('NO MATCH UI')
-        expect_settled('local search filter reports no matching rows', ['NO MATCH UI', 'Keine passenden Gespräche oder Personen'])
+        # Verify native input exactly through its clipboard selection. OCR can
+        # confuse the final I with l even while the filter and editor are correct.
+        key('ctrl+a'); key('ctrl+c')
+        deadline = time.monotonic() + 3
+        while True:
+            copied = subprocess.run(['xclip', '-selection', 'clipboard', '-o'],
+                                    env=env, text=True, capture_output=True, timeout=3)
+            if copied.returncode == 0 and copied.stdout == 'NO MATCH UI':
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError('The quick switcher did not retain the native search query')
+            time.sleep(.1)
+        expect_settled('local search filter reports no matching rows', ['Keine passenden Gespräche oder Personen'])
         key('ctrl+a'); key('BackSpace')
         key('Escape')
+        expect_settled('quick switcher closes before composer interaction',
+                       ['Nachricht an Produktteam'], ['Mit Pfeiltasten'])
         click('Nachricht', xmin=200, ymin=600)
-        type_text('DRAFTALPHA'); time.sleep(.4); key('Return')
+        type_text('DRAFTALPHA')
+        expect_settled('composer receives the native draft', ['DRAFTALPHA'])
+        key('Return')
         expect('draft retained after busy rejection' if scenario == 'busy' else 'draft retained after asynchronous failure',
                ['DRAFTALPHA'] if scenario == 'busy' else ['DRAFTALPHA', 'Nicht gesendet'])
         if scenario == 'busy' and (out / f'{label}.log').read_text().count(
                 'UI_BUSY send_rejected=true no_backend=true') != 1:
             raise AssertionError('The fictional busy port did not reject the explicit send exactly once')
         key('ctrl+comma')
-        expect('settings shortcut opens modal', ['Einstellungen'])
+        expect_settled('settings shortcut opens modal', ['Einstellungen'])
         click('Darstellung'); click('Salbei'); click('Dunkel')
         expect('theme selection stays available after appearance change', ['Einstellungen','Salbei'])
         path,_,_=observe()
@@ -651,16 +689,54 @@ def exercise(scenario, env, xid, out, label, large=False):
         type_text('X')
         expect('modal returns focus to invoking composer', ['DRAFTALPHAX'])
     elif scenario == 'thread-list':
-        expect('subscribed threads page is visible', ['Threads', 'Design review'])
-        click('Designteam', ymin=250)
-        expect_settled('sidebar conversation leaves the Threads page',
-                       ['Nachricht an Designteam'], ['Design review'])
+        expect('subscribed threads open inside the single Activity destination',
+               ['Aktivität', 'Ungelesen', 'Design review', 'Antworten'])
+        click('Mara', ymin=200)
+        expect_settled('sidebar conversation leaves the Activity page',
+                       ['Nachricht an Mara Fischer'], ['Design review'])
+    elif scenario == 'sidebar-activity':
+        expect('Activity bundles unread, mentions, threads and reminders behind one entry',
+               ['Aktivität', 'Erwähnungen', 'Threads', 'Erinnerungen',
+                'Einladungen von anderen Servern', 'Perfekt'])
+        click('Erwähnungen', xmin=900, ymin=60)
+        expect_settled('mentions filter keeps mentioned rooms and drops other unread rooms',
+                       ['Neue Kampagne ab Montag'], ['Hast du später kurz Zeit'])
+        click('Threads', xmin=900, ymin=60)
+        expect_settled('threads filter lists subscribed threads', ['Design review', 'Offsite planen'])
+        click('Erinnerungen', xmin=900, ymin=60)
+        expect_settled('reminders filter lists reminders without a dialog',
+                       ['Die neue Navigation ist bereit', 'Aktivität'])
+        click('Mara', ymin=200)
+        expect_settled('opening a conversation leaves Activity', ['Nachricht an Mara Fischer'],
+                       ['Die neue Navigation ist bereit für einen letzten'])
+    elif scenario == 'sidebar-new-menu':
+        expect('plus menu offers a new conversation and the open-conversation directory',
+               ['Neues Gespräch', 'Offene Gespräche durchsuchen'])
+        key('Escape')
+        expect_settled('Escape closes the plus menu', ['Favoriten'], ['Offene Gespräche durchsuchen'])
+    elif scenario == 'sidebar-list-menu':
+        expect('list menu exposes filters and the archive',
+               ['Alle Gespräche', 'Nur Ungelesene', 'Nur Erwähnungen', 'Archiv'])
+        click('Archiv', xmin=20, ymin=330)
+        expect_settled('archive replaces the list and offers a way back',
+                       ['Archiv', 'Alt-Projekt 2024'], ['Nur Ungelesene'])
+    elif scenario == 'connection-details':
+        expect('status pill opens calm details with queue and retry',
+               ['Offline', 'Wartet auf Senden', 'Jetzt erneut verbinden'])
+        key('Escape')
+        expect_settled('Escape closes the details and keeps the pill', ['Offline'], ['Wartet auf Senden'])
+    elif scenario == 'chat-access-denied':
+        expect('revoked access shows one centered explanation instead of a banner',
+               ['Kein Zugriff auf dieses Gespräch', 'Erneut prüfen'], ['Nachricht an'])
+    elif scenario == 'chat-read-only':
+        expect('read-only rooms keep their timeline and show one slim bar',
+               ['Nur Lesezugriff', 'Du kannst hier nicht schreiben', 'Perfekt'], ['Nachricht an Produktteam'])
     elif scenario == 'thread':
         words = expect('thread pane uses shared message and composer surfaces',
                        ['Design review', '2 Antworten', 'Mara Fischer', 'Im Thread antworten'])
-        run(['xdotool', 'mousemove', '--window', xid, '1050', '407'], env)
+        run(['xdotool', 'mousemove', '--window', xid, '1050', '420'], env)
         expect('thread hover keeps reply text readable', ['Ich aktualisiere die letzten', 'Details'])
-        run(['xdotool', 'mousemove', '--window', xid, '1204', '400', 'click', '1'], env)
+        run(['xdotool', 'mousemove', '--window', xid, '1190', '377', 'click', '1'], env)
         words = expect('reply to own thread message opens a quote', ['Alex Sommer'])
         if not any(normalized(word['text']) == 'alex' and int(word['left']) > 900
                    and int(word['top']) > 590 for word in words):
@@ -720,6 +796,120 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         expect_settled('Escape closes the thread pane and returns to the room',
                ['Designteam'], ['Design review', 'THREADDRAFT'])
+    elif scenario == 'chat-message-states':
+        expect('sending, waiting and unclear sends say so in words beside the message',
+               ['Wird gesendet', 'Wartet auf Versand', 'Sendestatus unklar'])
+        shot, _, whole = observe()
+        # Small red and blue 12 pt links are read from an enlarged crop of their row.
+        failed_row = ocr_crop(shot, (300, 615, 520, 50), env)
+        if not all(term in failed_row.replace(' ', '') for term in ('nichtgesendet', 'erneutversuchen', 'bearbeiten', 'schen')):
+            raise AssertionError(f'The failed row lacks its status or plain actions; OCR {failed_row!r}; evidence {shot.name}')
+        if any(term in whole for term in ('als entwurf bearbeiten', 'senden fehlgeschlagen', 'verwerfen')):
+            raise AssertionError('The former heavy failed-send card is still present')
+        checks.append({'check': 'a failed send is one quiet row with plain actions, not the former card',
+                       'result': 'pass', 'image': shot.name, 'sha256': sha(shot)})
+        log = out / f'{label}.log'
+        click('Löschen', ymin=600, inspected_point=(1280, 800, 651, 652))
+        expect_settled('discarding removes only the failed row', ['Wird gesendet'], ['Nicht gesendet', 'Erneut versuchen'])
+        if 'UI_CHAT_UX failed discard operation=41' not in log.read_text():
+            raise AssertionError('Löschen did not dispatch a scoped discard of the failed record')
+        checks.append({'check': 'failed-row Löschen dispatches a scoped discard', 'result': 'pass'})
+    elif scenario == 'chat-message-hover':
+        rest, _, _ = observe()
+        run(['xdotool', 'mousemove', '--window', xid, '700', '283'], env)
+        time.sleep(.6)
+        hover, _, _ = observe()
+        # The toolbar straddles the hovered row's top edge at the content's right edge.
+        if differs(rest, hover, (1020, 220, 235, 50), env) < 300:
+            raise AssertionError('Hovering a message did not reveal its toolbar at the row top-right')
+        # Revealing the toolbar and the row tint never moves or covers the text.
+        if differs(rest, hover, (333, 270, 400, 24), env) > 0:
+            raise AssertionError('Hovering changed the message text region')
+        checks.append({'check': 'timeline hover toolbar attaches to the row without moving its text', 'result': 'pass',
+                       'image': hover.name, 'sha256': sha(hover)})
+        run(['xdotool', 'mousemove', '--window', xid, '130', '740'], env)
+        time.sleep(.6)
+        gone, _, _ = observe()
+        if differs(rest, gone, (1020, 220, 235, 50), env) > 0:
+            raise AssertionError('The toolbar stayed after the pointer left the row')
+        checks.append({'check': 'timeline toolbar leaves with the pointer', 'result': 'pass'})
+        run(['xdotool', 'mousemove', '--window', xid, '700', '470'], env)
+        time.sleep(.5)
+        click('Erneut', ymin=600)
+        expect_settled('retry marks the retained text as retrying and offers no second action',
+                       ['Wird erneut versucht'], ['Erneut versuchen', 'Löschen'])
+        if 'UI_CHAT_UX failed retry operation=41' not in (out / f'{label}.log').read_text():
+            raise AssertionError('Erneut versuchen did not dispatch a scoped retry')
+        checks.append({'check': 'failed-row retry is scoped and never claims delivery', 'result': 'pass'})
+    elif scenario in ('chat-delivery-states', 'chat-delivery-sent'):
+        rest, _, _ = observe()
+        # Newest own message keeps its receipt at rest; earlier ones stay quiet.
+        newest = ink(rest, (486, 580, 22, 20), env)
+        earlier = ink(rest, (486, 370, 22, 20), env)
+        if newest < .02 or earlier > .005:
+            raise AssertionError(f'Receipts at rest: newest={newest:.3f} earlier={earlier:.3f}')
+        run(['xdotool', 'mousemove', '--window', xid, '700', '385'], env)
+        time.sleep(.6)
+        hover, _, _ = observe()
+        if ink(hover, (486, 370, 22, 20), env) < .02:
+            raise AssertionError('Hovering an earlier own message did not reveal its receipt')
+        checks.append({'check': 'receipts: newest own at rest, earlier on hover only', 'result': 'pass',
+                       'image': hover.name, 'sha256': sha(hover)})
+        run(['xdotool', 'mousemove', '--sync', '1590', '1190'], env)
+        time.sleep(.6)
+        gone, _, _ = observe()
+        if ink(gone, (486, 370, 22, 20), env) > .005:
+            raise AssertionError('An earlier receipt stayed visible after leaving the window')
+        checks.append({'check': 'earlier receipts leave with the toolbar on window exit',
+                       'result': 'pass', 'image': gone.name, 'sha256': sha(gone)})
+    elif scenario == 'thread-message-hover':
+        rest, _, _ = observe()
+        run(['xdotool', 'mousemove', '--window', xid, '1050', '320'], env)
+        time.sleep(.6)
+        hover, _, _ = observe()
+        if differs(rest, hover, (1020, 262, 235, 50), env) < 300:
+            raise AssertionError('Hovering a thread message did not reveal its toolbar')
+        if differs(rest, hover, (953, 312, 280, 24), env) > 0:
+            raise AssertionError('Hovering changed the thread message text region')
+        checks.append({'check': 'thread hover toolbar matches the timeline placement', 'result': 'pass',
+                       'image': hover.name, 'sha256': sha(hover)})
+    elif scenario == 'thread-message-menu':
+        expect('thread pane shows its root and replies', ['Design review', 'Mara Fischer', '2 Antworten'])
+        pane_words = lambda image, box: ocr_crop(image, box, env)
+        # Root message: the first row of the pane, inside the band the timeline
+        # reserves for its header. Its menu once vanished, and a ghost toolbar
+        # appeared over the timeline's copy of the same message.
+        run(['xdotool', 'mousemove', '--window', xid, '1050', '190'], env)
+        time.sleep(.6)
+        before, _, _ = observe()
+        run(['xdotool', 'mousemove', '--window', xid, '1224', '140', 'click', '1'], env)
+        time.sleep(.8)
+        after, _, _ = observe()
+        menu = pane_words(after, (975, 160, 270, 150))
+        if not all(term in menu for term in ('reaktion', 'bearbeiten', 'schen')):
+            raise AssertionError(f'The thread root menu did not open in the pane; OCR {menu!r}; evidence {after.name}')
+        if differs(before, after, (262, 180, 600, 460), env) > 0:
+            raise AssertionError('Opening the thread menu changed the timeline (ghost toolbar or highlight)')
+        checks.append({'check': 'thread root "…" opens its menu in the pane and leaves the timeline untouched',
+                       'result': 'pass', 'image': after.name, 'sha256': sha(after)})
+        key('Escape')
+        time.sleep(.6)
+        closed, _, _ = observe()
+        if pane_words(closed, (975, 160, 270, 150)).count('reaktion'):
+            raise AssertionError('Escape did not close the thread menu')
+        # Own reply: the action must execute, not merely open.
+        run(['xdotool', 'mousemove', '--window', xid, '1050', '440'], env)
+        time.sleep(.6)
+        run(['xdotool', 'mousemove', '--window', xid, '1224', '377', 'click', '1'], env)
+        time.sleep(.8)
+        menu_image, _, _ = observe()
+        menu = pane_words(menu_image, (975, 395, 270, 150))
+        if not all(term in menu for term in ('bearbeiten', 'schen')):
+            raise AssertionError(f'The reply menu did not open below its trigger; OCR {menu!r}; evidence {menu_image.name}')
+        run(['xdotool', 'mousemove', '--window', xid, '1060', '466', 'click', '1'], env)
+        expect_settled('Bearbeiten in the thread menu loads the reply into the thread composer',
+                       ['Ich aktualisiere die letzten Details'], footer_height=200, include_footer_words=True)
+        checks.append({'check': 'thread "…" menu executes Bearbeiten in the thread composer', 'result': 'pass'})
     elif scenario == 'thread-options':
         expect('thread options expose subscription and rename controls',
                ['Thread nicht mehr folgen', 'Alle Antworten', 'Nur Erwähnungen', 'Thread umbenennen'])
@@ -794,10 +984,13 @@ def exercise(scenario, env, xid, out, label, large=False):
         time.sleep(1)
         expect('sidebar action opens the selected room notification controls', ['Alle Nachrichten', 'Nur Erwähnungen', 'Anrufbenachrichtigungen'])
     elif scenario == 'search-filter':
-        click('Alle', ymin=190)
-        expect_settled('sidebar filters start with the loaded rooms', ['Produktteam', 'Designbesprechung', 'Erwähnungen'])
-        click('Erwähnungen')
-        expect_settled('mention filter keeps known mentions and explains unknown state', ['Produktteam', 'Erwähnungen sind noch nicht bekannt'], ['Designbesprechung'])
+        # The visibility filter lives in the list menu, not in permanent tabs.
+        # The "..." button of the 1280x800 fixture's list header (inspected capture).
+        run(['xdotool', 'mousemove', '--window', xid, '232', '153', 'click', '1'], env)
+        expect_settled('list menu offers the former tab filters', ['Alle Gespräche', 'Nur Ungelesene', 'Nur Erwähnungen'])
+        click('Erwähnungen', xmin=20, ymin=200)
+        expect_settled('mention filter keeps known mentions and explains unknown state',
+                       ['Produktteam', 'Erwähnungen sind noch nicht bekannt'], ['Designbesprechung'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])

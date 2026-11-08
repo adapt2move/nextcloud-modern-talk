@@ -435,7 +435,7 @@ impl Background {
             a.last[i] = Some(now);
             a.due[i] = now
                 + match kind {
-                    Observation::Calls | Observation::Messages => Duration::from_secs(5),
+                    Observation::Calls | Observation::Messages => Duration::from_secs(3),
                     Observation::Rooms => Duration::from_secs(if active { 15 } else { 30 }),
                     Observation::LiveEvents => live_interval(a.live),
                 };
@@ -940,6 +940,7 @@ impl Accounts {
                 None => (DiagnosticOutcome::Stopped, None),
             };
             diagnostics::record(Diagnostic {
+                gate: None,
                 profile: None,
                 request: 0,
                 operation: DiagnosticOperation::LiveConnection,
@@ -1250,6 +1251,20 @@ fn valid_rooms(list: &protocol::ConversationList) -> bool {
 mod tests {
     use super::*;
     use talk_core::ids::{HostId, RuntimeGeneration};
+
+    #[test]
+    fn running_background_notifications_are_due_within_three_seconds() {
+        let now = Instant::now();
+        let mut schedule = Background::default();
+        schedule.sync(&[scope(1)], now);
+        for kind in [Observation::Calls, Observation::Messages] {
+            schedule.admitted(scope(1), kind, false, now);
+            assert_eq!(
+                schedule.account(scope(1)).unwrap().due[kind.index()],
+                now + Duration::from_secs(3)
+            );
+        }
+    }
 
     #[test]
     fn notification_backoff_is_bounded_and_does_not_renew_sources_or_block_other_accounts() {

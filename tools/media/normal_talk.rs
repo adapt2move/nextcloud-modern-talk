@@ -546,7 +546,13 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
             std::fs::write(&temporary, bytes).map_err(|_| "progress write")?;
             std::fs::rename(temporary, output).map_err(|_| "progress replace")?;
             next_poll = Instant::now() + Duration::from_secs(1);
-            if matches!(current.phase, Phase::Waiting(_) | Phase::Ended) {
+            // Policy fetching is a connecting state, including before admission.
+            // Let the bounded probe observe recovery; it still requires active,
+            // decoded media at completion and never supplies missing authority.
+            if current.phase == Phase::Ended
+                || matches!(current.phase, Phase::Waiting(gate)
+                if !matches!(gate, talk_core::calls::Gate::PolicyUnavailable(_)))
+            {
                 break;
             }
         }
@@ -569,7 +575,15 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
         && drawn > 20
         && started.elapsed() >= Duration::from_secs(20);
     if mode == "policy-loss" {
-        let revoked = media.capture().is_none()
+        // Talk can deny the call-participants read before the concurrent room
+        // refresh exposes readOnly. Both authoritative rejections must close
+        // capture. The browser harness separately requires the owned policy
+        // mutation after established bidirectional media.
+        let rejected = current.phase == Phase::Waiting(talk_core::calls::Gate::RoomRestricted)
+            || report["terminal_observe_error"] == "PermissionDenied";
+        let revoked = rejected
+            && ready_at.is_some()
+            && media.capture().is_none()
             && previous
                 .as_ref()
                 .is_some_and(|c| !c.microphone(&[1; 480]) && !c.camera_rgba(640, 480, &pixels));

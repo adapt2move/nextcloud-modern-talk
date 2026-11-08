@@ -1,4 +1,4 @@
-//! Exact Talk24/25 source mapping. Server roles never substitute for effective
+//! Talk capability/room source mapping. Server roles never substitute for effective
 //! permissions. Every observation retains request-start based freshness.
 use nextcloud_talk_api::{
     self as api,
@@ -6,6 +6,7 @@ use nextcloud_talk_api::{
     models::*,
     signaling::PeerSession,
 };
+use talk_core::calls::PolicyEvidence as Evidence;
 use talk_core::{
     ids::{CallScope, ClockEpoch},
     policy::*,
@@ -75,16 +76,15 @@ impl Sources {
             Observation::CallParticipants => self.peers = Some(value),
         }
     }
-    pub(crate) fn finish(self, joined: bool) -> Result<Bundle, api::ErrorKind> {
-        let unknown = api::ErrorKind::Unsupported;
-        let account = self.account.ok_or(unknown)?;
-        let capabilities = self.capabilities.ok_or(unknown)?;
-        let room = self.room.ok_or(unknown)?;
-        let participants = self.participants.ok_or(unknown)?;
-        let settings = self.settings.ok_or(unknown)?;
+    pub(crate) fn finish(self, joined: bool) -> Result<Bundle, Evidence> {
+        let account = self.account.ok_or(Evidence::Account)?;
+        let capabilities = self.capabilities.ok_or(Evidence::Capabilities)?;
+        let room = self.room.ok_or(Evidence::Room)?;
+        let participants = self.participants.ok_or(Evidence::Participants)?;
+        let settings = self.settings.ok_or(Evidence::SignalingSettings)?;
         let lease = |r: &ObservedReply, source| {
             Lease::from_qualified_refresh(self.scope, source, moment(r.started), moment(r.received))
-                .map_err(|_| api::ErrorKind::Deadline)
+                .map_err(|_| Evidence::Freshness)
         };
         let al = lease(&account, Source::AccountProbe)?;
         let cl = lease(&capabilities, Source::HostCapabilities)?;
@@ -93,47 +93,52 @@ impl Sources {
         let pl = lease(&participants, Source::ConnectedParticipants)?;
         let sl = lease(&settings, Source::SignalingSettings)?;
         let api::Reply::Account(a) = account.reply else {
-            return Err(unknown);
+            return Err(Evidence::Account);
         };
         let api::Reply::Capabilities(c) = capabilities.reply else {
-            return Err(unknown);
+            return Err(Evidence::Capabilities);
         };
         let api::Reply::Room(r) = room.reply else {
-            return Err(unknown);
+            return Err(Evidence::Room);
         };
         let api::Reply::Participants(people) = participants.reply else {
-            return Err(unknown);
+            return Err(Evidence::Participants);
         };
         let api::Reply::SignalingSettings(settings) = settings.reply else {
-            return Err(unknown);
+            return Err(Evidence::SignalingSettings);
         };
-        if !matches!(c.server_major, Some(34 | 35)) || r.remote {
-            return Err(unknown);
+        if !c.supports("conversation-v4") {
+            return Err(Evidence::ConversationApi);
+        }
+        if !c.supports("signaling-v3") {
+            return Err(Evidence::SignalingApi);
+        }
+        if r.remote {
+            return Err(Evidence::FederatedCall);
         }
         let has = |name: &str| c.features.iter().any(|f| f == name);
         let hand_supported = has("raise-hand");
         let mut reactions = talk_core::bounded::Page::empty();
         for reaction in c.call_reactions.as_deref().unwrap_or_default() {
-            let value = talk_core::bounded::Text::new(reaction).map_err(|_| unknown)?;
+            let Ok(value) = talk_core::bounded::Text::new(reaction) else {
+                continue;
+            };
             if !reactions.as_slice().contains(&value) {
-                reactions.try_push(value).map_err(|_| unknown)?;
+                let _ = reactions.try_push(value);
             }
         }
 
-        let attributes = r.attributes.ok_or(unknown)?;
+        let attributes = r.attributes.ok_or(Evidence::Attributes)?;
         if attributes & !31 != 0 {
-            return Err(unknown);
+            return Err(Evidence::Attributes);
         }
         if attributes & 4 != 0 && !has("classified-conversations") {
-            return Err(unknown);
+            return Err(Evidence::ClassifiedCapability);
         }
         if attributes & 8 != 0 && !has("announcement-preset") {
-            return Err(unknown);
+            return Err(Evidence::ChannelCapability);
         }
-        let permissions = r
-            .permissions
-            .filter(|v| *v & !511 == 0 && *v != 0)
-            .ok_or(unknown)?;
+        let permissions = r.permissions.ok_or(Evidence::Permissions)?;
         let own = people
             .iter()
             .filter(|p| {
@@ -142,7 +147,7 @@ impl Sources {
             })
             .collect::<Vec<_>>();
         if own.len() != 1 {
-            return Err(unknown);
+            return Err(Evidence::Participants);
         }
         let own_connected = own[0].sessions.as_ref().is_some_and(|sessions| {
             sessions
@@ -162,10 +167,14 @@ impl Sources {
                 Some(2) => ConversationKind::Group,
                 Some(3) => ConversationKind::Public,
                 Some(6) => ConversationKind::NoteToSelf,
-                _ => return Err(unknown),
+                _ => return Err(Evidence::RoomType),
             },
             permissions: EffectivePermissions {
-                start_call: r.can_start_call.ok_or(unknown)? && permissions & 2 != 0,
+                start_call: (if r.has_call != Some(true) {
+                    r.can_start_call.ok_or(Evidence::CanStart)?
+                } else {
+                    r.can_start_call.unwrap_or(false)
+                }) && permissions & 2 != 0,
                 join_call: permissions & 4 != 0,
                 bypass_lobby: permissions & 8 != 0,
                 publish_audio: permissions & 16 != 0,
@@ -175,45 +184,53 @@ impl Sources {
             read_only: match r.read_only {
                 Some(0) => false,
                 Some(1) => true,
-                _ => return Err(unknown),
+                _ => return Err(Evidence::ReadOnly),
             },
             lobby_closed: match r.lobby_state {
                 Some(0) => false,
                 Some(1) => true,
-                _ => return Err(unknown),
+                _ => return Err(Evidence::Lobby),
             },
             classified: attributes & 4 != 0,
             channel: attributes & 8 != 0,
-            consent_required: match r.recording_consent {
-                Some(0) => false,
-                Some(1) => true,
-                _ => return Err(unknown),
-            },
+            // Unknown consent never implies agreement. Ask explicitly when
+            // per-room policy applies; classified rooms still prohibit recording.
+            consent_required: r.recording_consent != Some(0),
             recording,
         };
         let configuration = CallConfiguration {
             audio_supported: has("audio"),
             video_supported: has("video"),
-            calls_enabled: c.call_enabled.ok_or(unknown)?,
-            recording_enabled: c.recording_enabled.ok_or(unknown)?,
+            calls_enabled: if r.has_call == Some(false) {
+                c.call_enabled.ok_or(Evidence::CallsEnabled)?
+            } else {
+                c.call_enabled.unwrap_or(false)
+            },
+            recording_enabled: c.recording_enabled.unwrap_or(false),
             consent: match c.recording_consent {
                 Some(0) => ConsentMode::NotRequired,
                 Some(1) => ConsentMode::Required,
                 Some(2) => ConsentMode::PerConversation,
-                _ => return Err(unknown),
+                _ => ConsentMode::Required,
             },
             encryption_supported: has("call-end-to-end-encryption"),
-            encryption_required: c.encryption_required.ok_or(unknown)?,
+            // Official E2EE.isEnabled: no capability => off; advertised
+            // capability with omitted configuration => on. Support alone is
+            // not a requirement when configuration explicitly disables it.
+            encryption_required: has("call-end-to-end-encryption")
+                && c.encryption_required != Some(false),
         };
         let maximum = c
             .grid_limit
             .and_then(|v| u16::try_from(v).ok())
             .filter(|v| *v > 0)
-            .ok_or(unknown)?;
+            // Unknown grid policy cannot authorize a remote video subscription.
+            // Audio admission remains independent of optional video layout data.
+            .unwrap_or(0);
         let profile = match settings.mode {
             SignalingMode::Internal => SignalingProfile::Internal,
             SignalingMode::External => SignalingProfile::External,
-            _ => return Err(unknown),
+            _ => return Err(Evidence::SignalingSettings),
         };
         let mut invitees = Vec::with_capacity(people.len().min(100));
         for person in &people {
@@ -252,7 +269,7 @@ impl Sources {
         let mut connected = own_connected;
         if let Some(value) = self.peers {
             let api::Reply::CallParticipants(list) = value.reply else {
-                return Err(unknown);
+                return Err(Evidence::CallParticipants);
             };
             if joined {
                 connected = connected
@@ -261,12 +278,13 @@ impl Sources {
                         .any(|p| PeerSession::parse(&p.session).is_ok_and(|s| s == self.own));
             }
             for p in list {
-                let session = PeerSession::parse(&p.session)?;
+                let session =
+                    PeerSession::parse(&p.session).map_err(|_| Evidence::CallParticipants)?;
                 if session == self.own {
                     continue;
                 }
                 if peers.len() >= 16 || peers.iter().any(|p: &Peer| p.session == session) {
-                    return Err(api::ErrorKind::TooLarge);
+                    return Err(Evidence::CallParticipants);
                 }
                 let matching = people
                     .iter()
@@ -278,25 +296,26 @@ impl Sources {
                     })
                     .collect::<Vec<_>>();
                 if matching.len() != 1 {
-                    return Err(unknown);
+                    return Err(Evidence::CallParticipants);
                 }
                 let flags = matching[0]
                     .in_call
                     .filter(|v| *v & !7 == 0 && *v & 1 != 0)
-                    .ok_or(unknown)?;
+                    .ok_or(Evidence::CallParticipants)?;
                 peers.push(Peer {
                     session,
                     publish_media: flags & 6 != 0,
                     name: talk_core::bounded::Text::new(
-                        matching[0].display_name.as_deref().ok_or(unknown)?,
+                        // A missing display label cannot revoke call authority.
+                        matching[0].display_name.as_deref().unwrap_or(""),
                     )
-                    .map_err(|_| unknown)?,
+                    .map_err(|_| Evidence::CallParticipants)?,
                     microphone: flags & 2 != 0,
                     camera: flags & 4 != 0,
                 });
             }
         } else if joined {
-            return Err(unknown);
+            return Err(Evidence::CallParticipants);
         }
         Ok(Bundle {
             inputs: PolicyInputs {
@@ -311,7 +330,7 @@ impl Sources {
                 },
                 local_grid: Observed::Known {
                     value: GridPolicy {
-                        enforced: c.grid_limit_enforced.ok_or(unknown)?,
+                        enforced: c.grid_limit_enforced.unwrap_or(true),
                         maximum_remote_videos: maximum.min(16),
                     },
                     lease: gl,
@@ -330,7 +349,7 @@ impl Sources {
                 },
             },
             exists: Observed::Known {
-                value: r.has_call.ok_or(unknown)?,
+                value: r.has_call.ok_or(Evidence::CallExists)?,
                 lease: rl,
             },
             settings,
@@ -366,5 +385,17 @@ impl Sources {
             hand_supported,
             reactions,
         })
+    }
+}
+
+/// Source names only; the diagnostic boundary never receives the payload.
+pub(crate) fn evidence(observation: Observation) -> Evidence {
+    match observation {
+        Observation::Account => Evidence::Account,
+        Observation::Capabilities => Evidence::Capabilities,
+        Observation::Room => Evidence::Room,
+        Observation::ConnectedParticipants => Evidence::Participants,
+        Observation::SignalingSettings => Evidence::SignalingSettings,
+        Observation::CallParticipants => Evidence::CallParticipants,
     }
 }

@@ -110,7 +110,7 @@ on a matching native host with the pinned SDK:
 
 ```sh
 task package -- --target aarch64-apple-darwin \
-  --version 0.0.12 --output /absolute/new/package-directory
+  --version 0.0.13 --output /absolute/new/package-directory
 ```
 
 This delegates to the existing
@@ -142,8 +142,15 @@ Use `login-account-store-busy`, `login-account-store-device-changed` and
 destination and expose storage actions instead of a browser-login retry. These
 fixtures never reopen or repair an actual profile.
 
-Use `connection-reconnecting`, `offline-with-queue` and `startup-from-cache` for
-fictional offline/restart presentation. The capture tool waits through the normal
+Use `sidebar-rich` for a realistic room list with unread counts, `sidebar-activity` and
+`sidebar-activity-mentions` for the Activity page, `sidebar-new-menu`, `sidebar-list-menu`
+and `sidebar-archive` for the list menus, and `sidebar-load-failed`, `chat-access-denied`
+and `chat-read-only` for scoped error states. They are fictional and contact no server.
+Export `TALK_UI_MATERIAL_PREVIEW=1` when capturing on Linux so textures and glass render.
+
+Use `connection-reconnecting`, `offline-with-queue`, `connection-details` and
+`startup-from-cache` for fictional offline/restart presentation (the status pill and its
+popover). The capture tool waits through the normal
 five-second grace period for connection scenarios. These fixtures perform no server
 request and do not establish cache restoration, replay or native performance.
 
@@ -153,6 +160,8 @@ show the message menu and date/time choosers; `lobby-settings` shows the
 moderator lobby timer. These scenarios do not contact a server.
 
 Use `chat-send-pending` for the fictional pending-send presentation, repeated Enter and aligned delivery indicators on grouped, edited and wrapped messages. It deliberately leaves the send unconfirmed and does not qualify transport admission.
+
+Use `chat-message-states` for fictional own-message outcomes: read and sent messages, a pending, a queued and an unclear send with their wording under the message, one failed send as a quiet row above the composer (retry marks it retrying, Löschen discards the record, neither claims delivery) and a pinned message. `chat-delivery-states` and `chat-delivery-sent` show the newest own message's read or sent receipt at rest; hover an earlier message to reveal its receipt. `chat-message-hover`, `thread-message-hover` and `thread-message-menu` are the timeline and thread-pane scenarios for the hover toolbar and the "…" menu, which the native checks drive with the pointer. Linux fixtures do not prime the system timezone, so grouped same-sender rows are not formed in them; grouping stays covered by unit tests. These fixtures contact no server and do not qualify delivery.
 
 Use `chat-busy` to inspect rejected automatic read receipts and explicit sends under fictional local backpressure. Automatic requests remain quiet; a rejected send keeps its draft and shows a scoped notice for at most eight seconds. This fixture performs no server request.
 

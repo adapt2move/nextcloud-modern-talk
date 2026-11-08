@@ -131,7 +131,7 @@ async def run(args,report):
       report['screen_buttons']=[x[:80] for x in await page.locator('button').all_text_contents()][:40]
      if args.scenario in ('web-screen','web-screen-resume') and screen_started and not screen_stopped and (elapsed is not None and elapsed>=(44 if recovery_window==50 else 16) if args.scenario=='web-screen-resume' else time.monotonic()-start>=16):
       report['screen_stop_action']=await press(page,['Disable screensharing','Stop screensharing','Stop screen sharing','Stop sharing','Stop sharing screen']);screen_stopped=True
-     if args.scenario=='policy-loss' and not policy_changed and time.monotonic()-start>=11:
+     if args.scenario=='policy-loss' and not policy_changed and elapsed is not None and elapsed>=3 and all(media_checks(samples).values()):
       await asyncio.to_thread(room.request,'PUT','/'+token+'/read-only',{'state':1});policy_changed=True;report['policy_change_ms']=int((time.monotonic()-start)*1000)
      try:await asyncio.wait_for(process.wait(),.5)
      except TimeoutError:pass
@@ -152,6 +152,7 @@ async def run(args,report):
      if args.scenario=='web-screen-resume':checks['screen_flow_after_recovery']=recovery['screen_flow_after_recovery']
     if args.rejoin_web_peer_after_replacement:checks['explicit_browser_rejoin_complete']=report.get('explicit_browser_rejoin_fixture',{}).get('joined',False)
     if args.refresh_web_peer_flags_after_replacement:checks['explicit_browser_flags_refresh_complete']=report.get('explicit_browser_flags_refresh_fixture',{}).get('status')==200
+    if args.scenario=='policy-loss':checks['policy_changed_after_media']=policy_changed
     if extra_page:checks['third_party_av']=all(media_checks(extra_samples).values());report['third_party_samples']=extra_samples
     report['browser_checks']=checks;report['result']='pass' if (all(checks.values()) or args.scenario=='incoming-decline') and report['native'].get('result')=='pass' else 'fail'
     if policy_changed:await asyncio.to_thread(room.request,'PUT','/'+token+'/read-only',{'state':0})

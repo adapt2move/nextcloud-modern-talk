@@ -12,16 +12,36 @@ are available in Git history, not maintained alongside the current interface.
 - Reuse native controls and retained input entities. Composite fields have one background
   and border; focus must be visible without shifting geometry.
 - Keep confirmed content visible during refresh. Use bounded static skeletons only for
-  initial loads; expose offline, denied, unsupported and uncertain outcomes honestly.
+  initial loads; expose offline, denied, unsupported and uncertain outcomes honestly,
+  at the smallest scope that explains them, with one calm notice style.
+- Keep top-level navigation to search and one Activity destination; the conversation list
+  is the main content and secondary choices sit behind its two menus.
 - Respect Reduce Motion and maintain keyboard access, visible focus, readable contrast
   and text scaling. Styling alone does not establish semantic accessibility.
 - UI strings are localized; user-authored messages are not. Product behavior must not
   depend on translated string matching.
 
 [Tokens](tokens.md) records accessibility targets and palette roles.
+[Shell navigation and status](shell-navigation-and-status.md) explains the sidebar structure,
+the title-bar connection status and the shared notice and error system.
 [Conversation dialogs](conversation-dialogs.md) describes members, bots and room settings.
 [Dependency provenance](native-ui/dependencies.md) and [project notices](../../NOTICE.md)
 cover the native toolkit and assets.
+
+## Message rows
+
+- Calm by default, detail on demand. A row shows author, time and text. The hover
+  toolbar, earlier receipts and the unpin action appear only for the hovered or
+  keyboard-focused row, and never move its text.
+- The toolbar straddles the row's top edge at the content's right edge, identically in the
+  timeline and the thread pane. The hovered row is tinted with `surface.subtle`, so the
+  controls visibly belong to it. It fades in over 140 ms; Reduce Motion shows it at once.
+- States that need words say so under the message in 12 pt text: "Wird gesendet …",
+  "Wartet auf Versand", the unclear-status explanation (warning) and "Nicht gesendet"
+  (error) with plain-text actions. Only the newest own message keeps its sent or read
+  receipt at rest. A pinned message carries "Angeheftet" under its text.
+- A menu belongs to the surface that opened it: its open state, anchor and visibility are
+  judged against that surface's own scroll region.
 
 ## Interaction rules
 

@@ -235,6 +235,9 @@ impl Accounts {
     /// A denied room has no cache; a deliberate retry creates a new read ticket,
     /// but never restores data discarded after access loss.
     pub(super) fn refresh_messages(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
+        if self.public_room(context) {
+            return self.start_open(context, None);
+        }
         if self.snapshot.selected != Some(context) {
             return Err(SubmitError::StaleScope);
         }
@@ -419,6 +422,24 @@ impl Accounts {
         work: Work,
         queued: Option<OperationId>,
     ) -> Result<(), SubmitError> {
+        if work != Work::Prefetch
+            && (self
+                .pending
+                .iter()
+                .any(|p| matches!(p.purpose, Purpose::Open(c, _) if c == context))
+                || self.snapshot.message_panel.as_ref().is_some_and(|p| {
+                    p.context == context
+                        && matches!(
+                            p.history,
+                            RemoteState::Failed(
+                                _,
+                                UnavailableReason::PasswordRequired | UnavailableReason::Lobby
+                            )
+                        )
+                }))
+        {
+            return Err(SubmitError::Busy);
+        }
         // One optional metadata repair across room switches leaves four
         // admission slots for required work. Rejection owns no probe or timer.
         if work == Work::Metadata
@@ -740,6 +761,12 @@ impl Accounts {
     ) -> Result<(), SubmitError> {
         use view::MessageAction as V;
         use wire::MessagingCommand as W;
+        if let V::JoinRoom(password) = action {
+            return self.start_open(context, Some(password));
+        }
+        if action == V::Refresh && self.public_room(context) {
+            return self.start_open(context, None);
+        }
         let action = match action {
             V::MarkRead(id) => V::MarkRead(
                 self.history
@@ -827,7 +854,7 @@ impl Accounts {
                 Work::ThreadChange(*root)
             }
             V::Older => Work::Older,
-            V::Refresh => Work::History,
+            V::Refresh | V::JoinRoom(_) => Work::History,
             V::Send { .. } => Work::Send,
             V::MarkRead(id) => Work::Read(*id),
             V::MarkUnread => Work::Unread,
@@ -968,7 +995,7 @@ impl Accounts {
                 ),
                 thread: None,
             },
-            V::Refresh => W::History {
+            V::Refresh | V::JoinRoom(_) => W::History {
                 before: None,
                 thread: None,
             },
@@ -1219,6 +1246,7 @@ impl Accounts {
                 && (offline && before != Some(true) || !offline && before == Some(true))
             {
                 diagnostics::record(Diagnostic {
+                    gate: None,
                     profile: None,
                     outcome: if offline {
                         DiagnosticOutcome::Offline
@@ -1358,6 +1386,21 @@ impl Accounts {
             && self
                 .history
                 .read_failure_is_current(context, operation, work);
+        let admission_blocked = if room_read
+            && self
+                .history
+                .read_failure_is_current(context, operation, work)
+        {
+            match &reply {
+                Err(IdentityError::Request(ErrorKind::Lobby)) => Some(UnavailableReason::Lobby),
+                Err(IdentityError::Request(ErrorKind::PasswordRequired)) => {
+                    Some(UnavailableReason::PasswordRequired)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
         let result = match reply {
             Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
                 conversation,
@@ -1495,6 +1538,16 @@ impl Accounts {
         }
         if access_lost {
             self.invalidate_history(context, ContentState::Denied);
+            return;
+        }
+        if let Some(reason) = admission_blocked {
+            self.invalidate_history(context, ContentState::Denied);
+            if self.snapshot.selected == Some(context) {
+                self.snapshot.content = ContentState::Failed;
+                if let Some(panel) = &mut self.snapshot.message_panel {
+                    panel.history = RemoteState::Failed(request, reason);
+                }
+            }
             return;
         }
         // A selected federated room can establish its first remote capability

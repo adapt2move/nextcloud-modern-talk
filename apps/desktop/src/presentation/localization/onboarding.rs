@@ -26,11 +26,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Tu cuenta está conectada. Puedes cambiar los permisos opcionales en Ajustes cuando quieras.",
     ),
     (
-        "Deine Anmeldung wird dauerhaft auf diesem Gerät gespeichert.",
-        "Your sign-in is being saved on this device.",
-        "Se está guardando tu inicio de sesión en este dispositivo.",
-    ),
-    (
         "Der App-Datenordner liegt außerhalb des unterstützten lokalen Benutzerordners. Stelle den ursprünglichen Speicherort wieder her und lade die Konten erneut.",
         "The app data folder is outside the supported local user folder. Restore its original location and reload accounts.",
         "La carpeta de datos de la aplicación está fuera de la carpeta local de usuario compatible. Restaura su ubicación original y vuelve a cargar las cuentas.",

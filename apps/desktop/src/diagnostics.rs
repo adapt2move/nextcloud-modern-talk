@@ -64,6 +64,7 @@ pub(crate) enum Operation {
     Thread,
     Poll,
     Send,
+    CallGate,
 }
 impl Operation {
     fn name(self) -> &'static str {
@@ -99,6 +100,7 @@ impl Operation {
             Self::Thread => "thread",
             Self::Poll => "poll",
             Self::Send => "send",
+            Self::CallGate => "call_gate",
         }
     }
 }
@@ -153,6 +155,7 @@ pub(crate) struct Event {
     pub error: Option<ErrorKind>,
     pub storage: Option<(StorageBackend, StorageFailure)>,
     pub profile: Option<ProfileFailure>,
+    pub gate: Option<talk_core::calls::Gate>,
 }
 impl Event {
     pub(crate) fn new(operation: Operation, outcome: Outcome) -> Self {
@@ -164,6 +167,7 @@ impl Event {
             error: None,
             storage: None,
             profile: None,
+            gate: None,
         }
     }
 }
@@ -376,7 +380,18 @@ fn encode(session: u128, record: Record) -> String {
         error,
         storage,
         profile,
+        gate,
     } = record.event;
+    let gate = gate.map_or_else(String::new, |gate| {
+        if let talk_core::calls::Gate::PolicyUnavailable(evidence) = gate {
+            format!(
+                ",\"call_gate\":\"policy_unavailable\",\"policy_evidence\":\"{}\"",
+                evidence.name()
+            )
+        } else {
+            format!(",\"call_gate\":\"{}\"", gate.diagnostic())
+        }
+    });
     let error = error.map_or("none", error_name);
     let detail = storage.map_or_else(String::new, |(backend, failure)| {
         let backend = match backend {
@@ -411,7 +426,7 @@ fn encode(session: u128, record: Record) -> String {
         format!(",\"profile_failure\":\"{failure}\"")
     });
     format!(
-        "{{\"timestamp_unix_ms\":{},\"session\":{session},\"pid\":{},\"version\":\"{}\",\"request\":{request},\"operation\":\"{}\",\"outcome\":\"{}\",\"count\":{count},\"error\":\"{error}\"{detail}{profile}}}\n",
+        "{{\"timestamp_unix_ms\":{},\"session\":{session},\"pid\":{},\"version\":\"{}\",\"request\":{request},\"operation\":\"{}\",\"outcome\":\"{}\",\"count\":{count},\"error\":\"{error}\"{detail}{profile}{gate}}}\n",
         record.at,
         std::process::id(),
         env!("CARGO_PKG_VERSION"),
@@ -426,6 +441,8 @@ fn error_name(error: ErrorKind) -> &'static str {
         ErrorKind::Cancelled => "cancelled",
         ErrorKind::Deadline => "deadline",
         ErrorKind::Busy => "busy",
+        ErrorKind::PasswordRequired => "password_required",
+        ErrorKind::Lobby => "lobby",
         ErrorKind::PermissionDenied => "permission_denied",
         ErrorKind::ReauthenticationRequired => "reauthentication_required",
         ErrorKind::Malformed => "malformed",

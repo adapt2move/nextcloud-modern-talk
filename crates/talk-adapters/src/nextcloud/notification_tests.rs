@@ -513,3 +513,68 @@ async fn personal_reminders_accept_old_own_messages_and_distinct_server_events_w
         );
     }
 }
+
+#[tokio::test]
+async fn talk_server_diagnostics_baseline_dnd_stale_dedup_and_batch_cursor_are_bounded() {
+    for case in ["fresh", "dnd", "unknown", "suppressed", "old"] {
+        let (_, datetime) = wall_time();
+        let test = |id| {
+            let mut value = notice(id, "no-talk-target", &datetime);
+            value["app"] = json!("admin_notification_talk");
+            value["object_type"] = json!("admin_notifications");
+            if case == "suppressed" {
+                value["shouldNotify"] = json!(false);
+            }
+            if case == "old" {
+                value["datetime"] = json!("2000-01-01T00:00:00+00:00");
+            }
+            value
+        };
+        let mut replies = notifications(json!([test(100)]), "online");
+        let status = if case == "dnd" {
+            "dnd"
+        } else if case == "unknown" {
+            "unknown"
+        } else {
+            "online"
+        };
+        let rows = json!([
+            test(106),
+            test(102),
+            test(101),
+            test(104),
+            test(103),
+            test(105)
+        ]);
+        for _ in 0..3 {
+            replies.extend(notifications(rows.clone(), status));
+        }
+        let server = Server::start(replies).await;
+        let r = runtime();
+        let mut c = client(&server.origin, r.clone());
+        assert!(
+            poll(&mut c, &r).await.server_tests.as_slice().is_empty(),
+            "silent startup baseline"
+        );
+        let first = poll(&mut c, &r).await;
+        let second = poll(&mut c, &r).await;
+        if case == "fresh" {
+            assert_eq!(first.server_tests.as_slice(), &[101, 102, 103, 104]);
+            assert_eq!(second.server_tests.as_slice(), &[105, 106]);
+        } else {
+            assert!(first.server_tests.as_slice().is_empty());
+            assert!(second.server_tests.as_slice().is_empty());
+        }
+        assert!(
+            poll(&mut c, &r).await.server_tests.as_slice().is_empty(),
+            "no replay"
+        );
+        assert!(first.notices.as_slice().is_empty());
+        assert!(c.active.is_none() && c.meeting_owner.is_none());
+        assert_eq!(
+            server.seen.lock().unwrap().len(),
+            12,
+            "no room, context or mutation requests"
+        );
+    }
+}

@@ -624,6 +624,48 @@ fn new_thread_send_keeps_its_title_through_the_durable_intent() {
 }
 
 #[test]
+fn pane_replies_preserve_thread_and_quote_through_outbox_storage_and_dispatch() {
+    let (model, context, room) = model();
+    for reply_to in [None, Some(8)] {
+        let action = view::MessageAction::Send {
+            body: text("Pane reply"),
+            target: view::ComposeTarget {
+                thread: Some(7),
+                reply_to,
+                ..Default::default()
+            },
+        };
+        let intent = model.outbox_intent(context, &action).unwrap().unwrap();
+        let record =
+            OutboxRecord::from_intent(OperationId::from_local(2), room.clone(), &intent).unwrap();
+        let restored = record.intent().unwrap();
+        let Some((
+            wire::MessagingCommand::Send {
+                text: body,
+                options,
+            },
+            messaging::Work::Send,
+        )) = command(context, &restored, |_| None)
+        else {
+            panic!("pane reply must dispatch as a send")
+        };
+        assert_eq!(body.as_str(), "Pane reply");
+        assert_eq!(
+            options.thread.unwrap(),
+            MessageId {
+                conversation: context.conversation,
+                sequence: 7
+            }
+        );
+        assert_eq!(
+            options.reply_to.map(|id| id.sequence),
+            reply_to.map(|id| id as u64)
+        );
+        assert!(options.thread_title.is_none());
+    }
+}
+
+#[test]
 fn queued_room_unread_overlays_new_observations_and_never_replays_ambiguity() {
     let (mut model, context, room) = model();
     model.snapshot.conversations = page(

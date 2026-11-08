@@ -16,11 +16,19 @@ pub struct MessageNotification {
     pub eligible: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct ServerTestNotification {
+    pub id: u64,
+    pub timestamp: u64,
+    pub eligible: bool,
+}
+
 pub struct MessageNotifications {
     /// Includes unrelated notification IDs, so ignored/replayed rows cannot move
     /// the account's cursor backwards.
     pub high_water: u64,
     pub messages: Vec<MessageNotification>,
+    pub server_tests: Vec<ServerTestNotification>,
 }
 
 impl Client {
@@ -64,6 +72,7 @@ fn decode(data: &Value, user: &str, allowed: bool) -> Result<MessageNotification
     }
     let mut ids = Vec::with_capacity(rows.len());
     let mut messages = Vec::new();
+    let mut server_tests = Vec::new();
     for row in rows {
         let id = row["notification_id"]
             .as_u64()
@@ -73,6 +82,22 @@ fn decode(data: &Value, user: &str, allowed: bool) -> Result<MessageNotification
             return Err(ErrorKind::Malformed);
         }
         ids.push(id);
+        // TestPush persists an admin_notification_talk object before attempting
+        // mobile push. It has no room/message authority; never interpret its copy
+        // or action links as a Talk target. Respect server eligibility and DND.
+        if row["app"].as_str() == Some("admin_notification_talk")
+            && row["object_type"].as_str() == Some("admin_notifications")
+        {
+            if row["user"].as_str() != Some(user) {
+                return Err(ErrorKind::WrongScope);
+            }
+            server_tests.push(ServerTestNotification {
+                id,
+                timestamp: timestamp(row["datetime"].as_str().ok_or(ErrorKind::Malformed)?)?,
+                eligible: allowed && row["shouldNotify"].as_bool() == Some(true),
+            });
+            continue;
+        }
         let reminder = match row["object_type"].as_str() {
             Some("chat") => false,
             Some("reminder") => true,
@@ -132,6 +157,7 @@ fn decode(data: &Value, user: &str, allowed: bool) -> Result<MessageNotification
     Ok(MessageNotifications {
         high_water: ids.into_iter().max().unwrap_or(0),
         messages,
+        server_tests,
     })
 }
 
@@ -188,6 +214,38 @@ mod tests {
             "shouldNotify":true,"subject":"Untrusted translated text",
             "link":"https://unrelated.invalid/","actions":[{"link":"https://unrelated.invalid/"}]})
     }
+    #[test]
+    fn talk_server_diagnostics_have_no_talk_target_and_keep_server_policy() {
+        let mut test = row(15, "untrusted/not/a/room/target");
+        test["app"] = json!("admin_notification_talk");
+        test["object_type"] = json!("admin_notifications");
+        let data = json!([test.clone()]);
+        let list = decode(&data, "alice", true).unwrap();
+        assert_eq!(list.high_water, 15);
+        assert!(list.messages.is_empty());
+        assert_eq!(list.server_tests.len(), 1);
+        assert!(list.server_tests[0].eligible);
+        assert!(!decode(&data, "alice", false).unwrap().server_tests[0].eligible);
+        assert!(matches!(
+            decode(&data, "bob", true),
+            Err(ErrorKind::WrongScope)
+        ));
+        test["shouldNotify"] = Value::Null;
+        assert!(
+            !decode(&json!([test.clone()]), "alice", true)
+                .unwrap()
+                .server_tests[0]
+                .eligible
+        );
+        test["app"] = json!("admin_notifications");
+        assert!(
+            decode(&json!([test]), "alice", true)
+                .unwrap()
+                .server_tests
+                .is_empty()
+        );
+    }
+
     #[test]
     fn background_notifications_use_only_typed_targets_and_fresh_server_eligibility() {
         let data = json!([row(8, "testroom/42/41"), row(9, "privateroom")]);

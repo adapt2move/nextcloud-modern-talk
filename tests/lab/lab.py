@@ -261,6 +261,14 @@ class Lab:
                     "tar -xzf /tmp/spreed.tar.gz -C /var/www/html/custom_apps; "
                     "chown -R www-data:www-data /var/www/html/custom_apps/spreed; rm /tmp/spreed.tar.gz")
         self.occ("app:enable", "spreed", timeout=120)
+        # Notifications ships inside the digest-pinned server image. Explicitly
+        # enable and verify it: installing Talk alone is not a delivery probe.
+        self.occ("app:enable", "notifications", timeout=120)
+        self.current["notifications_installed_version"] = self.occ(
+            "config:app:get", "notifications", "installed_version")
+        self.require("LAB-003.notifications-installed", bool(self.current["notifications_installed_version"]))
+        self.docker("exec", self.container, "test", "-s", "/var/www/html/apps/notifications/appinfo/signature.json")
+        self.require("LAB-003.notifications-integrity", self.occ("integrity:check-app", "notifications") == "")
         app_version = self.occ("config:app:get", "spreed", "installed_version")
         self.current["talk_installed_version"] = app_version
         self.require("LAB-003.talk-installed-version", app_version == pin["talk_version"])

@@ -1399,6 +1399,50 @@ async fn released_server_messaging_and_room_controls() {
     )
     .await;
     let thread_reply = canonical_accepted_id(thread_reply, OperationId::from_local(127));
+    let MR::Message(edited) = m(
+        &mut client,
+        &runtime,
+        id,
+        10_001,
+        "thread-edit",
+        M::Edit {
+            message: thread_reply,
+            text: text("Edited thread reply"),
+        },
+    )
+    .await
+    else {
+        panic!("canonical thread edit")
+    };
+    assert_eq!(edited.message.id, thread_reply);
+    assert_eq!(edited.thread, Some(thread));
+    assert_eq!(edited.message.text.as_str(), "Edited thread reply");
+    m(
+        &mut client,
+        &runtime,
+        id,
+        10_002,
+        "thread-react",
+        M::React {
+            message: thread_reply,
+            emoji: text("👍"),
+            add: true,
+        },
+    )
+    .await;
+    m(
+        &mut client,
+        &runtime,
+        id,
+        10_003,
+        "thread-unreact",
+        M::React {
+            message: thread_reply,
+            emoji: text("👍"),
+            add: false,
+        },
+    )
+    .await;
     let nested = m(
         &mut client,
         &runtime,

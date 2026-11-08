@@ -71,7 +71,7 @@ impl Desktop {
         // Small sidebar avatars need more clearance for their initials. Keep
         // most of the indicator outside while larger avatars retain their edge.
         let (right, bottom) = if avatar_size <= 24. {
-            (9., 8.)
+            (6., 6.)
         } else {
             (7., 7.)
         };
@@ -107,8 +107,7 @@ impl Desktop {
                 )
                 .child(div().tab_group().tab_index(1).flex_1().min_h_0().child(
                     match self.destination {
-                        super::SidebarDestination::Inbox => self.inbox(cx),
-                        super::SidebarDestination::Threads => self.threads_page(cx),
+                        super::SidebarDestination::Activity => self.activity_page(cx),
                         _ => self.conversation(
                             window.viewport_size().height < self.sp(160.) + px(210.),
                             cx,
@@ -586,17 +585,48 @@ impl Desktop {
                 .account_connection_failure(row.context.account)
                 .is_none()
         {
+            // With no access at all the centered state above explains
+            // everything; a read-only room keeps one slim, labelled bar.
+            let has_draft = !self.composer.read(cx).content.is_empty();
             div()
                 .flex_none()
-                .px_6()
-                .py_4()
-                .border_t_1()
-                .border_color(t.border)
-                .child(self.hint(self.l(
-                    "Du kannst in diesem Gespräch nicht schreiben. Dein Entwurf bleibt erhalten.",
-                )))
+                .when(self.snapshot.content != ContentState::Denied, |d| {
+                    d.px_6()
+                        .py_3()
+                        .border_t_1()
+                        .border_color(t.border)
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .text_size(self.sp(13.))
+                                .line_height(self.sp(20.))
+                                .child(self.scaled_icon("lock", 16., t.muted))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_color(t.muted)
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(t.text)
+                                                .child(self.l("Nur Lesezugriff").to_owned()),
+                                        )
+                                        .child(self.l(if has_draft {
+                                            "Du kannst hier nicht schreiben. Dein Entwurf bleibt erhalten."
+                                        } else {
+                                            "Du kannst hier nicht schreiben."
+                                        }).to_owned()),
+                                ),
+                        )
+                })
                 .when(self.local_feedback_visible(), |d| {
-                    d.child(self.feedback_view(cx))
+                    d.px_6().pb_3().child(self.feedback_view(cx))
                 })
         } else {
             self.composer_view(row, false, cx)
@@ -785,6 +815,8 @@ impl Desktop {
             .gap_2()
             .when(!thread, |d| d.child(self.typing_slot(row.context)))
             .children(if thread==(self.overlay==Some(Overlay::Thread)) {self.action_hint_view(cx)} else {None})
+            // A failed send is a quiet row above the field, not content inside it.
+            .children(if thread { None } else { self.failed_draft_card(cx) })
             .child(
                 self.composer_frame()
                     .child(self.field_ring(input.focus_handle(cx), 12.))

@@ -281,17 +281,6 @@ pub(crate) struct DiagnosticCallAdmission {
     call: CallKey,
     duplex_started: bool,
 }
-#[cfg(any(test, feature = "backend-test"))]
-#[allow(
-    dead_code,
-    reason = "Consumed by the coordinated diagnostic signaling state"
-)]
-impl DiagnosticCallAdmission {
-    pub(crate) fn scope(&self) -> CallKey {
-        self.call
-    }
-}
-
 impl Transport {
     /// An account-owned chat signaling session has its own cookie jar, so
     /// opening or replacing it cannot move an existing call's HTTP room session.
@@ -479,6 +468,36 @@ impl Transport {
             meeting_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             meeting_lifetime: std::sync::Weak::new(),
         })
+    }
+
+    pub(crate) fn conversation_link_token(
+        &self,
+        link: &str,
+    ) -> Result<crate::models::RoomToken, PortError> {
+        let url = url::Url::parse(link).map_err(|_| self.error(ErrorKind::Malformed))?;
+        if !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(self.error(ErrorKind::WrongScope));
+        }
+        let token = crate::models::RoomToken::parse(url.path().rsplit('/').next().unwrap_or(""))
+            .map_err(|kind| self.error(kind))?;
+        for route in [
+            format!("call/{}", token.as_str()),
+            format!("index.php/call/{}", token.as_str()),
+        ] {
+            if self
+                .binding
+                .origin
+                .endpoint(&route)
+                .is_ok_and(|expected| expected == url)
+            {
+                return Ok(token);
+            }
+        }
+        Err(self.error(ErrorKind::WrongScope))
     }
 
     pub(crate) fn public_room_link(
@@ -1112,7 +1131,16 @@ fn classify_ocs(
     Err(match effective {
         // A v1-style HTTP200 auth code is not authoritative on the pinned v2 route.
         401 | 997 if account_probe => ErrorKind::Malformed,
-        401 | 997 | 403 | 412 => ErrorKind::PermissionDenied,
+        403 if ocs
+            .get("data")
+            .and_then(|data| data.get("error"))
+            .and_then(serde_json::Value::as_str)
+            == Some("password") =>
+        {
+            ErrorKind::PasswordRequired
+        }
+        412 => ErrorKind::Lobby,
+        401 | 997 | 403 => ErrorKind::PermissionDenied,
         404 => ErrorKind::NotFound,
         409 => ErrorKind::Conflict,
         413 => ErrorKind::TooLarge,

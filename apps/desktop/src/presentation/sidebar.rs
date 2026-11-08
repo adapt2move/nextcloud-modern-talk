@@ -1,18 +1,83 @@
 //! Compact navigation over bounded, typed conversation projections.
 use super::collection::CollectionState;
-use super::controls::{Availability, scoped_id};
+use super::controls::{Availability, BannerRole, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SidebarDestination};
 use gpui::{Context, Div, FontWeight, MouseButton, div, prelude::*, px};
 use talk_core::preferences::navigation::{
     AccountNavigation, NavigationEdit, NavigationSection, RemoteNavigationSupport, SidebarFilter,
 };
 use talk_core::ui::Decision;
+use talk_core::ui::presentation::UiIntent;
 use talk_core::ui::presentation::{
     ContentState, ConversationCategory, ConversationKind, ConversationRef, ConversationView,
     FeatureSupport, TagEdit, TagKind,
 };
 
 const SECTION_ICON_SIZE: f32 = 14.;
+
+/// Filters inside the single Activity destination.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Activity {
+    #[default]
+    Unread,
+    Mentions,
+    Threads,
+    Reminders,
+}
+
+/// The two list-header menus. Opening one closes the other.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Menu {
+    /// Start something: new conversation, browse open conversations.
+    New,
+    /// Change the list: visibility filter and the archive.
+    List,
+}
+
+/// Initial navigation state for explicit UI-development scenarios only.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Fixture {
+    #[default]
+    None,
+    Activity(Activity),
+    Archive,
+    Menu(Menu),
+}
+impl Fixture {
+    pub fn for_scenario(scenario: Option<&str>) -> Self {
+        match scenario {
+            Some("sidebar-activity") => Self::Activity(Activity::Unread),
+            Some("sidebar-activity-mentions") => Self::Activity(Activity::Mentions),
+            Some("thread-list") => Self::Activity(Activity::Threads),
+            Some("account-reminders" | "account-reminders-partial") => {
+                Self::Activity(Activity::Reminders)
+            }
+            Some("sidebar-archive") => Self::Archive,
+            Some("sidebar-new-menu") => Self::Menu(Menu::New),
+            Some("sidebar-list-menu") => Self::Menu(Menu::List),
+            _ => Self::None,
+        }
+    }
+    pub(super) fn destination(self) -> SidebarDestination {
+        match self {
+            Self::Activity(_) => SidebarDestination::Activity,
+            Self::Archive => SidebarDestination::Archive,
+            _ => SidebarDestination::Conversations,
+        }
+    }
+    pub(super) fn activity(self) -> Activity {
+        match self {
+            Self::Activity(activity) => activity,
+            _ => Activity::default(),
+        }
+    }
+    pub(super) fn menu(self) -> Option<Menu> {
+        match self {
+            Self::Menu(menu) => Some(menu),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Section {
@@ -265,6 +330,11 @@ impl Desktop {
                 ),
             );
         }
+        let filter = self
+            .account_layout()
+            .map_or(SidebarFilter::All, AccountNavigation::filter);
+        let can_filter = account.is_some_and(|a| a.navigation_key.is_some());
+        let archived = self.destination == SidebarDestination::Archive;
         sidebar = sidebar
             .child(
                 self.button_with_leading_icon(
@@ -278,7 +348,7 @@ impl Desktop {
                 .w_full()
                 .justify_start()
                 .bg(t.subtle)
-                .mb_2()
+                .mb_1()
                 .child(div().flex_1())
                 .child(
                     self.style_tonal_chip(self.hint(if cfg!(target_os = "macos") {
@@ -291,202 +361,18 @@ impl Desktop {
                     .border_color(t.border),
                 ),
             )
-            .child(self.sidebar_destination(
-                "nav-inbox",
-                "Posteingang",
-                "inbox",
-                SidebarDestination::Inbox,
-                cx,
-            ))
-            .when(
-                self.snapshot.threads.support == FeatureSupport::Supported,
-                |d| {
-                    d.child(self.sidebar_destination(
-                        "nav-threads",
-                        "Threads",
-                        "chat",
-                        SidebarDestination::Threads,
-                        cx,
-                    ))
-                },
-            )
-            .when(
-                self.snapshot
-                    .account_reminders
-                    .as_ref()
-                    .is_some_and(|view| {
-                        Some(view.scope) == self.snapshot.active_account
-                            && view.support == FeatureSupport::Supported
-                    }),
-                |sidebar| {
-                    sidebar.child(
-                        self.button_with_leading_icon(
-                            "nav-reminders",
-                            ("Erinnerungen", "clock"),
-                            ButtonStyle::Quiet,
-                            true,
-                            LocalAction::Open(Overlay::Reminders),
-                            cx,
-                        )
-                        .w_full()
-                        .justify_start(),
-                    )
-                },
-            )
-            .child(self.sidebar_destination(
-                "nav-archive",
-                "Archiv",
-                "file",
-                SidebarDestination::Archive,
-                cx,
-            ))
-            .when_some(
-                self.snapshot
-                    .federation_invitations
-                    .as_ref()
-                    .filter(|view| {
-                        Some(view.scope) == self.snapshot.active_account
-                            && view.support == FeatureSupport::Supported
-                            && !view.invitations.as_slice().is_empty()
-                    }),
-                |sidebar, view| {
-                    sidebar.child(
-                        self.button_with_leading_icon(
-                            "nav-federation",
-                            ("Einladungen", "users"),
-                            ButtonStyle::Quiet,
-                            true,
-                            LocalAction::Open(Overlay::Federation),
-                            cx,
-                        )
-                        .w_full()
-                        .justify_start()
-                        .child(div().flex_1())
-                        .child(self.count_badge(
-                            if view.invitations.as_slice().len() > 99 {
-                                "99+".to_owned()
-                            } else {
-                                view.invitations.as_slice().len().to_string()
-                            },
-                        )),
-                    )
-                },
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .rounded(px(8.))
-                    .when(self.destination == SidebarDestination::Conversations, |d| {
-                        d.bg(t.selected)
-                    })
-                    .child(
-                        self.sidebar_destination(
-                            "nav-active",
-                            "Gespräche",
-                            "chat",
-                            SidebarDestination::Conversations,
-                            cx,
-                        )
-                        .flex_1()
-                        .min_w_0(),
-                    )
-                    .child(div().w(px(1.)).h(px(14.)).bg(t.border).mx_1())
-                    .child(
-                        self.icon_button(
-                            "new-conversation",
-                            ("plus", "Neues Gespräch"),
-                            ButtonStyle::Quiet,
-                            Availability::available().beside_control(),
-                            LocalAction::Open(Overlay::Create),
-                            cx,
-                        )
-                        .mr_1(),
-                    ),
-            );
+            .child(self.activity_entry(cx))
+            .child(self.list_header(archived, filter, can_filter, cx))
+            .when(filter != SidebarFilter::All && !archived, |d| {
+                d.child(self.filter_chip(filter, cx))
+            });
 
-        let discovery_support = self.snapshot.discover_panel.as_ref().map_or(
-            talk_core::ui::presentation::FeatureSupport::Unknown,
-            |panel| panel.support,
-        );
-        let discovery_supported =
-            discovery_support == talk_core::ui::presentation::FeatureSupport::Supported;
-        sidebar = sidebar.child(
-            self.button_with_leading_icon(
-                "open-discovery",
-                ("Offene Gespräche", "compass"),
-                ButtonStyle::Quiet,
-                Availability::when(
-                    self.active_account_connected() && discovery_supported,
-                    if !self.active_account_connected() {
-                        "Das Verzeichnis benötigt eine Verbindung."
-                    } else if discovery_support
-                        == talk_core::ui::presentation::FeatureSupport::Unknown
-                    {
-                        "Das Verzeichnis wird geprüft."
-                    } else {
-                        "Das Gesprächsverzeichnis ist auf diesem Server nicht verfügbar."
-                    },
-                ),
-                LocalAction::Open(Overlay::Discover),
-                cx,
-            )
-            .w_full(),
-        );
-
-        let filter = self
-            .account_layout()
-            .map_or(SidebarFilter::All, AccountNavigation::filter);
-        let can_filter = account.is_some_and(|a| a.navigation_key.is_some());
-        let mentions_known = self
-            .snapshot
-            .conversations
-            .as_slice()
-            .iter()
-            .any(|r| r.unread_mention.is_some());
-        sidebar = sidebar.child(
-            self.segmented().w_full().mt_2().children(
-                [
-                    (SidebarFilter::All, "Alle"),
-                    (SidebarFilter::Unread, "Ungelesen"),
-                    (SidebarFilter::Mentions, "Erwähnungen"),
-                ]
-                .into_iter()
-                .enumerate()
-                .map(|(index, (value, label))| {
-                    self.chip_with_availability(
-                        ("sidebar-filter", index),
-                        label,
-                        (value == filter, index, 3),
-                        Availability::when(
-                            can_filter
-                                && (value != SidebarFilter::Mentions
-                                    || mentions_known
-                                    || filter == value),
-                            if !can_filter {
-                                "Filter sind für dieses Konto nicht verfügbar."
-                            } else {
-                                "Erwähnungen sind noch nicht verfügbar."
-                            },
-                        ),
-                        LocalAction::SidebarFilter(value),
-                        cx,
-                    )
-                    .flex_1()
-                    .px_1()
-                    .min_w_0()
-                    .text_size(self.sp(12.))
-                }),
-            ),
-        );
         let matches_filter = |r: &ConversationView| match filter {
             SidebarFilter::All => true,
             SidebarFilter::Unread => r.unread > 0,
             SidebarFilter::Mentions => r.unread_mention == Some(true),
         };
         let query = self.sidebar_filter.read(cx).content.to_lowercase();
-        let archived = self.destination == SidebarDestination::Archive;
         let state = CollectionState::new(
             self.snapshot.conversation_list.content,
             !self.snapshot.conversations.as_slice().is_empty(),
@@ -527,7 +413,7 @@ impl Desktop {
                     .items_center()
                     .gap_2()
                     .px_2()
-                    .min_h(px(32.))
+                    .min_h(px(28.))
                     .mt_2()
                     .font_weight(FontWeight::MEDIUM)
                     .text_size(self.sp(12.))
@@ -567,10 +453,13 @@ impl Desktop {
                 visible += rows.len();
                 grouped.extend(rows.iter().map(|r| r.context));
                 list = list.child(
-                    self.button(
+                    self.group_header(
                         gpui::SharedString::from(format!("sidebar-tag-{}", tag.id.local)),
-                        "",
-                        ButtonStyle::Quiet,
+                        tag.name.as_str().to_owned(),
+                        (
+                            tag.collapsed && query.is_empty(),
+                            rows.iter().filter(|r| r.unread > 0).count(),
+                        ),
                         rooms
                             .iter()
                             .any(|r| r.organization.tag_change == talk_core::ui::Decision::Allowed),
@@ -579,30 +468,6 @@ impl Desktop {
                             collapsed: !tag.collapsed,
                         }),
                         cx,
-                    )
-                    .justify_start()
-                    .gap_2()
-                    .mt_2()
-                    .min_h(px(32.))
-                    .py_1()
-                    .px_2()
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(t.sidebar_secondary)
-                    .text_size(self.sp(12.))
-                    .child(self.scaled_icon(
-                        if tag.collapsed && query.is_empty() {
-                            "chevron-left"
-                        } else {
-                            "chevron-down"
-                        },
-                        SECTION_ICON_SIZE,
-                        t.muted,
-                    ))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .text_ellipsis()
-                            .child(tag.name.as_str().to_owned()),
                     ),
                 );
                 if !tag.collapsed || !query.is_empty() {
@@ -634,40 +499,17 @@ impl Desktop {
                 let mut changed = group.clone();
                 changed.collapsed = !changed.collapsed;
                 let scope = rows[0].context.account;
-                list = list.child(
-                    self.button(
-                        gpui::SharedString::from(format!("sidebar-group-{}", group.id.get())),
-                        "",
-                        ButtonStyle::Quiet,
-                        true,
-                        LocalAction::EditGroup(scope, NavigationEdit::UpsertGroup(changed)),
-                        cx,
-                    )
-                    .justify_start()
-                    .gap_2()
-                    .mt_2()
-                    .min_h(px(32.))
-                    .py_1()
-                    .px_2()
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(t.sidebar_secondary)
-                    .text_size(self.sp(12.))
-                    .child(self.scaled_icon(
-                        if group.collapsed && query.is_empty() {
-                            "chevron-left"
-                        } else {
-                            "chevron-down"
-                        },
-                        SECTION_ICON_SIZE,
-                        t.muted,
-                    ))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .text_ellipsis()
-                            .child(group.name.as_str().to_owned()),
+                list = list.child(self.group_header(
+                    gpui::SharedString::from(format!("sidebar-group-{}", group.id.get())),
+                    group.name.as_str().to_owned(),
+                    (
+                        group.collapsed && query.is_empty(),
+                        rows.iter().filter(|r| r.unread > 0).count(),
                     ),
-                );
+                    true,
+                    LocalAction::EditGroup(scope, NavigationEdit::UpsertGroup(changed)),
+                    cx,
+                ));
                 if !group.collapsed || !query.is_empty() {
                     for row in rows {
                         list = list.child(self.sidebar_room(row, cx));
@@ -693,35 +535,14 @@ impl Desktop {
             rows.sort_by_key(|r| self.placement(r).map_or(0, |p| p.order));
             visible += rows.len();
             let collapsed = self.section_collapsed(section) && query.is_empty();
-            list = list.child(
-                self.button(
-                    ("sidebar-section", section as usize),
-                    "",
-                    ButtonStyle::Quiet,
-                    true,
-                    LocalAction::CollapseSection(section),
-                    cx,
-                )
-                .justify_start()
-                .gap_2()
-                .mt_2()
-                .min_h(px(32.))
-                .py_1()
-                .px_2()
-                .font_weight(FontWeight::MEDIUM)
-                .text_size(self.sp(12.))
-                .text_color(t.sidebar_secondary)
-                .child(self.scaled_icon(
-                    if collapsed {
-                        "chevron-left"
-                    } else {
-                        "chevron-down"
-                    },
-                    SECTION_ICON_SIZE,
-                    t.muted,
-                ))
-                .child(self.l(section.key())),
-            );
+            list = list.child(self.group_header(
+                ("sidebar-section", section as usize),
+                self.l(section.key()).to_owned(),
+                (collapsed, rows.iter().filter(|r| r.unread > 0).count()),
+                true,
+                LocalAction::CollapseSection(section),
+                cx,
+            ));
             if !collapsed {
                 for row in rows {
                     list = list.child(self.sidebar_room(row, cx));
@@ -862,6 +683,516 @@ impl Desktop {
                 ))
                 .when(self.own_status_open, |d| d.child(self.own_status_menu(cx))),
         )
+    }
+
+    /// Rooms that currently ask for attention: a direct message, a note to
+    /// self or an @-mention with unread messages. This is the same rule that
+    /// puts a number on a conversation row, so the two never disagree.
+    fn needs_attention(row: &ConversationView) -> bool {
+        attention(
+            row.kind,
+            row.unread,
+            row.archived,
+            row.unread_direct_mention,
+            row.notification_muted,
+        )
+    }
+
+    fn pending_invitations(&self) -> usize {
+        self.snapshot
+            .federation_invitations
+            .as_ref()
+            .filter(|view| {
+                Some(view.scope) == self.snapshot.active_account
+                    && view.support == FeatureSupport::Supported
+            })
+            .map_or(0, |view| view.invitations.as_slice().len())
+    }
+
+    pub(super) fn activity_count(&self) -> usize {
+        let state = CollectionState::new(
+            self.snapshot.conversation_list.content,
+            !self.snapshot.conversations.as_slice().is_empty(),
+        );
+        let rooms = if state.shows_content() {
+            self.snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .filter(|row| Self::needs_attention(row))
+                .count()
+        } else {
+            0
+        };
+        rooms + self.pending_invitations()
+    }
+
+    /// Entering a filter asks its owner for fresh data, as the former
+    /// reminders dialog did. Unread and mentions come from the room list.
+    pub(super) fn refresh_activity(&mut self, filter: Activity) {
+        let Some(scope) = self.snapshot.active_account else {
+            return;
+        };
+        match filter {
+            Activity::Reminders => {
+                self.submit(UiIntent::RefreshAccountReminders(scope));
+            }
+            Activity::Threads | Activity::Unread | Activity::Mentions => {}
+        }
+        if self.pending_invitations() > 0 || self.snapshot.federation_invitations.is_some() {
+            self.submit(UiIntent::RefreshFederationInvitations(scope));
+        }
+    }
+
+    /// The single top-level destination below search.
+    fn activity_entry(&self, cx: &Context<Self>) -> gpui::Stateful<Div> {
+        let count = self.activity_count();
+        self.sidebar_destination(
+            "nav-activity",
+            "Aktivität",
+            "inbox",
+            SidebarDestination::Activity,
+            cx,
+        )
+        .when(count > 0, |d| {
+            d.child(div().flex_1())
+                .child(self.count_badge(if count > 99 {
+                    "99+".to_owned()
+                } else {
+                    count.to_string()
+                }))
+        })
+    }
+
+    /// "Gespräche" title with the two list-level menus. Everything that is not
+    /// a conversation lives behind them; the archive replaces the title with a
+    /// way back.
+    fn list_header(
+        &self,
+        archived: bool,
+        filter: SidebarFilter,
+        can_filter: bool,
+        cx: &Context<Self>,
+    ) -> Div {
+        let t = self.theme;
+        let row = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_1()
+            .mt_3()
+            .min_h(px(30.))
+            .pl_2();
+        if archived {
+            return row.child(
+                self.button_with_leading_icon(
+                    "archive-back",
+                    ("Archiv", "arrow-left"),
+                    ButtonStyle::Quiet,
+                    true,
+                    LocalAction::Destination(SidebarDestination::Conversations),
+                    cx,
+                )
+                .min_h(px(28.))
+                .py(px(2.))
+                .px_1()
+                .gap_1()
+                .font_weight(FontWeight::MEDIUM)
+                .text_size(self.sp(12.))
+                .text_color(t.sidebar_secondary),
+            );
+        }
+        let discovery_support = self
+            .snapshot
+            .discover_panel
+            .as_ref()
+            .map_or(FeatureSupport::Unknown, |panel| panel.support);
+        let discovery_supported = discovery_support == FeatureSupport::Supported;
+        let mentions_known = self
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .any(|r| r.unread_mention.is_some());
+        let trigger = |menu: Menu, id: &'static str, icon: &'static str, label: &'static str| {
+            div().relative().flex_none().child(
+                self.icon_button(
+                    id,
+                    (icon, label),
+                    ButtonStyle::Quiet,
+                    Availability::available().below_control(),
+                    LocalAction::ToggleSidebarMenu(menu),
+                    cx,
+                )
+                .size(px(28.))
+                .min_h(px(28.))
+                .when(self.sidebar_menu == Some(menu), |d| d.bg(t.hover)),
+            )
+        };
+        let menu_surface = |menu: Menu, body: Div| {
+            gpui::deferred(
+                gpui::anchored()
+                    .anchor(gpui::Corner::TopRight)
+                    .offset(gpui::point(px(28.), px(4.)))
+                    .snap_to_window_with_margin(px(8.))
+                    .child(
+                        self.context_menu_surface()
+                            .id(match menu {
+                                Menu::New => "sidebar-new-menu",
+                                Menu::List => "sidebar-list-menu",
+                            })
+                            .w(px(244.))
+                            .occlude()
+                            .on_mouse_down_out(cx.listener(move |this, _, _, cx| {
+                                if this.sidebar_menu == Some(menu) {
+                                    this.sidebar_menu = None;
+                                    cx.notify();
+                                }
+                            }))
+                            .child(body),
+                    ),
+            )
+        };
+        let new_menu = div()
+            .flex()
+            .flex_col()
+            .child(self.menu_item(
+                "new-conversation",
+                ("Neues Gespräch", "plus"),
+                Availability::available(),
+                LocalAction::Open(Overlay::Create),
+                cx,
+            ))
+            .child(self.menu_item(
+                "open-discovery",
+                ("Offene Gespräche durchsuchen", "compass"),
+                Availability::when(
+                    self.active_account_connected() && discovery_supported,
+                    if !self.active_account_connected() {
+                        "Das Verzeichnis benötigt eine Verbindung."
+                    } else if discovery_support == FeatureSupport::Unknown {
+                        "Das Verzeichnis wird geprüft."
+                    } else {
+                        "Das Gesprächsverzeichnis ist auf diesem Server nicht verfügbar."
+                    },
+                ),
+                LocalAction::Open(Overlay::Discover),
+                cx,
+            ));
+        let option = |index: usize, value: SidebarFilter, label: &'static str| {
+            let enabled = can_filter
+                && (value != SidebarFilter::Mentions || mentions_known || filter == value);
+            let selected = value == filter;
+            self.style_list_row(
+                self.button(
+                    ("sidebar-filter", index),
+                    label,
+                    ButtonStyle::Quiet,
+                    Availability::when(
+                        enabled,
+                        if !can_filter {
+                            "Filter sind für dieses Konto nicht verfügbar."
+                        } else {
+                            "Erwähnungen sind noch nicht verfügbar."
+                        },
+                    ),
+                    LocalAction::SidebarFilter(value),
+                    cx,
+                ),
+                super::controls::RowSize::Regular,
+            )
+            .w_full()
+            .justify_between()
+            .when(selected, |d| {
+                d.child(self.scaled_icon("check", 16., t.selected_text))
+            })
+        };
+        let list_menu = div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .px_2()
+                    .pt_1()
+                    .pb(px(2.))
+                    .text_size(self.sp(12.))
+                    .text_color(t.muted)
+                    .child(self.l("Anzeigen").to_owned()),
+            )
+            .child(option(0, SidebarFilter::All, "Alle Gespräche"))
+            .child(option(1, SidebarFilter::Unread, "Nur Ungelesene"))
+            .child(option(2, SidebarFilter::Mentions, "Nur Erwähnungen"))
+            .child(div().h(px(1.)).my_1().bg(t.border))
+            .child(self.menu_item(
+                "nav-archive",
+                ("Archiv", "file"),
+                Availability::available(),
+                LocalAction::Destination(SidebarDestination::Archive),
+                cx,
+            ));
+        row.child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(self.sp(12.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(t.sidebar_secondary)
+                .child(self.l("Gespräche").to_owned()),
+        )
+        .child(
+            trigger(
+                Menu::New,
+                "sidebar-new",
+                "plus",
+                "Neues Gespräch oder Verzeichnis",
+            )
+            .when(self.sidebar_menu == Some(Menu::New), |d| {
+                d.child(menu_surface(Menu::New, new_menu))
+            }),
+        )
+        .child(
+            trigger(Menu::List, "sidebar-options", "more", "Liste anpassen")
+                .when(self.sidebar_menu == Some(Menu::List), |d| {
+                    d.child(menu_surface(Menu::List, list_menu))
+                }),
+        )
+    }
+
+    /// A non-default list filter stays visible and one click from reset.
+    fn filter_chip(&self, filter: SidebarFilter, cx: &Context<Self>) -> Div {
+        let t = self.theme;
+        div().flex_none().flex().px_2().pb_1().child(
+            self.button_with_icon(
+                "sidebar-filter-reset",
+                (
+                    match filter {
+                        SidebarFilter::Mentions => "Nur Erwähnungen",
+                        _ => "Nur Ungelesene",
+                    },
+                    "x",
+                ),
+                ButtonStyle::Quiet,
+                true,
+                LocalAction::SidebarFilter(SidebarFilter::All),
+                cx,
+            )
+            .gap_1()
+            .min_h(px(24.))
+            .py_0()
+            .px_2()
+            .rounded_full()
+            .bg(t.selected)
+            .text_color(t.selected_text)
+            .text_size(self.sp(12.)),
+        )
+    }
+
+    /// Collapsible group heading. A collapsed group still says that something
+    /// inside it is unread.
+    fn group_header(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        label: impl Into<gpui::SharedString>,
+        (collapsed, unread): (bool, usize),
+        enabled: bool,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> gpui::Stateful<Div> {
+        let t = self.theme;
+        let chevron = self.scaled_icon("chevron-down", SECTION_ICON_SIZE, t.muted);
+        self.button(id, "", ButtonStyle::Quiet, enabled, action, cx)
+            .justify_start()
+            .gap(px(6.))
+            .mt_2()
+            .min_h(px(28.))
+            .py(px(2.))
+            .px_2()
+            .font_weight(FontWeight::MEDIUM)
+            .text_size(self.sp(12.))
+            .text_color(t.sidebar_secondary)
+            .child(if collapsed {
+                chevron.with_transformation(gpui::Transformation::rotate(gpui::radians(
+                    -std::f32::consts::FRAC_PI_2,
+                )))
+            } else {
+                chevron
+            })
+            .child(div().min_w_0().text_ellipsis().child(label.into()))
+            .when(collapsed && unread > 0, |d| {
+                d.child(div().flex_1())
+                    .child(self.count_badge(if unread > 99 {
+                        "99+".to_owned()
+                    } else {
+                        unread.to_string()
+                    }))
+            })
+    }
+
+    /// Activity: the one place for what needs attention. Filters live inside
+    /// it; the conversation list stays quiet.
+    pub(super) fn activity_page(&self, cx: &Context<Self>) -> Div {
+        let state = CollectionState::new(
+            self.snapshot.conversation_list.content,
+            !self.snapshot.conversations.as_slice().is_empty(),
+        );
+        let reminders = self
+            .snapshot
+            .account_reminders
+            .as_ref()
+            .is_some_and(|view| {
+                Some(view.scope) == self.snapshot.active_account
+                    && view.support == FeatureSupport::Supported
+            });
+        let threads = self.snapshot.threads.support == FeatureSupport::Supported;
+        let mentions_known = self
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .any(|r| r.unread_mention.is_some());
+        let filters: Vec<(Activity, &'static str, bool)> = [
+            (Activity::Unread, "Ungelesen", true),
+            (Activity::Mentions, "Erwähnungen", mentions_known),
+            (Activity::Threads, "Threads", threads),
+            (Activity::Reminders, "Erinnerungen", reminders),
+        ]
+        .into_iter()
+        .filter(|(value, _, _)| match value {
+            Activity::Threads => threads,
+            Activity::Reminders => reminders,
+            _ => true,
+        })
+        .collect();
+        // A filter whose feature is unavailable cannot stay selected.
+        let selected = if filters.iter().any(|(value, _, _)| *value == self.activity) {
+            self.activity
+        } else {
+            Activity::Unread
+        };
+        let count = filters.len();
+        let mut page = div().flex().flex_col().px_5().pt_4().pb_3().gap_3().child(
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_x_4()
+                .gap_y_2()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(120.))
+                        .child(self.title(self.l("Aktivität"))),
+                )
+                .child(
+                    self.segmented()
+                        .children(filters.into_iter().enumerate().map(
+                            |(index, (value, label, enabled))| {
+                                self.chip_with_availability(
+                                    ("activity-filter", index),
+                                    label,
+                                    (value == selected, index, count),
+                                    Availability::when(
+                                        enabled,
+                                        "Erwähnungen sind noch nicht verfügbar.",
+                                    ),
+                                    LocalAction::ActivityFilter(value),
+                                    cx,
+                                )
+                            },
+                        )),
+                ),
+        );
+        if let Some(scope) = self.snapshot.active_account {
+            page = page.child(self.collection_feedback(
+                state,
+                "retry-activity",
+                LocalAction::Intent(UiIntent::ReloadConversations(scope)),
+                cx,
+            ));
+        }
+        let invitations = self.pending_invitations();
+        if invitations > 0 {
+            page = page.child(
+                self.notice(
+                    BannerRole::Info,
+                    self.l("Einladungen von anderen Servern"),
+                    Some(&self.lf(
+                        if invitations == 1 {
+                            "{n} Einladung wartet auf deine Antwort."
+                        } else {
+                            "{n} Einladungen warten auf deine Antwort."
+                        },
+                        &[("n", &invitations.to_string())],
+                    )),
+                    Some("users"),
+                )
+                .child(self.notice_action(
+                    "nav-federation",
+                    "Ansehen",
+                    LocalAction::Open(Overlay::Federation),
+                    cx,
+                )),
+            );
+        }
+        let body = match selected {
+            Activity::Unread | Activity::Mentions => self.activity_rooms(selected, state, cx),
+            Activity::Threads => self.threads_body(cx),
+            Activity::Reminders => self.account_reminders_body(cx),
+        };
+        let page = page.child(
+            self.scroll_area(super::navigation::Region::Conversation)
+                .flex_1()
+                .min_h_0()
+                .child(body),
+        );
+        self.content_card(page)
+    }
+
+    fn activity_rooms(&self, filter: Activity, state: CollectionState, cx: &Context<Self>) -> Div {
+        let mut rows = div().flex().flex_col().gap_1();
+        let mut count = 0;
+        for row in self.snapshot.conversations.as_slice().iter().filter(|r| {
+            state.shows_content()
+                && r.archived == Some(false)
+                && match filter {
+                    Activity::Mentions => r.unread_mention == Some(true) && r.unread > 0,
+                    _ => r.unread > 0,
+                }
+        }) {
+            rows = rows.child(self.compact_room(row, "inbox-room", cx));
+            count += 1;
+        }
+        if count == 0 && self.snapshot.conversation_list.content == ContentState::Ready {
+            rows = rows.child(self.state_note(
+                "check-circle",
+                match filter {
+                    Activity::Mentions => "Keine neuen Erwähnungen.",
+                    _ => "Alles gelesen.",
+                },
+                match filter {
+                    Activity::Mentions => "Wenn dich jemand erwähnt, erscheint es hier.",
+                    _ => "Ungelesene Gespräche erscheinen hier.",
+                },
+            ));
+        }
+        if filter == Activity::Mentions
+            && self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|r| r.unread_mention.is_none())
+        {
+            rows = rows.child(self.hint(self.l("Einige Erwähnungen sind noch nicht bekannt.")));
+        }
+        if self.snapshot.conversation_list.content == ContentState::Ready
+            && !self.snapshot.conversation_list.complete
+            && self.active_account_connected()
+        {
+            rows = rows
+                .child(self.hint(self.l("Die Gesprächsliste ist noch nicht vollständig geladen.")));
+        }
+        rows
     }
 
     fn sidebar_destination(
@@ -1032,23 +1363,28 @@ impl Desktop {
         let t = self.theme;
         let context = row.context;
         let selected = Some(context) == self.snapshot.selected
-            && self.destination == SidebarDestination::Conversations;
+            && self.destination != SidebarDestination::Activity;
+        // The sidebar row is one dense line. In the Activity page the same row
+        // gains a larger avatar and the last-message preview.
+        let roomy = namespace != "room";
+        let size = if roomy { 32. } else { 22. };
         let id = scoped_id(namespace, context, 0, 0);
         let row_focus = self.control_focus(id.clone(), cx);
         let avatar = if let Some(avatar) = self.projected_avatar(
             talk_core::ui::content::AssetTarget::ConversationAvatar(row.context),
-            22.,
+            size,
         ) {
             avatar
         } else if row.kind == ConversationKind::Direct {
-            self.person_avatar(row.initials.as_str(), 22.)
+            self.person_avatar(row.initials.as_str(), size)
         } else {
             div()
                 .flex_none()
-                .size(px(22.))
+                .size(px(size))
                 .flex()
                 .items_center()
                 .justify_center()
+                .when(roomy, |d| d.rounded(px(8.)).bg(t.selected))
                 .child(self.scaled_icon(
                     if row.organization.classified == Some(true) {
                         "lock"
@@ -1061,15 +1397,19 @@ impl Desktop {
                             _ => "chat",
                         }
                     },
-                    16.,
-                    t.sidebar_secondary,
+                    if roomy { 18. } else { 16. },
+                    if roomy {
+                        t.selected_text
+                    } else {
+                        t.sidebar_secondary
+                    },
                 ))
         };
         let avatar = if row.kind == ConversationKind::Direct {
             self.avatar_with_presence(
                 avatar,
                 row.presence,
-                22.,
+                size,
                 if selected { t.selected } else { t.sidebar },
             )
         } else {
@@ -1096,21 +1436,42 @@ impl Desktop {
             .gap_2()
             .px_2()
             .py_1()
-            .min_h(self.sp(20.) + px(12.))
+            .min_h(if roomy {
+                self.sp(36.) + px(8.)
+            } else {
+                self.sp(20.) + px(12.)
+            })
             .when(selected, |d| d.bg(t.selected).text_color(t.selected_text))
             .child(avatar)
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .text_size(self.sp(13.))
-                    .font_weight(if row.unread > 0 {
-                        FontWeight::MEDIUM
-                    } else {
-                        FontWeight::NORMAL
-                    })
-                    .text_ellipsis()
-                    .child(row.title.as_str().to_owned()),
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .child(
+                        div()
+                            .w_full()
+                            .text_size(self.sp(13.))
+                            .font_weight(if row.unread > 0 {
+                                FontWeight::MEDIUM
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .text_ellipsis()
+                            .child(row.title.as_str().to_owned()),
+                    )
+                    .when(roomy && !row.subtitle.as_str().is_empty(), |d| {
+                        d.child(
+                            div()
+                                .w_full()
+                                .text_size(self.sp(12.))
+                                .text_color(t.muted)
+                                .text_ellipsis()
+                                .child(row.subtitle.as_str().to_owned()),
+                        )
+                    }),
             )
             .when(selected && !self.typing_people(context).is_empty(), |d| {
                 d.child(
@@ -1352,60 +1713,8 @@ impl Desktop {
             })
     }
 
-    pub(super) fn inbox(&self, cx: &Context<Self>) -> Div {
-        let mut page = div()
-            .flex()
-            .flex_col()
-            .p_5()
-            .gap_3()
-            .child(self.title(self.l("Posteingang")))
-            .child(self.hint(self.l("Ungelesene Gespräche in diesem Konto.")));
-        let state = CollectionState::new(
-            self.snapshot.conversation_list.content,
-            !self.snapshot.conversations.as_slice().is_empty(),
-        );
-        let mut rows = div().flex().flex_col().gap_1();
-        let mut count = 0;
-        for row in self
-            .snapshot
-            .conversations
-            .as_slice()
-            .iter()
-            .filter(|r| state.shows_content() && r.unread > 0 && r.archived == Some(false))
-        {
-            rows = rows.child(self.compact_room(row, "inbox-room", cx));
-            count += 1;
-        }
-        if count == 0 && self.snapshot.conversation_list.content == ContentState::Ready {
-            rows = rows.child(self.hint(self.l("Keine ungelesenen Gespräche geladen.")));
-        }
-        if self.snapshot.conversation_list.content == ContentState::Ready
-            && !self.snapshot.conversation_list.complete
-            && self.active_account_connected()
-        {
-            rows = rows
-                .child(self.hint(self.l("Die Gesprächsliste ist noch nicht vollständig geladen.")));
-        }
-        if let Some(scope) = self.snapshot.active_account {
-            page = page.child(self.collection_feedback(
-                state,
-                "retry-inbox",
-                LocalAction::Intent(talk_core::ui::presentation::UiIntent::ReloadConversations(
-                    scope,
-                )),
-                cx,
-            ));
-        }
-        page = page.child(
-            self.scroll_area(super::navigation::Region::Conversation)
-                .flex_1()
-                .min_h_0()
-                .child(rows),
-        );
-        self.content_card(page)
-    }
-
-    pub(super) fn threads_page(&self, cx: &Context<Self>) -> Div {
+    /// Subscribed threads, as the body of the Activity "Threads" filter.
+    fn threads_body(&self, cx: &Context<Self>) -> Div {
         let mut rows = div().flex().flex_col().gap_1();
         for thread in self.snapshot.threads.entries.as_slice() {
             let Some(room) = self
@@ -1482,71 +1791,64 @@ impl Desktop {
         ) {
             rows = rows.child(self.hint(self.l("Threads konnten nicht geladen werden.")));
         }
-        let mut heading = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(div().flex_1().child(self.title(self.l("Threads"))));
+        let mut controls = div().flex().flex_wrap().items_center().gap_2();
         if let Some(account) = self.snapshot.active_account {
-            heading = heading.child(self.icon_button(
+            controls = controls.child(self.icon_button(
                 "refresh-threads",
                 ("refresh", "Threads aktualisieren"),
                 ButtonStyle::Quiet,
                 Availability::when(self.snapshot.threads.content != ContentState::Loading, ""),
-                LocalAction::Intent(talk_core::ui::presentation::UiIntent::RefreshThreads(
-                    account,
-                )),
+                LocalAction::Intent(UiIntent::RefreshThreads(account)),
                 cx,
             ));
-        }
-        let mut page = div().flex().flex_col().p_5().gap_3().child(heading);
-        if let Some(account) = self.snapshot.active_account {
             let list = &self.snapshot.threads;
             if list.offset > 0 || list.has_next {
                 let ready = list.content != ContentState::Loading;
-                page = page.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(self.button(
-                            "threads-previous",
-                            "Vorherige Threads",
-                            ButtonStyle::Quiet,
-                            ready && list.offset >= 50,
-                            LocalAction::Intent(
-                                talk_core::ui::presentation::UiIntent::PageThreads {
-                                    account,
-                                    offset: list.offset.saturating_sub(50),
-                                },
-                            ),
-                            cx,
-                        ))
-                        .child(self.button(
-                            "threads-next",
-                            "Weitere Threads",
-                            ButtonStyle::Quiet,
-                            ready && list.has_next && list.offset.checked_add(50).is_some(),
-                            LocalAction::Intent(
-                                talk_core::ui::presentation::UiIntent::PageThreads {
-                                    account,
-                                    offset: list.offset.saturating_add(50),
-                                },
-                            ),
-                            cx,
-                        )),
-                );
+                controls = controls
+                    .child(self.button(
+                        "threads-previous",
+                        "Vorherige Threads",
+                        ButtonStyle::Quiet,
+                        ready && list.offset >= 50,
+                        LocalAction::Intent(UiIntent::PageThreads {
+                            account,
+                            offset: list.offset.saturating_sub(50),
+                        }),
+                        cx,
+                    ))
+                    .child(self.button(
+                        "threads-next",
+                        "Weitere Threads",
+                        ButtonStyle::Quiet,
+                        ready && list.has_next && list.offset.checked_add(50).is_some(),
+                        LocalAction::Intent(UiIntent::PageThreads {
+                            account,
+                            offset: list.offset.saturating_add(50),
+                        }),
+                        cx,
+                    ));
             }
         }
-        self.content_card(
-            page.child(
-                self.scroll_area(super::navigation::Region::Conversation)
-                    .flex_1()
-                    .min_h_0()
-                    .child(rows),
-            ),
-        )
+        div().flex().flex_col().gap_3().child(controls).child(rows)
     }
+}
+
+/// Unread messages that ask for the user: personal rooms and direct mentions.
+fn attention(
+    kind: ConversationKind,
+    unread: u32,
+    archived: Option<bool>,
+    direct_mention: Option<bool>,
+    muted: Option<bool>,
+) -> bool {
+    unread > 0
+        && archived == Some(false)
+        && muted != Some(true)
+        && (direct_mention == Some(true)
+            || matches!(
+                kind,
+                ConversationKind::Direct | ConversationKind::NoteToSelf
+            ))
 }
 
 fn thread_unread(
@@ -1564,6 +1866,90 @@ fn thread_unread(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn navigation_fixtures_map_one_scenario_to_one_initial_state() {
+        assert_eq!(Fixture::for_scenario(None), Fixture::None);
+        assert_eq!(Fixture::for_scenario(Some("chat")), Fixture::None);
+        for (scenario, destination, activity, menu) in [
+            (
+                "sidebar-activity",
+                SidebarDestination::Activity,
+                Activity::Unread,
+                None,
+            ),
+            (
+                "sidebar-activity-mentions",
+                SidebarDestination::Activity,
+                Activity::Mentions,
+                None,
+            ),
+            (
+                "thread-list",
+                SidebarDestination::Activity,
+                Activity::Threads,
+                None,
+            ),
+            (
+                "account-reminders",
+                SidebarDestination::Activity,
+                Activity::Reminders,
+                None,
+            ),
+            (
+                "sidebar-archive",
+                SidebarDestination::Archive,
+                Activity::Unread,
+                None,
+            ),
+            (
+                "sidebar-new-menu",
+                SidebarDestination::Conversations,
+                Activity::Unread,
+                Some(Menu::New),
+            ),
+            (
+                "sidebar-list-menu",
+                SidebarDestination::Conversations,
+                Activity::Unread,
+                Some(Menu::List),
+            ),
+        ] {
+            let fixture = Fixture::for_scenario(Some(scenario));
+            assert_eq!(fixture.destination(), destination, "{scenario}");
+            assert_eq!(fixture.activity(), activity, "{scenario}");
+            assert_eq!(fixture.menu(), menu, "{scenario}");
+        }
+    }
+
+    #[test]
+    fn only_direct_mentions_and_personal_rooms_count_toward_activity() {
+        let (direct, group, note) = (
+            ConversationKind::Direct,
+            ConversationKind::Group,
+            ConversationKind::NoteToSelf,
+        );
+        let quiet = Some(false);
+        assert!(!attention(group, 4, Some(false), Some(false), quiet));
+        assert!(!attention(group, 4, Some(false), None, quiet));
+        assert!(attention(group, 4, Some(false), Some(true), quiet));
+        assert!(
+            !attention(group, 4, Some(true), Some(true), quiet),
+            "archived rooms stay quiet"
+        );
+        assert!(
+            !attention(group, 4, None, Some(true), quiet),
+            "unknown archive state is not attention"
+        );
+        assert!(!attention(group, 0, Some(false), Some(true), quiet));
+        assert!(
+            !attention(group, 4, Some(false), Some(true), Some(true)),
+            "muted rooms stay quiet"
+        );
+        assert!(attention(direct, 1, Some(false), Some(false), None));
+        assert!(!attention(direct, 1, Some(false), Some(false), Some(true)));
+        assert!(attention(note, 2, Some(false), None, quiet));
+    }
+
     #[test]
     fn unread_thread_requires_a_known_room_marker_and_recent_message() {
         assert_eq!(thread_unread(Some(40), 1, 5, 2, Some(41)), Some(true));

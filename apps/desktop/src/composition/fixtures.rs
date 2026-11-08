@@ -1,6 +1,7 @@
 //! Explicit development scenarios only. No server, credential or media operation occurs.
 mod content;
 mod dialog;
+mod shell;
 pub(super) use content::images as content_images;
 use talk_core::ui::presentation::{
     AccountView, CallStage, CallStreamView, CallTileKind, CallView, Completion, ContentState,
@@ -83,8 +84,24 @@ pub const SCENARIOS: &[&str] = &[
     "storage-recovery",
     "chat",
     "chat-grouped",
+    "sidebar-rich",
+    "sidebar-activity",
+    "sidebar-activity-mentions",
+    "sidebar-new-menu",
+    "sidebar-list-menu",
+    "sidebar-archive",
+    "sidebar-load-failed",
+    "connection-details",
+    "chat-access-denied",
+    "chat-read-only",
     "chat-busy",
     "chat-send-pending",
+    "chat-message-states",
+    "chat-message-hover",
+    "chat-delivery-states",
+    "chat-delivery-sent",
+    "thread-message-hover",
+    "thread-message-menu",
     "chat-reactions",
     "chat-reactions-pending",
     "chat-reactions-denied",
@@ -319,6 +336,9 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if let Some(state) = shell::snapshot_for(scenario) {
+        return state;
+    }
     if matches!(
         scenario,
         Some("connection-reconnecting" | "offline-with-queue" | "startup-from-cache")
@@ -1030,6 +1050,23 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             }
         }
         return state;
+    }
+    if matches!(
+        scenario,
+        Some(
+            "chat-message-states"
+                | "chat-message-hover"
+                | "chat-delivery-states"
+                | "chat-delivery-sent"
+        )
+    ) {
+        return message_states_snapshot(scenario);
+    }
+    if matches!(
+        scenario,
+        Some("thread-message-hover" | "thread-message-menu")
+    ) {
+        return snapshot(Some("thread"));
     }
     if scenario == Some("thread") {
         let mut state = snapshot(Some("chat-edit"));
@@ -1777,7 +1814,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             stage: match scenario {
                 "incoming" => CallStage::Incoming,
                 "outgoing" => CallStage::Outgoing,
-                "gate" => CallStage::Required(RequiredGate::SecurityPolicy),
+                "gate" => CallStage::Required(RequiredGate::CallPolicy(
+                    talk_core::ui::presentation::CallPolicyReason::RequiredEncryption,
+                )),
                 "gate-mic" => CallStage::Required(RequiredGate::MicrophonePermission),
                 "gate-camera" => CallStage::Required(RequiredGate::CameraPermission),
                 "gate-recording" | "gate-recording-direct" => {
@@ -2184,6 +2223,177 @@ fn populate(s: &mut PresentationSnapshot, selected: ConversationRef) {
 
 /// Explicit, finite interaction fixture. No server result or native operation is
 /// inferred from these samples; unsupported writes keep their existing failure.
+/// Fictional own-message outcomes for visual evidence: sent, read, sending,
+/// waiting, unclear and failed. Local rows carry no author key, like the real
+/// outbox projection, so they never group with confirmed messages. Nothing here
+/// contacts a server or qualifies delivery.
+fn message_states_snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    use talk_core::ui::messaging::{FailedDraft, FailedDraftKind, MessageFeature};
+    let mut state = snapshot(Some("chat-ux"));
+    let base = 1_800_003_600;
+    let delivery = matches!(
+        scenario,
+        Some("chat-delivery-states" | "chat-delivery-sent")
+    );
+    let rows: Vec<(u128, &str, &str, &str, bool, u64)> = if delivery {
+        let mut rows = vec![
+            (
+                1,
+                "Mara Fischer",
+                "MF",
+                "Kannst du mir kurz bestätigen, dass die Dateien angekommen sind?",
+                false,
+                0,
+            ),
+            (
+                2,
+                "Alex Sommer",
+                "AS",
+                "Ja, sie sind angekommen.",
+                true,
+                100,
+            ),
+            (
+                3,
+                "Alex Sommer",
+                "AS",
+                "Und ich habe sie schon im Projektordner abgelegt.",
+                true,
+                160,
+            ),
+            (4, "Mara Fischer", "MF", "Perfekt, danke dir!", false, 600),
+            (5, "Alex Sommer", "AS", "Gern geschehen.", true, 900),
+        ];
+        if scenario == Some("chat-delivery-states") {
+            rows.push((
+                6,
+                "Alex Sommer",
+                "AS",
+                "Melde dich, wenn noch etwas fehlt.",
+                true,
+                950,
+            ));
+        }
+        rows
+    } else {
+        vec![
+            (
+                1,
+                "Mara Fischer",
+                "MF",
+                "Habt ihr den Entwurf für den Release schon gesehen?",
+                false,
+                0,
+            ),
+            (
+                2,
+                "Alex Sommer",
+                "AS",
+                "Ja, ich schaue gerade drüber.",
+                true,
+                100,
+            ),
+            (
+                3,
+                "Alex Sommer",
+                "AS",
+                "Zwei Anmerkungen schicke ich gleich.",
+                true,
+                160,
+            ),
+            (
+                4,
+                "Mara Fischer",
+                "MF",
+                "Super, danke dir! Der Rest passt so.",
+                false,
+                600,
+            ),
+        ]
+    };
+    let mut messages: Vec<_> = rows
+        .into_iter()
+        .map(|(id, author, initials, body, own, offset)| {
+            let mut row = message(id, author, initials, "09:41", body, own);
+            row.metadata.author_key = Some(text(if own { "5:users:alex" } else { "5:users:mara" }));
+            row.metadata.timestamp = base + offset;
+            row.time_label = text(&format!("09:{:02}", 41 + offset / 60));
+            row
+        })
+        .collect();
+    if !delivery {
+        for (index, (body, delivery, minute)) in [
+            (
+                "Ich lade die Screenshots noch hoch.",
+                DeliveryState::Pending,
+                "09:52",
+            ),
+            (
+                "Das schicke ich, sobald ich wieder online bin.",
+                DeliveryState::Queued,
+                "09:53",
+            ),
+            (
+                "Der Termin am Donnerstag bleibt bestehen.",
+                DeliveryState::Uncertain,
+                "09:54",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut row = message(
+                (1u128 << 127) | (900 + index as u128),
+                "Alex Sommer",
+                "AS",
+                minute,
+                body,
+                true,
+            );
+            row.delivery = delivery;
+            row.metadata.local_operation = Some(900 + index as u128);
+            row.metadata.timestamp = base + 700 + 60 * index as u64;
+            messages.push(row);
+        }
+    }
+    let last = messages.last().map_or(0, |row| row.local_id);
+    if let Some(panel) = state.message_panel.as_mut() {
+        panel.common_read = Some(match scenario {
+            Some("chat-delivery-states") => last,
+            Some("chat-delivery-sent") => 3,
+            _ => 3,
+        });
+        for feature in [MessageFeature::ReadReceipts, MessageFeature::React] {
+            let _ = panel.features.try_push((
+                feature,
+                talk_core::ui::conversation::Availability {
+                    implemented: true,
+                    server: talk_core::ui::presentation::FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            ));
+        }
+        panel.pinned_messages = if delivery {
+            Page::empty()
+        } else {
+            page(messages.first().cloned())
+        };
+        panel.shared_files = Page::empty();
+        panel.queue_available = true;
+        if !delivery {
+            panel.failed_drafts = page([FailedDraft {
+                operation: 41,
+                body: text("Ich schicke gleich noch den Link zum Entwurf."),
+                target: Default::default(),
+                kind: FailedDraftKind::Send,
+                retrying: false,
+            }]);
+        }
+    }
+    state.messages = page(messages);
+    state
+}
+
 fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
     use talk_core::ui::conversation::Availability;
     use talk_core::ui::messaging::{MessageFeature, MessagePanel, RichObject};
@@ -2410,8 +2620,14 @@ impl DevelopmentPort {
             reaction_diagnostics: 0,
             thread_fixture: match scenario {
                 Some(
-                    "chat-edit" | "thread" | "thread-list" | "thread-options" | "thread-offline"
-                    | "thread-paged",
+                    "chat-edit"
+                    | "thread"
+                    | "thread-list"
+                    | "thread-options"
+                    | "thread-offline"
+                    | "thread-paged"
+                    | "thread-message-hover"
+                    | "thread-message-menu",
                 ) => Some(false),
                 Some("thread-error") => Some(true),
                 _ => None,
@@ -2431,6 +2647,12 @@ impl DevelopmentPort {
                         | "thread-options"
                         | "thread-offline"
                         | "thread-paged"
+                        | "thread-message-hover"
+                        | "thread-message-menu"
+                        | "chat-message-states"
+                        | "chat-message-hover"
+                        | "chat-delivery-states"
+                        | "chat-delivery-sent"
                         | "chat-send-pending"
                         | "unread-divider"
                         | "unread-jump"
@@ -3317,6 +3539,41 @@ impl NativeDesktopPort for DevelopmentPort {
                     }
                     MessageAction::Files | MessageAction::Pins => {
                         println!("UI_CHAT_UX shared room={}", context.conversation.local);
+                    }
+                    // A retained failure is only marked as retrying: the fixture
+                    // never fabricates a delivery. Discarding removes the record.
+                    MessageAction::RetryQueued(operation)
+                        if panel
+                            .failed_drafts
+                            .as_slice()
+                            .iter()
+                            .any(|draft| draft.operation == operation && !draft.retrying) =>
+                    {
+                        panel.failed_drafts =
+                            page(panel.failed_drafts.as_slice().iter().cloned().map(
+                                |mut draft| {
+                                    draft.retrying |= draft.operation == operation;
+                                    draft
+                                },
+                            ));
+                        println!("UI_CHAT_UX failed retry operation={operation}");
+                    }
+                    MessageAction::DiscardQueued(operation)
+                        if panel
+                            .failed_drafts
+                            .as_slice()
+                            .iter()
+                            .any(|draft| draft.operation == operation && !draft.retrying) =>
+                    {
+                        panel.failed_drafts = page(
+                            panel
+                                .failed_drafts
+                                .as_slice()
+                                .iter()
+                                .filter(|draft| draft.operation != operation)
+                                .cloned(),
+                        );
+                        println!("UI_CHAT_UX failed discard operation={operation}");
                     }
                     _ => return Err(SubmitError::Unavailable(UnavailableReason::Unsupported)),
                 }

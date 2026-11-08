@@ -29,7 +29,10 @@ impl CollectionState {
     fn retry(self) -> bool {
         matches!(
             self.state,
-            ContentState::Offline | ContentState::Failed | ContentState::Denied
+            ContentState::Offline
+                | ContentState::Failed
+                | ContentState::Denied
+                | ContentState::Unconfigured
         )
     }
     fn copy(self) -> Option<(&'static str, &'static str, &'static str)> {
@@ -63,14 +66,74 @@ impl CollectionState {
             ),
             ContentState::Unconfigured => (
                 "info",
-                "Verbindung noch nicht verfügbar.",
-                "Diese Funktion ist in diesem Client noch nicht verfügbar.",
+                "Inhalte derzeit nicht verfügbar.",
+                "Die Verfügbarkeit konnte nicht bestätigt werden. Bitte erneut laden.",
             ),
         })
     }
 }
 
 impl Desktop {
+    /// The whole room cannot show content: access withdrawn, never loaded, or
+    /// not yet available. Confirmed content that is merely refreshing never
+    /// reaches this state (`shows_content`), so it cannot replace a timeline.
+    pub(super) fn room_unavailable(
+        &self,
+        state: CollectionState,
+        context: talk_core::ui::presentation::ConversationRef,
+        cx: &Context<Self>,
+    ) -> Option<Div> {
+        if let Some(entry) = self.room_entry_feedback(context, cx) {
+            return Some(entry);
+        }
+        let (symbol, title, detail, retry) = match state.state {
+            ContentState::Denied => (
+                "lock",
+                "Kein Zugriff auf dieses Gespräch.",
+                "Dein Zugang wurde möglicherweise geändert oder der Link ist nicht mehr gültig.",
+                Some("Erneut prüfen"),
+            ),
+            ContentState::Offline if !state.retained => (
+                "cloud-off",
+                "Noch keine Verbindung",
+                "Die Nachrichten erscheinen, sobald du wieder online bist.",
+                None,
+            ),
+            ContentState::Failed if !state.retained => (
+                "info",
+                "Nachrichten konnten nicht geladen werden.",
+                "Prüfe deine Verbindung und versuche es erneut.",
+                Some("Erneut versuchen"),
+            ),
+            ContentState::Unconfigured => {
+                // Center the shared availability explanation without turning
+                // missing policy evidence into a claim of missing implementation.
+                let (symbol, title, detail) = state.copy()?;
+                (symbol, title, detail, Some("Erneut laden"))
+            }
+            _ => return None,
+        };
+        Some(
+            self.state_note(symbol, title, detail)
+                .max_w(gpui::px(420.))
+                .when_some(retry, |d, label| {
+                    d.child(
+                        self.button(
+                            "retry-content",
+                            label,
+                            ButtonStyle::Secondary,
+                            true,
+                            LocalAction::Intent(talk_core::ui::presentation::UiIntent::Refresh(
+                                context,
+                            )),
+                            cx,
+                        )
+                        .mt_1(),
+                    )
+                }),
+        )
+    }
+
     pub(super) fn collection_feedback(
         &self,
         state: CollectionState,
@@ -106,10 +169,9 @@ impl Desktop {
             ContentState::Denied | ContentState::Offline => super::controls::BannerRole::Warning,
             _ => super::controls::BannerRole::Info,
         };
-        let label = format!("{} {}", self.l(title), self.l(detail));
-        self.banner_with_icon(role, &label, Some(symbol))
+        self.notice(role, self.l(title), Some(self.l(detail)), Some(symbol))
             .when(state.retry(), |d| {
-                d.child(self.button(id, "Erneut laden", ButtonStyle::Secondary, true, retry, cx))
+                d.child(self.notice_action(id, "Erneut laden", retry, cx))
             })
     }
 }
@@ -117,6 +179,15 @@ impl Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_content_offers_retry_without_claiming_a_missing_implementation() {
+        let state = CollectionState::new(ContentState::Unconfigured, false);
+        assert!(state.retry());
+        let (_, title, detail) = state.copy().unwrap();
+        assert!(!title.contains("Verbindung"));
+        assert!(!detail.contains("Client"));
+    }
 
     #[test]
     fn refresh_and_temporary_failure_keep_content_but_never_claim_empty() {
@@ -157,7 +228,7 @@ mod tests {
             let unsupported = CollectionState::new(ContentState::Unconfigured, retained);
             assert!(!unsupported.shows_content());
             assert!(!unsupported.confirmed_empty());
-            assert!(!unsupported.retry());
+            assert!(unsupported.retry());
         }
     }
 }

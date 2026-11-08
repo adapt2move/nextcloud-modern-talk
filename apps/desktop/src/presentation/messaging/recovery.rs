@@ -191,11 +191,18 @@ impl Desktop {
         cx.notify();
     }
 
-    pub(super) fn failed_draft_card(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+    /// A failed text stays honest and quiet: the retained words with a small red
+    /// marker and plain-text actions, aligned with message text. Nothing is
+    /// replayed by itself; each action remains an explicit typed intent.
+    pub(in crate::presentation) fn failed_draft_card(
+        &self,
+        cx: &Context<Self>,
+    ) -> Option<gpui::AnyElement> {
         let context = self.snapshot.selected?;
         let drafts = self.current_failed_drafts(context)?;
         let (index, draft) = selected(drafts, self.message_ui.failed_selection, context)?;
         let operation = draft.operation;
+        let t = self.theme;
         let action = |action| LocalAction::MessageIn(context, super::Action::Recovery(action));
         let copy_allowed = !self.background_inert
             && !self.projection_blocked
@@ -204,29 +211,175 @@ impl Desktop {
                 .selected()
                 .is_some_and(|room| room.draft_clipboard == Decision::Allowed);
         let restore = self.can_restore_failed_draft(context, draft, cx);
-        Some(self.composer_card().p_3().gap_2()
-            .child(div().flex().items_center().gap_2()
-                .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(self.l(match draft.kind {
-                    FailedDraftKind::File | FailedDraftKind::Send => "Senden fehlgeschlagen",
-                    FailedDraftKind::Edit(_) => "Änderung fehlgeschlagen",
-                    FailedDraftKind::Schedule(_) | FailedDraftKind::EditScheduled(_) => "Planung fehlgeschlagen",
-                })))
-                .when(drafts.len() > 1, |row| row
-                    .child(self.icon_button(scoped_id("failed-previous", context, 0, 0), ("arrow-left", "Vorheriger Entwurf"), ButtonStyle::Quiet,
-                        Availability::available(), action(RecoveryAction::Previous(operation)), cx))
-                    .child(div().font_family("Google Sans Code").text_size(self.sp(12.)).child(format!("{}/{}", index + 1, drafts.len())))
-                    .child(self.icon_button(scoped_id("failed-next", context, 0, 0), ("arrow-right", "Nächster Entwurf"), ButtonStyle::Quiet,
-                        Availability::available(), action(RecoveryAction::Next(operation)), cx))))
-            .child(div().max_h(self.sp(60.)).overflow_hidden().text_size(self.sp(13.)).line_height(self.sp(20.))
-                .child(crate::presentation::selectable::SelectableText::new(scoped_id("failed-text", context, operation, 0), draft.body.as_str(), self.text_selection.clone(), self.theme, copy_allowed)))
-            .child(div().flex().flex_wrap().gap_2()
-                .child(self.button(scoped_id("failed-retry", context, operation, 0), "Erneut versuchen", ButtonStyle::Secondary,
-                    Availability::when(self.can_retry_failed_draft(draft), "Diese Aktion kann gerade nicht erneut versucht werden."), action(RecoveryAction::Retry(operation)), cx))
-                .child(self.button(scoped_id("failed-restore", context, operation, 0), "Als Entwurf bearbeiten", ButtonStyle::Quiet,
-                    Availability::when(restore, "Beende zuerst die aktuelle Eingabe. Ein vorhandener Entwurf wird nicht überschrieben."), action(RecoveryAction::Restore(operation)), cx))
-                .child(self.button(scoped_id("failed-discard", context, operation, 0), "Verwerfen", ButtonStyle::Quiet,
-                    Availability::when(!draft.retrying, "Der Entwurf wird gerade verarbeitet."), action(RecoveryAction::Discard(operation)), cx)))
-            .into_any_element())
+        let retry = self.can_retry_failed_draft(draft);
+        let (label, discard) = failed_labels(draft.kind);
+        // A 32 pt target on an 18 pt line: the extra height overlaps its padding.
+        let link =
+            |id: gpui::ElementId, text: &str, enabled: Availability, color: gpui::Hsla, act| {
+                self.button(id, text.to_owned(), ButtonStyle::Quiet, enabled, act, cx)
+                    .min_h(px(32.))
+                    .my(px(-7.))
+                    .px(px(6.))
+                    .py_0()
+                    .text_size(self.sp(12.))
+                    .line_height(self.sp(18.))
+                    .text_color(color)
+            };
+        // `focus` is the palette's text-safe accent (4.5:1 in every theme); `accent` is a fill.
+        let separator = || div().text_color(t.muted).child("·");
+        let role = if draft.retrying {
+            crate::presentation::controls::BannerRole::Info
+        } else {
+            crate::presentation::controls::BannerRole::Error
+        };
+        let status_color = role.foreground(t);
+        Some(
+            self.banner_frame(role)
+                .items_start()
+                .gap_3()
+                .child(
+                    div()
+                        .w(px(36.))
+                        .flex_none()
+                        .flex()
+                        .justify_center()
+                        .pt(px(3.))
+                        .child(self.scaled_icon(
+                            if draft.retrying { "clock" } else { "info" },
+                            16.,
+                            status_color,
+                        )),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .max_h(self.sp(44.))
+                                .overflow_hidden()
+                                .text_size(self.sp(14.))
+                                .line_height(self.sp(22.))
+                                .opacity(0.72)
+                                .child(crate::presentation::selectable::SelectableText::new(
+                                    scoped_id("failed-text", context, operation, 0),
+                                    draft.body.as_str(),
+                                    self.text_selection.clone(),
+                                    t,
+                                    copy_allowed,
+                                )),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap_x(px(2.))
+                                .text_size(self.sp(12.))
+                                .line_height(self.sp(18.))
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .mr(px(4.))
+                                        .text_color(status_color)
+                                        .child(self.l(if draft.retrying {
+                                            "Wird erneut versucht …"
+                                        } else {
+                                            label
+                                        })
+                                        .to_owned()),
+                                )
+                                .when(!draft.retrying, |row| {
+                                    row.child(separator())
+                                        .child(link(
+                                            scoped_id("failed-retry", context, operation, 0),
+                                            "Erneut versuchen",
+                                            Availability::when(
+                                                retry,
+                                                "Diese Aktion kann gerade nicht erneut versucht werden.",
+                                            ),
+                                            if retry { t.focus } else { t.disabled_fg },
+                                            action(RecoveryAction::Retry(operation)),
+                                        ))
+                                        .when(draft.kind != FailedDraftKind::File, |row| {
+                                            row.child(separator()).child(link(
+                                                scoped_id("failed-restore", context, operation, 0),
+                                                "Bearbeiten",
+                                                Availability::when(
+                                                    restore,
+                                                    "Beende zuerst die aktuelle Eingabe. Ein vorhandener Entwurf wird nicht überschrieben.",
+                                                ),
+                                                if restore { t.focus } else { t.disabled_fg },
+                                                action(RecoveryAction::Restore(operation)),
+                                            ))
+                                        })
+                                        .child(separator())
+                                        .child(link(
+                                            scoped_id("failed-discard", context, operation, 0),
+                                            discard,
+                                            Availability::when(
+                                                !draft.retrying,
+                                                "Der Entwurf wird gerade verarbeitet.",
+                                            ),
+                                            t.danger,
+                                            action(RecoveryAction::Discard(operation)),
+                                        ))
+                                })
+                                .when(drafts.len() > 1, |row| {
+                                    row.child(
+                                        div()
+                                            .ml_auto()
+                                            .flex()
+                                            .items_center()
+                                            .child(
+                                                self.icon_button(
+                                                    scoped_id("failed-previous", context, 0, 0),
+                                                    ("arrow-left", "Vorheriger Entwurf"),
+                                                    ButtonStyle::Quiet,
+                                                    Availability::available(),
+                                                    action(RecoveryAction::Previous(operation)),
+                                                    cx,
+                                                )
+                                                .my(px(-7.)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .font_family("Google Sans Code")
+                                                    .text_size(self.sp(12.))
+                                                    .child(format!("{}/{}", index + 1, drafts.len())),
+                                            )
+                                            .child(
+                                                self.icon_button(
+                                                    scoped_id("failed-next", context, 0, 0),
+                                                    ("arrow-right", "Nächster Entwurf"),
+                                                    ButtonStyle::Quiet,
+                                                    Availability::available(),
+                                                    action(RecoveryAction::Next(operation)),
+                                                    cx,
+                                                )
+                                                .my(px(-7.)),
+                                            ),
+                                    )
+                                }),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+}
+
+/// Status wording and the destructive verb for each kind of retained failure.
+/// Only a typed send/file is deleted; an edit or schedule never reads as
+/// deleting the message it belongs to.
+fn failed_labels(kind: FailedDraftKind) -> (&'static str, &'static str) {
+    match kind {
+        FailedDraftKind::File | FailedDraftKind::Send => ("Nicht gesendet", "Löschen"),
+        FailedDraftKind::Edit(_) => ("Änderung nicht gespeichert", "Verwerfen"),
+        FailedDraftKind::Schedule(_) | FailedDraftKind::EditScheduled(_) => {
+            ("Planung nicht gespeichert", "Verwerfen")
+        }
     }
 }
 
@@ -287,6 +440,26 @@ mod tests {
             retrying: false,
         }
     }
+    #[test]
+    fn only_an_unsent_text_or_file_is_deleted_and_edits_are_never_called_deletion() {
+        assert_eq!(
+            failed_labels(FailedDraftKind::Send),
+            ("Nicht gesendet", "Löschen")
+        );
+        assert_eq!(
+            failed_labels(FailedDraftKind::File),
+            ("Nicht gesendet", "Löschen")
+        );
+        for kind in [
+            FailedDraftKind::Edit(1),
+            FailedDraftKind::Schedule(5),
+            FailedDraftKind::EditScheduled(2),
+        ] {
+            assert_eq!(failed_labels(kind).1, "Verwerfen");
+            assert_ne!(failed_labels(kind).0, "Nicht gesendet");
+        }
+    }
+
     #[test]
     fn one_failed_selection_survives_reordering_and_retires_a_removed_operation() {
         use talk_core::ui::{AccountId, AccountScope, ConversationId, HostId, RuntimeGeneration};

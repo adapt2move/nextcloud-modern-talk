@@ -471,6 +471,7 @@ pub struct PrivateReplyTarget {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
+    JoinRoom(Text<512>),
     SetFavorite(bool),
     SetArchived(bool),
     SetNotificationLevel(u8),

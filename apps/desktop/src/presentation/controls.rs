@@ -194,10 +194,6 @@ impl Availability {
         self.help = Some(text);
         self
     }
-    pub fn beside_control(mut self) -> Self {
-        self.beside_control = true;
-        self
-    }
     pub fn explained_elsewhere(mut self) -> Self {
         self.explained_elsewhere = true;
         self
@@ -607,12 +603,24 @@ impl Desktop {
                 cx.notify();
             }
         });
+        let pointer_exit = cx.listener(|this, _: &gpui::MouseExitEvent, _, cx| {
+            // GPUI retains its last in-window pointer position on exit. Retire
+            // our pointer-owned reveals without disturbing keyboard focus.
+            this.toolbar_hover.clear();
+            this.hover_hints.cancel();
+            cx.notify();
+        });
         gpui::canvas(
             |_, _, _| {},
             move |_, _, window, _| {
                 window.on_mouse_event(move |event: &gpui::MouseDownEvent, phase, window, cx| {
                     if phase == gpui::DispatchPhase::Capture {
                         pointer_down(event, window, cx);
+                    }
+                });
+                window.on_mouse_event(move |event: &gpui::MouseExitEvent, phase, window, cx| {
+                    if phase == gpui::DispatchPhase::Capture {
+                        pointer_exit(event, window, cx);
                     }
                 });
             },
@@ -790,7 +798,7 @@ impl Desktop {
         let selected = match action {
             LocalAction::Navigate(context) if navigation_row => {
                 Some(context) == self.snapshot.selected
-                    && self.destination != super::SidebarDestination::Inbox
+                    && self.destination != super::SidebarDestination::Activity
             }
             LocalAction::Destination(destination) => self.destination == destination,
             LocalAction::Scale(n) => self.scale == n,

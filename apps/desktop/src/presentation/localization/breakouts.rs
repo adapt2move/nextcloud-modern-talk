@@ -73,7 +73,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Enter a message.",
         "Escribe un mensaje.",
     ),
-    ("Nicht zugewiesen", "Not assigned", "Sin asignar"),
     (
         "Personen für die Zuweisung laden",
         "Load people for assignment",
@@ -83,11 +82,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Status nicht verfügbar. Bitte neu laden.",
         "Status unavailable. Reload and try again.",
         "Estado no disponible. Vuelve a cargarlo.",
-    ),
-    (
-        "Verlasse zuerst den aktiven Anruf.",
-        "Leave the current call first.",
-        "Sal primero de la llamada actual.",
     ),
     (
         "Weniger Gruppenräume",

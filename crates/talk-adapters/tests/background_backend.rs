@@ -236,6 +236,104 @@ async fn background_message_remote_membership_and_incoming_invitation() {
     );
     println!("background-backend: nonselected message, replay and unread checks passed");
 
+    setting(
+        &mut alice,
+        &r,
+        a,
+        alice_room,
+        11,
+        C::SetNotifications(NotificationLevel::Mention),
+    )
+    .await;
+    let ProtocolReply::Send(mention) = request(
+        &mut bob,
+        &r,
+        b,
+        ProtocolRequest::Send(SendMessage {
+            conversation: bob_room,
+            operation: OperationId::from_local(11),
+            text: Text::new("Synthetic direct mention @lab_alice").unwrap(),
+        }),
+    )
+    .await
+    else {
+        panic!("mention send");
+    };
+    let SendState::ServerAccepted(mention) = mention.state else {
+        panic!("mention accepted");
+    };
+    let mention_notice = messages(&mut alice, &r, a).await;
+    assert!(
+        mention_notice
+            .notices
+            .as_slice()
+            .iter()
+            .any(|n| !n.reminder && n.message == mention.sequence),
+        "real direct mention"
+    );
+    let due = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 1;
+    request(
+        &mut alice,
+        &r,
+        a,
+        ProtocolRequest::Messaging {
+            conversation: alice_room,
+            operation: OperationId::from_local(12),
+            command: talk_core::protocol::messaging::MessagingCommand::Reminder {
+                message: talk_core::protocol::MessageId {
+                    conversation: alice_room,
+                    sequence: mention.sequence,
+                },
+                timestamp: Some(due),
+            },
+        },
+    )
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let control = std::path::PathBuf::from(std::env::var("NMT_NOTIFICATION_CONTROL").unwrap());
+    std::fs::write(control.join("reminder-ready"), b"ready").unwrap();
+    for _ in 0..100 {
+        if control.join("reminder-generated").exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        control.join("reminder-generated").exists(),
+        "reminder job deadline"
+    );
+    let reminder = messages(&mut alice, &r, a).await;
+    assert!(
+        reminder
+            .notices
+            .as_slice()
+            .iter()
+            .any(|n| n.reminder && n.message == mention.sequence),
+        "real due reminder"
+    );
+    assert!(
+        messages(&mut alice, &r, a)
+            .await
+            .notices
+            .as_slice()
+            .is_empty(),
+        "reminder cannot replay"
+    );
+    setting(
+        &mut alice,
+        &r,
+        a,
+        alice_room,
+        13,
+        C::SetNotifications(NotificationLevel::Always),
+    )
+    .await;
+    println!("background-backend: direct mention and cron-generated reminder passed");
+
     let suffix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -401,5 +499,57 @@ async fn background_message_remote_membership_and_incoming_invitation() {
     bob.cancellation().cancel();
     println!(
         "background-backend: incoming discovery and exact invitation decline passed; no media claim"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "owned notifications.py lab only; server command handshake and private fixture"]
+async fn server_talk_diagnostic_arrives_without_a_mobile_device_or_room_activation() {
+    let r = NetworkRuntime::new(ClockEpoch::from_local(803));
+    let a = scope(803);
+    let mut client = test_support::from_private_fixture(
+        Path::new(&std::env::var("NMT_BACKGROUND_ALICE_FIXTURE").unwrap()),
+        a,
+        HostId::from_local(1),
+        r.clone(),
+    )
+    .unwrap();
+    let baseline = messages(&mut client, &r, a).await;
+    assert!(baseline.server_tests.as_slice().is_empty());
+    let directory = std::path::PathBuf::from(std::env::var("NMT_NOTIFICATION_CONTROL").unwrap());
+    std::fs::write(directory.join("ready"), b"ready").unwrap();
+    for _ in 0..100 {
+        if directory.join("generated").exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        directory.join("generated").exists(),
+        "server command deadline"
+    );
+    let start = std::time::Instant::now();
+    let batch = messages(&mut client, &r, a).await;
+    assert_eq!(
+        batch.server_tests.as_slice().len(),
+        1,
+        "test-push object reaches production adapter"
+    );
+    assert!(batch.notices.as_slice().is_empty());
+    assert!(
+        messages(&mut client, &r, a)
+            .await
+            .server_tests
+            .as_slice()
+            .is_empty(),
+        "no replay"
+    );
+    assert!(
+        start.elapsed() < Duration::from_secs(3),
+        "bounded healthy-server observation"
+    );
+    println!(
+        "notifications-backend: server test delivered, no replay, no room activation; observation_ms={}",
+        start.elapsed().as_millis()
     );
 }

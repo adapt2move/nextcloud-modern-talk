@@ -1,6 +1,8 @@
 use super::*;
 #[path = "alpha_tests.rs"]
 mod alpha_tests;
+#[path = "call_policy_tests.rs"]
+mod call_policy_tests;
 #[path = "content_tests.rs"]
 mod content_tests;
 #[path = "creation_tests.rs"]
@@ -19,6 +21,8 @@ mod read_tests;
 mod reconcile_tests;
 #[path = "references_tests.rs"]
 mod references_tests;
+#[path = "room_access_tests.rs"]
+mod room_access_tests;
 #[path = "search_tests.rs"]
 mod search_tests;
 #[path = "status_tests.rs"]
@@ -544,7 +548,7 @@ async fn autonomous_account_probe_reports_only_authoritative_rejection() {
         .await;
         assert!(matches!(
             wrong_scope_result,
-            Err(nextcloud_talk_api::ErrorKind::WrongScope)
+            Err(error) if error.kind == nextcloud_talk_api::ErrorKind::WrongScope
         ));
         assert!(
             !cancel.is_cancelled(),
@@ -559,7 +563,7 @@ async fn autonomous_account_probe_reports_only_authoritative_rejection() {
         let result =
             super::meeting_runtime::refresh(&mut writer, call, &runtime, &cancel, Some(&handler))
                 .await;
-        assert!(matches!(result, Err(kind) if kind == expected));
+        assert!(matches!(result, Err(error) if error.kind == expected));
         assert_eq!(cancel.is_cancelled(), rejected);
         assert_eq!(
             *reports.lock().unwrap(),
@@ -958,8 +962,67 @@ async fn unknown_and_restrictive_policies_never_send() {
 }
 
 #[tokio::test]
-async fn future_family_missing_capabilities_and_account_capacity_are_bounded() {
-    let server = Server::start(vec![Reply::data(caps(36))]).await;
+async fn missing_route_capability_and_account_capacity_are_bounded() {
+    let mut missing_route = caps(36);
+    missing_route["capabilities"]["spreed"]["features"] = json!(["threads", "chat-v2"]);
+    let server = Server::start(vec![Reply::data(missing_route)]).await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    assert_eq!(
+        client
+            .request(context(&runtime), ProtocolRequest::ListConversations)
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::Unsupported
+    );
+    let mut clients = vec![client];
+    for n in 2..=8 {
+        clients.push(
+            NextcloudClient::from_identity(
+                AuthenticatedBinding {
+                    scope: AccountScope {
+                        account: AccountId::from_local(n),
+                        ..scope()
+                    },
+                    host: HostId::from_local(1),
+                    origin: transport::ServerOrigin::loopback(&server.origin).unwrap(),
+                    login_name: Zeroizing::new("fixture_user".into()),
+                    user: Zeroizing::new("fixture_user".into()),
+                    password: Zeroizing::new("private".into()),
+                    cancellation: Cancellation::default(),
+                },
+                runtime.clone(),
+            )
+            .unwrap(),
+        );
+    }
+    let ninth = NextcloudClient::from_identity(
+        AuthenticatedBinding {
+            scope: scope(),
+            host: HostId::from_local(1),
+            origin: transport::ServerOrigin::loopback(&server.origin).unwrap(),
+            login_name: Zeroizing::new("fixture_user".into()),
+            user: Zeroizing::new("fixture_user".into()),
+            password: Zeroizing::new("private".into()),
+            cancellation: Cancellation::default(),
+        },
+        runtime,
+    );
+    assert!(matches!(
+        ninth,
+        Err(PortError {
+            kind: ErrorKind::Busy,
+            ..
+        })
+    ));
+}
+
+#[tokio::test]
+async fn missing_capabilities_and_account_capacity_are_bounded() {
+    let mut missing_route = caps(36);
+    missing_route["capabilities"]["spreed"]["features"] = json!([]);
+    let server = Server::start(vec![Reply::data(missing_route)]).await;
     let runtime = runtime();
     let mut client = client(&server.origin, runtime.clone());
     assert_eq!(

@@ -22,8 +22,6 @@ pub(super) fn materials() -> crate::presentation::MaterialImages {
     }
     crate::presentation::MaterialImages {
         grain: prepare(include_bytes!("../../assets/materials/grain.png")),
-        light: prepare(include_bytes!("../../assets/materials/grid-light.png")),
-        dark: prepare(include_bytes!("../../assets/materials/grid-dark.png")),
     }
 }
 impl AssetSource for Assets {
@@ -49,8 +47,6 @@ impl AssetSource for Assets {
             "icons/minimize-2.svg" => include_bytes!("../../assets/icons/minimize-2.svg"),
             "icons/wifi-off.svg" => include_bytes!("../../assets/icons/wifi-off.svg"),
             "icons/grid.svg" => include_bytes!("../../assets/icons/grid.svg"),
-            "icons/thumbs-up.svg" => include_bytes!("../../assets/icons/thumbs-up.svg"),
-            "icons/sparkles.svg" => include_bytes!("../../assets/icons/sparkles.svg"),
             "icons/cloud-off.svg" => include_bytes!("../../assets/icons/cloud-off.svg"),
             "icons/bar-chart-2.svg" => include_bytes!("../../assets/icons/bar-chart-2.svg"),
             "icons/cloud.svg" => include_bytes!("../../assets/icons/cloud.svg"),
@@ -70,7 +66,6 @@ impl AssetSource for Assets {
             "icons/clock.svg" => include_bytes!("../../assets/icons/clock.svg"),
             "icons/refresh.svg" => include_bytes!("../../assets/icons/refresh.svg"),
             "icons/sidebar.svg" => include_bytes!("../../assets/icons/sidebar.svg"),
-            "icons/panel-right.svg" => include_bytes!("../../assets/icons/panel-right.svg"),
             "icons/chevron-left.svg" => include_bytes!("../../assets/icons/chevron-left.svg"),
             "icons/chevron-down.svg" => include_bytes!("../../assets/icons/chevron-down.svg"),
             "icons/chevron-up.svg" => include_bytes!("../../assets/icons/chevron-up.svg"),

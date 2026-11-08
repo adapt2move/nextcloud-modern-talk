@@ -48,6 +48,8 @@ pub(super) enum Kind {
     Backdrop,
     Pulse,
     Badge,
+    /// A hover toolbar: a brief fade and four-point drop; never a layout change.
+    Toolbar,
 }
 
 /// One timing record per mounted page or menu, retired by GPUI on unmount.
@@ -110,7 +112,7 @@ impl Element for ActionReveal {
             |state: Option<Timing>, window| {
                 let mut timing = state.unwrap_or_default();
                 timing.duration = match self.kind {
-                    Kind::Page | Kind::Badge => REVEAL,
+                    Kind::Page | Kind::Badge | Kind::Toolbar => REVEAL,
                     Kind::Pulse => CONTROL,
                     _ => DIALOG,
                 };
@@ -138,6 +140,10 @@ impl Element for ActionReveal {
                         .relative()
                         .top(gpui::px(-3. * (1. - eased)))
                         .opacity(0.65 + 0.35 * eased),
+                    Kind::Toolbar => child
+                        .relative()
+                        .top(gpui::px(-4. * (1. - eased)))
+                        .opacity(0.15 + 0.85 * eased),
                 }
                 .into_any_element();
                 if progress.is_some() {

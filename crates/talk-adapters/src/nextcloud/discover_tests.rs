@@ -17,14 +17,17 @@ fn listed(password: bool) -> Value {
 }
 
 #[tokio::test]
-async fn discovery_uses_a_current_listing_ticket_and_closes_its_temporary_session() {
+async fn discovery_uses_a_current_listing_ticket_and_retains_its_chat_session() {
     let server = Server::start(vec![
         Reply::data(capabilities()),
         Reply::data(json!([listed(false)])),
         Reply::data(capabilities()),
-        Reply::data(json!({"sessionId":"synthetic-session"})),
-        Reply::data(json!([])),
         Reply::data(room()),
+        Reply::data({
+            let mut r = room();
+            r["sessionId"] = json!("synthetic-session");
+            r
+        }),
     ])
     .await;
     let runtime = runtime();
@@ -60,16 +63,19 @@ async fn discovery_uses_a_current_listing_ticket_and_closes_its_temporary_sessio
     let listing = String::from_utf8_lossy(&calls[1]);
     assert!(listing.contains("/v4/listed-room?"));
     assert!(listing.contains("searchTerm=fixture"));
-    assert!(String::from_utf8_lossy(&calls[3]).starts_with("POST "));
-    assert!(String::from_utf8_lossy(&calls[4]).starts_with("DELETE "));
+    assert!(String::from_utf8_lossy(&calls[3]).starts_with("GET "));
+    assert!(String::from_utf8_lossy(&calls[4]).starts_with("POST "));
+    assert_eq!(calls.len(), 5);
 }
 
 #[tokio::test]
-async fn discovery_does_not_join_password_protected_or_unlisted_rooms() {
+async fn discovery_reports_password_requirement_from_the_server() {
     let server = Server::start(vec![
         Reply::data(capabilities()),
         Reply::data(json!([listed(true)])),
         Reply::data(capabilities()),
+        Reply::data(listed(true)),
+        Reply::envelope(403, "failure", 403, json!({"error":"password"})),
     ])
     .await;
     let runtime = runtime();
@@ -91,6 +97,6 @@ async fn discovery_does_not_join_password_protected_or_unlisted_rooms() {
         .request(context(&runtime), ProtocolRequest::JoinOpenConversation(id))
         .await
         .unwrap_err();
-    assert_eq!(error.kind, ErrorKind::Unsupported);
-    assert_eq!(server.count(), 3);
+    assert_eq!(error.kind, ErrorKind::PasswordRequired);
+    assert_eq!(server.count(), 5);
 }

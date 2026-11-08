@@ -128,6 +128,12 @@ It records timestamps, app version, connection changes, history requests and sen
 outcomes. Sign-in records its start, browser result and storage outcome.
 Account removal also records credential retirement, cleanup and local
 record removal, including allowlisted storage-backend and failure categories.
+Call gate transitions record `operation: "call_gate"` and an allowlisted
+`call_gate` reason (for example `required_e2ee_unsupported` or
+`start_permission_denied`). `policy_unavailable` adds `policy_evidence` with
+the source or field that could not be confirmed (for example `signaling_settings`,
+`effective_permissions` or `source_freshness`). Repeated identical
+observations do not emit another entry. No raw capability payload is logged.
 Process-local request numbers connect an operation to its result.
 Message text, account and conversation names, server addresses, credentials and
 raw backend responses are excluded. Nothing is uploaded automatically.
