@@ -315,6 +315,63 @@ mod tests {
         }
     }
     #[test]
+    fn notices_and_the_status_pill_keep_contrast_on_every_surface_they_sit_on() {
+        use crate::presentation::controls::BannerRole;
+        let over = |front: Hsla, back: Hsla| -> Hsla {
+            let (f, b) = (gpui::Rgba::from(front), gpui::Rgba::from(back));
+            gpui::Rgba {
+                r: f.r * f.a + b.r * (1. - f.a),
+                g: f.g * f.a + b.g * (1. - f.a),
+                b: f.b * f.a + b.b * (1. - f.a),
+                a: 1.,
+            }
+            .into()
+        };
+        for palette in [Palette::Blue, Palette::Sage] {
+            for appearance in [Appearance::Light, Appearance::Dark] {
+                let t = Theme::resolve(palette, appearance, WindowAppearance::Light);
+                for role in [BannerRole::Info, BannerRole::Warning, BannerRole::Error] {
+                    // Notices sit on the content surface, inset areas and the selected tint.
+                    for back in [t.surface, t.subtle, t.selected] {
+                        let wash = over(role.wash(t), back);
+                        for (name, fg) in [
+                            ("title", t.text),
+                            ("detail", t.muted),
+                            ("action", t.selected_text),
+                        ] {
+                            assert!(
+                                contrast(fg, wash) >= 4.5,
+                                "{palette:?}/{appearance:?}/{name}: {}",
+                                contrast(fg, wash)
+                            );
+                        }
+                        assert!(
+                            contrast(role.foreground(t), wash) >= 3.0,
+                            "{palette:?}/{appearance:?} icon"
+                        );
+                    }
+                }
+                // The title-bar pill sits on the canvas gradient.
+                for back in [t.canvas, t.chrome_end] {
+                    let pill = over(BannerRole::Warning.wash(t), back);
+                    assert!(
+                        contrast(t.text, pill) >= 4.5,
+                        "{palette:?}/{appearance:?} pill label"
+                    );
+                    assert!(
+                        contrast(t.muted, pill) >= 4.5,
+                        "{palette:?}/{appearance:?} pill count"
+                    );
+                    assert!(
+                        contrast(crate::presentation::connectivity::status_dot(t), pill) >= 3.0,
+                        "{palette:?}/{appearance:?} pill dot: {}",
+                        contrast(crate::presentation::connectivity::status_dot(t), pill)
+                    );
+                }
+            }
+        }
+    }
+    #[test]
     fn semantic_text_and_control_roles_meet_design_contrast_in_all_four_themes() {
         for palette in [Palette::Blue, Palette::Sage] {
             for appearance in [Appearance::Light, Appearance::Dark] {

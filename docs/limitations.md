@@ -224,7 +224,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - The quick switcher searches loaded conversation names, up to 16 observed
   participant names per eligible room, and the server's user directory. Its
   participant index is session-only and is filled gradually when permitted.
-  Sidebar unread and mention filters are stored per durable account. Eligible
+  The connection status pill reports the time since this client observed the failure,
+  not the last successful synchronization, which the presentation contract does not
+  expose. Sidebar unread and mention filters (in the list's “⋯” menu) and the
+  Aktivität counts are stored or derived per durable account. Eligible
   cached rooms retain previously reported mention flags; missing or changed
   observations remain unknown. Room notification edits are optimistic and
   reconciled with the server. An uncertain write requires a fresh room read.

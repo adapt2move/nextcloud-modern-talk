@@ -145,7 +145,7 @@ def capture(args, before_runtime_cleanup=None):
                                 raise RuntimeError("Call header did not enter window-manager fullscreen")
                             run(["xdotool", "mousemove", "--sync", "1590", "1190"], env)
                             run(["import", "-window", xid, str(screenshot)], env)
-                        if scenario in ("connection-reconnecting", "offline-with-queue"):
+                        if scenario in ("connection-reconnecting", "offline-with-queue", "connection-details"):
                             # The production grace deadline advances on the normal
                             # owner tick. Capture its sustained state, not a blip.
                             time.sleep(5.5)

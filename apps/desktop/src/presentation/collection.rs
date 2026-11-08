@@ -71,6 +71,63 @@ impl CollectionState {
 }
 
 impl Desktop {
+    /// The whole room cannot show content: access withdrawn, never loaded, or
+    /// not yet available. Confirmed content that is merely refreshing never
+    /// reaches this state (`shows_content`), so it cannot replace a timeline.
+    pub(super) fn room_unavailable(
+        &self,
+        state: CollectionState,
+        context: talk_core::ui::presentation::ConversationRef,
+        cx: &Context<Self>,
+    ) -> Option<Div> {
+        let (symbol, title, detail, retry) = match state.state {
+            ContentState::Denied => (
+                "lock",
+                "Kein Zugriff auf dieses Gespräch.",
+                "Dein Zugang wurde möglicherweise geändert oder der Link ist nicht mehr gültig.",
+                Some("Erneut prüfen"),
+            ),
+            ContentState::Offline if !state.retained => (
+                "cloud-off",
+                "Noch keine Verbindung",
+                "Die Nachrichten erscheinen, sobald du wieder online bist.",
+                None,
+            ),
+            ContentState::Failed if !state.retained => (
+                "info",
+                "Nachrichten konnten nicht geladen werden.",
+                "Prüfe deine Verbindung und versuche es erneut.",
+                Some("Erneut versuchen"),
+            ),
+            ContentState::Unconfigured => (
+                "info",
+                "Hier noch nicht verfügbar",
+                "Diese Funktion ist in diesem Client noch nicht verfügbar.",
+                None,
+            ),
+            _ => return None,
+        };
+        Some(
+            self.state_note(symbol, title, detail)
+                .max_w(gpui::px(420.))
+                .when_some(retry, |d, label| {
+                    d.child(
+                        self.button(
+                            "retry-content",
+                            label,
+                            ButtonStyle::Secondary,
+                            true,
+                            LocalAction::Intent(talk_core::ui::presentation::UiIntent::Refresh(
+                                context,
+                            )),
+                            cx,
+                        )
+                        .mt_1(),
+                    )
+                }),
+        )
+    }
+
     pub(super) fn collection_feedback(
         &self,
         state: CollectionState,
@@ -106,10 +163,9 @@ impl Desktop {
             ContentState::Denied | ContentState::Offline => super::controls::BannerRole::Warning,
             _ => super::controls::BannerRole::Info,
         };
-        let label = format!("{} {}", self.l(title), self.l(detail));
-        self.banner_with_icon(role, &label, Some(symbol))
+        self.notice(role, self.l(title), Some(self.l(detail)), Some(symbol))
             .when(state.retry(), |d| {
-                d.child(self.button(id, "Erneut laden", ButtonStyle::Secondary, true, retry, cx))
+                d.child(self.notice_action(id, "Erneut laden", retry, cx))
             })
     }
 }

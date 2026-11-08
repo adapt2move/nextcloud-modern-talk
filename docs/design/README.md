@@ -12,13 +12,18 @@ are available in Git history, not maintained alongside the current interface.
 - Reuse native controls and retained input entities. Composite fields have one background
   and border; focus must be visible without shifting geometry.
 - Keep confirmed content visible during refresh. Use bounded static skeletons only for
-  initial loads; expose offline, denied, unsupported and uncertain outcomes honestly.
+  initial loads; expose offline, denied, unsupported and uncertain outcomes honestly,
+  at the smallest scope that explains them, with one calm notice style.
+- Keep top-level navigation to search and one Activity destination; the conversation list
+  is the main content and secondary choices sit behind its two menus.
 - Respect Reduce Motion and maintain keyboard access, visible focus, readable contrast
   and text scaling. Styling alone does not establish semantic accessibility.
 - UI strings are localized; user-authored messages are not. Product behavior must not
   depend on translated string matching.
 
 [Tokens](tokens.md) records accessibility targets and palette roles.
+[Shell navigation and status](shell-navigation-and-status.md) explains the sidebar structure,
+the title-bar connection status and the shared notice and error system.
 [Conversation dialogs](conversation-dialogs.md) describes members, bots and room settings.
 [Dependency provenance](native-ui/dependencies.md) and [project notices](../../NOTICE.md)
 cover the native toolkit and assets.

@@ -142,8 +142,15 @@ Use `login-account-store-busy`, `login-account-store-device-changed` and
 destination and expose storage actions instead of a browser-login retry. These
 fixtures never reopen or repair an actual profile.
 
-Use `connection-reconnecting`, `offline-with-queue` and `startup-from-cache` for
-fictional offline/restart presentation. The capture tool waits through the normal
+Use `sidebar-rich` for a realistic room list with unread counts, `sidebar-activity` and
+`sidebar-activity-mentions` for the Activity page, `sidebar-new-menu`, `sidebar-list-menu`
+and `sidebar-archive` for the list menus, and `sidebar-load-failed`, `chat-access-denied`
+and `chat-read-only` for scoped error states. They are fictional and contact no server.
+Export `TALK_UI_MATERIAL_PREVIEW=1` when capturing on Linux so textures and glass render.
+
+Use `connection-reconnecting`, `offline-with-queue`, `connection-details` and
+`startup-from-cache` for fictional offline/restart presentation (the status pill and its
+popover). The capture tool waits through the normal
 five-second grace period for connection scenarios. These fixtures perform no server
 request and do not establish cache restoration, replay or native performance.
 

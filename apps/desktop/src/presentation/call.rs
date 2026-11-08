@@ -1450,7 +1450,6 @@ impl Desktop {
                     .flex()
                     .flex_col()
                     .bg(t.stage)
-                    .children(self.materials.layer(super::controls::Texture::PatternDark, t.reduced_transparency))
                     .children(self.materials.layer(super::controls::Texture::Card, t.reduced_transparency))
                     .text_color(t.stage_text)
                     .child(

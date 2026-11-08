@@ -13,6 +13,7 @@ pub enum Probe {
     Status,
     StatusMessage,
     PeopleCard,
+    ConnectionDetails,
 }
 impl Desktop {
     pub(super) fn control_probe(&self, cx: &Context<Self>) -> gpui::Stateful<Div> {
