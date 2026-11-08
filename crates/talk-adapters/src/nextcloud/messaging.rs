@@ -557,12 +557,22 @@ impl NextcloudClient {
                 unavailable,
             }
         });
-        let thread = message.thread_id.map(|sequence| MessageId {
-            conversation: id,
-            sequence,
-        });
+        // Talk Message::toArray supplies threadId even for ordinary messages
+        // (their own ID, or the topmost quoted parent). Only isThread proves
+        // that the thread service owns this ID. Otherwise the pane's GET and
+        // send preflight both fail with NotFound for a phantom thread.
+        let thread = message
+            .thread_id
+            .filter(|_| message.is_thread == Some(true))
+            .map(|sequence| MessageId {
+                conversation: id,
+                sequence,
+            });
         let thread_replies = message
             .thread_replies
+            // Talk repeats the thread's count on replies as well. Only the
+            // root owns the reply footer; a reply ID is not a thread ID.
+            .filter(|_| message.is_thread == Some(true) && message.thread_id == Some(message.id))
             .and_then(|count| u32::try_from(count).ok());
         let replyable = message.replyable;
         let system = message

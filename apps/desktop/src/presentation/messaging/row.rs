@@ -530,7 +530,7 @@ impl Desktop {
                 content = content.child(self.hint(&label));
             }
         }
-        if !thread && m.reply_count > 0 {
+        if !thread && m.reply_count > 0 && m.metadata.thread.is_none_or(|root| root == m.local_id) {
             let count = self.count(
                 crate::presentation::localization::Count::Replies,
                 m.reply_count.into(),

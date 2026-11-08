@@ -705,6 +705,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudo completar la acción. Vuelve a intentarlo.",
     ),
     (
+        "Die Aktion konnte nicht gestartet werden. Bitte neu laden und erneut versuchen.",
+        "The action could not be started. Please reload and try again.",
+        "No se pudo iniciar la acción. Vuelve a cargar e inténtalo de nuevo.",
+    ),
+    (
         "Die Anmeldung hat zu lange gedauert. Mit einem neuen Link kannst du weitermachen.",
         "Sign-in took too long. Continue with a new link.",
         "El inicio de sesión ha tardado demasiado. Continúa con un enlace nuevo.",
@@ -835,6 +840,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Se desconoce la disponibilidad. Vuelve a cargar.",
     ),
     (
+        "Die Verfügbarkeit konnte nicht bestätigt werden. Bitte erneut laden.",
+        "Availability could not be confirmed. Please reload.",
+        "No se pudo confirmar la disponibilidad. Vuelve a cargar.",
+    ),
+    (
         "Die Vorschau ist nicht bestätigt. Bitte erneut suchen.",
         "The preview is unconfirmed. Search again.",
         "La vista previa no está confirmada. Vuelve a buscar.",
@@ -928,6 +938,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die Änderung konnte nicht bestätigt werden. Bitte neu laden.",
         "The change could not be confirmed. Reload to check its status.",
         "No se pudo confirmar el cambio. Recarga para comprobar su estado.",
+    ),
+    (
+        "Diese Aktion ist für dieses Ziel derzeit nicht verfügbar.",
+        "This action is currently unavailable for this target.",
+        "Esta acción no está disponible para este destino en este momento.",
     ),
     (
         "Diese Aktion ist in diesem Client noch nicht verfügbar.",
@@ -1468,6 +1483,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "In geladenen Inhalten suchen",
         "Search loaded content",
         "Buscar en el contenido cargado",
+    ),
+    (
+        "Inhalte derzeit nicht verfügbar.",
+        "Content is currently unavailable.",
+        "El contenido no está disponible en este momento.",
     ),
     ("Jetzt teilnehmen", "Join now", "Unirse ahora"),
     ("Kalender", "Calendar", "Calendario"),

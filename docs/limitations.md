@@ -153,6 +153,12 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   plus an exhaustion check, and reports an unavailable result if the boundary
   cannot be established within that bound.
 - Threads use the Talk `threads` capability and current room permissions. The
+  `isThread` message flag identifies actual threads; `threadId` alone also
+  appears on ordinary messages and does not enable the thread pane. The
+  documented feature flags also govern messaging on unrecognized server
+  versions; those deployments remain unverified. No additional thread-enable
+  configuration key is required. Thread replies and quoted pane replies use
+  the same admitted outgoing queue as the room composer. The
   account-wide list contains the subscriptions the server returns for rooms
   already known to the account, in pages of 50. Its last page is retained for
   the session; the list is discovered again after restart. The account-wide

@@ -41,6 +41,19 @@ class Relay:
         for task in tasks:task.cancel()
         await asyncio.gather(*tasks,return_exceptions=True)
 
+async def trigger_reminders(lab,directory):
+    async def wait_for_request():
+        while not (directory/'reminder.request').exists():
+            await asyncio.sleep(.1)
+    await asyncio.wait_for(wait_for_request(),180)
+    job_class=r'OCA\Talk\BackgroundJob\Reminder'
+    rows=await asyncio.to_thread(lab.occ,'background-job:list','--class',job_class)
+    jobs=[parts[1].strip() for row in rows.splitlines()
+          if len(parts:=row.split('|'))>=4 and parts[1].strip().isdigit() and parts[2].strip()==job_class]
+    lab.require('alpha.reminder-job',len(jobs)==1)
+    await asyncio.to_thread(lab.occ,'background-job:execute',jobs[0],'--force-execute')
+    (directory/'reminder.done').touch(mode=0o600)
+
 async def exercise(state,manifest,output):
     root=pathlib.Path(__file__).resolve().parents[2]
     source=json.loads(pathlib.Path(manifest).read_text())
@@ -54,11 +67,17 @@ async def exercise(state,manifest,output):
         lab=restore(record)
         room=lab.request('lab_alice','POST','/ocs/v2.php/apps/spreed/api/v4/room',body={'roomType':2,'roomName':'Alpha scoped fixture'},expected=(201,),name='alpha-create-room')
         lab.request('lab_alice','POST','/ocs/v2.php/apps/spreed/api/v4/room/'+room['token']+'/participants',body={'newParticipant':'lab_bob','source':'users'},name='alpha-member-intake')
+        listed=lab.request('lab_bob','POST','/ocs/v2.php/apps/spreed/api/v4/room',body={'roomType':2,'roomName':'Disposable discovery fixture'},expected=(201,),name='alpha-create-listed')
+        lab.request('lab_bob','PUT','/ocs/v2.php/apps/spreed/api/v4/room/'+listed['token']+'/listable',body={'scope':1},name='alpha-listable')
+        lab.request('lab_bob','PUT','/ocs/v2.php/apps/spreed/api/v4/room/'+listed['token']+'/description',body={'description':'Synthetic open conversation'},name='alpha-description')
         directory=pathlib.Path(tempfile.mkdtemp(prefix='nmt-alpha-protocol-',dir='/run'))
         os.chmod(directory,0o700)
         intake=directory/'alice.json'
         intake.write_text(json.dumps({'origin':record['development']['client_url'],'user':'lab_alice','password':lab.passwords['lab_alice'],'room':room}))
         os.chmod(intake,0o600)
+        member=directory/'bob.json'
+        member.write_text(json.dumps({'origin':record['development']['client_url'],'user':'lab_bob','password':lab.passwords['lab_bob'],'room':room}))
+        os.chmod(member,0o600)
         parsed=urllib.parse.urlsplit(record['development']['client_url'])
         host=urllib.parse.urlsplit(record['development']['vm_url']).hostname
         env=os.environ.copy();env['PATH']='/root/.cargo/bin:'+env.get('PATH','');env['NMT_FIXTURE_DIR']=str(directory);env['RUST_BACKTRACE']='0'
@@ -69,9 +88,16 @@ async def exercise(state,manifest,output):
             async with Relay(host,parsed.port):
                 with (target/'backend.log').open('w') as log:
                     process=await asyncio.create_subprocess_exec(*command,cwd=root,env=env,stdout=log,stderr=asyncio.subprocess.STDOUT)
-                    try:rc=await asyncio.wait_for(process.wait(),240)
+                    reminder_job=asyncio.create_task(trigger_reminders(lab,directory))
+                    try:
+                        rc=await asyncio.wait_for(process.wait(),240)
+                        if rc==0:await reminder_job
                     except BaseException:
-                        process.kill();await process.wait();raise
+                        if process.returncode is None:process.kill();await process.wait()
+                        raise
+                    finally:
+                        reminder_job.cancel()
+                        await asyncio.gather(reminder_job,return_exceptions=True)
             report={'profile':record['development']['profile'],'source':source,'command':command,'exit_code':rc,'seconds':round(time.monotonic()-start,2),'scope':'synthetic released Talk protocol fixture, no GUI/media claim'}
             (target/'result.json').write_text(json.dumps(report,indent=2)+'\n')
             print(json.dumps({'profile':report['profile'],'exit_code':rc,'seconds':report['seconds']}),flush=True)
@@ -79,6 +105,7 @@ async def exercise(state,manifest,output):
         finally:
             shutil.rmtree(directory)
             lab.request('lab_alice','DELETE','/ocs/v2.php/apps/spreed/api/v4/room/'+room['token'],expected=(200,404),name='alpha-cleanup-room')
+            lab.request('lab_bob','DELETE','/ocs/v2.php/apps/spreed/api/v4/room/'+listed['token'],expected=(200,404),name='alpha-cleanup-listed')
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--state',required=True);parser.add_argument('--manifest',required=True);parser.add_argument('--output',required=True)
     args=parser.parse_args();sys.exit(asyncio.run(exercise(args.state,args.manifest,args.output)))

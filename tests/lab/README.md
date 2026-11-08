@@ -72,6 +72,14 @@ configure Janus or exercise media. See the [backend lab guide](../../docs/backen
 
 Browser authorization, revoked-credential/callback races, guest/file/federation workflows, most preset restrictions, Keychain fallback, GPUI, accessibility, WebRTC/audio/video/screen sharing, E2EE, HPB media/TURN, recording, native performance and full parity remain **not tested here**. No native client or full compatibility pass is implied by these harness commands.
 
+`thread_reply.py --state PRIVATE_STATE --binary DEV_PROBES_BINARY --output NEW_DIRECTORY`
+uses a running development profile to open a real thread through native GPUI,
+type a reply with X11 keyboard input, press Enter, and assert one canonical
+reply both on the server and in the pane with the editor cleared. It retains
+before/after images and content-free probe state. Run one profile at a time.
+This separate Linux Xvfb/Mesa interaction check does not qualify macOS input,
+native semantic accessibility or production TLS.
+
 The recovery relay also accepts fixed `latency-1500` / `latency-4000` modes,
 `slow-poll` (four seconds on forward chat/signaling polls), and deterministic
 `intermittent` read faults cycling 502, 504 and dropped connections. Each mode
