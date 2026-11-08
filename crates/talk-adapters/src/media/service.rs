@@ -632,6 +632,7 @@ mod screen_tests {
                     recording_control: None,
                     recording_pending: false,
                     recording_uncertain: false,
+                    encrypted: false,
                     hand_supported: false,
                     hand_raised: false,
                     reactions: talk_core::bounded::Page::empty(),

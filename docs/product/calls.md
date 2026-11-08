@@ -49,7 +49,7 @@ Server recording controls require current moderator authority, recording capabil
 
 ## CALL-011
 
-Call E2EE is currently unsupported. Block required encryption or unknown required protection; never downgrade. Transport encryption, classified privacy and chat/file storage are distinct. Future support requires compatible key lifecycle and verified negotiated media protection, not merely a capability or encrypted flag.
+Call E2EE follows the Talk web client's protocol: Olm key sessions over call signaling, one sender key per participant, AES-GCM frame encryption with a clear codec header, rotation when somebody leaves and a ratchet when somebody joins. Required or unknown required protection starts the key exchange with the call; if it cannot start, the call ends and media is never sent unencrypted. Frames that cannot be opened are dropped. The lock in the call header reports only what this client does; it is not inferred from a capability or a server flag. Transport encryption, classified privacy and chat/file storage are distinct. Interoperability beyond the checks in [limitations](../limitations.md) is not established.
 
 ## CALL-012
 

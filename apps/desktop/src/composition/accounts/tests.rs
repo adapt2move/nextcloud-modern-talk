@@ -746,6 +746,7 @@ fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
             recording_control: None,
             recording_pending: false,
             recording_uncertain: false,
+            encrypted: false,
             hand_supported: false,
             hand_raised: false,
             reactions: Page::empty(),

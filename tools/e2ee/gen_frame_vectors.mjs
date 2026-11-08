@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Derived from Nextcloud Talk (spreed) src/utils/e2ee, copyright Nextcloud GmbH and
+// contributors, AGPL-3.0-or-later, which in turn builds on Jitsi's end-to-end
+// encryption (Apache-2.0, Jitsi team at 8x8 and the community). Development
+// reference only; it is not part of any shipped package.
 // Generates frame-cipher vectors with the exact WebCrypto steps of Nextcloud Talk's
 // web client (spreed src/utils/e2ee/crypto-utils.js and JitsiEncryptionWorkerContext.js),
 // so the native cipher is checked against the reference rather than against itself.

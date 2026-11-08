@@ -150,10 +150,6 @@ impl Encryptor {
     pub(crate) fn has_key(&self) -> bool {
         self.ring.has_key()
     }
-    pub(crate) fn clear(&mut self) {
-        self.ring.clear();
-        self.counters.clear();
-    }
 
     /// The IV is `ssrc | timestamp | counter`; it only has to be unique per key,
     /// because receivers read it from the trailer.

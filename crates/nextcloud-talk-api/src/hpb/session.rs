@@ -450,6 +450,25 @@ async fn connected(
                             let _ = reply.send(sent);
                             if let Some(error) = failed { return Err(error); }
                         }
+                        Command::Encryption { generation, peer, payload, deadline: end, cancel, reply } => {
+                            let value = {
+                                let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
+                                let Some(room) = &state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
+                                if room.generation != generation || !room.joined || room.cancellation.is_cancelled() || reply.is_closed() || cancel.is_cancelled() {
+                                    let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
+                                }
+                                let Some(member) = room.members.iter().find(|member| member.talk == peer && peer != room.own) else {
+                                    let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
+                                };
+                                json!({"type":"message","message":{"recipient":{"type":"session","sessionid":member.sfu.0.as_str()},"data":{"type":"message","to":member.sfu.0.as_str(),"payload":payload}}})
+                            };
+                            let mut value = value;
+                            value["id"] = json!(next_id(counter)?);
+                            let sent = until(shared, end, &cancel, write(socket, value)).await;
+                            let failed = sent.as_ref().err().copied();
+                            let _ = reply.send(sent);
+                            if let Some(error) = failed { return Err(error); }
+                        }
                         Command::Typing { generation, started, deadline: end, cancel, reply } => {
                             let peers = {
                                 let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;

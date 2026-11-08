@@ -624,6 +624,9 @@ pub struct Snapshot {
     pub recording_control: Option<bool>,
     pub recording_pending: bool,
     pub recording_uncertain: bool,
+    /// Media of this call is end-to-end encrypted by this client; never inferred
+    /// from a capability or a server flag.
+    pub encrypted: bool,
     pub hand_supported: bool,
     pub hand_raised: bool,
     pub reactions: crate::bounded::Page<crate::bounded::Text<64>, 32>,

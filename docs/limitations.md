@@ -11,10 +11,23 @@ of complete parity with the official clients.
   baselines are 34.0.5 / 24.0.6 and 35.0.2 / 25.0.6; other patches and compatible
   backports are not automatically verified. Calls select `conversation-v4` and
   `signaling-v3` by capability rather than a major-version allowlist.
-- **Call E2EE is unsupported.** Admission blocks when
-  `call-end-to-end-encryption` is advertised and its configuration does not
-  explicitly disable it. Transport encryption is not call E2EE. Guest and
-  federated media are unavailable.
+- **Call E2EE follows Talk's web protocol and is not yet proven in a live call
+  with another client.** When `call-end-to-end-encryption` is advertised and not
+  disabled, every audio and video frame is sealed before packetization
+  (AES-128-GCM, HKDF-SHA256 keys, per-participant sender keys over Olm sessions,
+  rotation on departure, ratchet on join) and frames that cannot be opened are
+  dropped; nothing is sent in the clear. Checked: the frame format byte for byte
+  against the web client's own WebCrypto output, the key exchange against Talk's
+  JavaScript on libolm in both roles including rotation, sealed Opus/VP8 through
+  the real RTP and decoder path, and the signaling transport (internal and HPB)
+  in unit tests. **Not checked:** a call with the Talk web client, Android/iOS or
+  an HPB/Janus deployment; mixed encrypted and non-encrypted participants (the
+  web client shows no media from them, and so does this client); lost key
+  messages beyond the 5 s request timeout. Participants are not authenticated
+  beyond the server's session identity: there is no safety-number or key
+  verification. Transport encryption is not call E2EE. Chat and file content are
+  not end-to-end encrypted. Guest and federated media are unavailable. The call
+  header shows a lock only while this client protects the call's media.
 - The call card and local diagnostics distinguish missing policy evidence from
   a prohibition. Unknown required policy stays closed; failed reads retry without
   granting media authority. Ordinary rooms require applicable recording consent;

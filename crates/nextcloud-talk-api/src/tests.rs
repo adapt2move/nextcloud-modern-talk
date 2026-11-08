@@ -1098,6 +1098,38 @@ fn internal_screen_offer_and_payload_free_stop_preserve_camera_batch() {
     ));
 }
 
+#[test]
+fn internal_call_encryption_messages_survive_alongside_media_and_are_bounded() {
+    use signaling::Event;
+    let encryption = |payload: Value| json!({"type":"message","data":json!({"to":"local","from":"remote","type":"message","payload":payload}).to_string()});
+    let start = json!({"id":"1","type":"encryption.start","identity":"abc","key":"def"});
+    let offer = json!({"type":"message","data":json!({"to":"local","from":"remote","sid":"cam","roomType":"video","type":"offer","payload":{"type":"offer","sdp":"v=0\r\n"}}).to_string()});
+    let batch = signaling::parse_batch(
+        &json!([
+            encryption(start.clone()),
+            offer,
+            encryption(json!({"type":"encryption.setkey","key":{"type":1,"body":"x"}}))
+        ]),
+        "local",
+        1,
+    )
+    .unwrap();
+    assert!(
+        matches!(&batch.events()[0], Event::Encryption { payload, wire, from } if *payload == start && wire == from)
+    );
+    assert!(matches!(batch.events()[1], Event::Signal { .. }));
+    assert!(matches!(batch.events()[2], Event::Encryption { .. }));
+    // Addressed to somebody else, oversized, or flooding: the response is refused.
+    let elsewhere = json!({"type":"message","data":json!({"to":"someone-else","from":"remote","type":"message","payload":start}).to_string()});
+    assert!(signaling::parse_batch(&json!([elsewhere]), "local", 1).is_err());
+    let huge = encryption(json!({"type":"encryption.setkey","pad":"x".repeat(9000)}));
+    assert!(signaling::parse_batch(&json!([huge]), "local", 1).is_err());
+    let flood: Vec<Value> = (0..40)
+        .map(|_| encryption(json!({"type":"encryption.start"})))
+        .collect();
+    assert!(signaling::parse_batch(&Value::Array(flood), "local", 1).is_err());
+}
+
 #[tokio::test]
 async fn internal_poll_failure_reports_interruption_then_resume_without_new_authority() {
     let mut replies = join_replies();

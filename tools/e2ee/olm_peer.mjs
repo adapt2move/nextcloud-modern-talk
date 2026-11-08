@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Derived from Nextcloud Talk (spreed) src/utils/e2ee, copyright Nextcloud GmbH and
+// contributors, AGPL-3.0-or-later, which in turn builds on Jitsi's end-to-end
+// encryption (Apache-2.0, Jitsi team at 8x8 and the community). Development
+// reference only; it is not part of any shipped package.
 // A participant running Nextcloud Talk's own key-exchange logic (spreed
 // src/utils/e2ee/encryption.js, same messages, same Olm library) over JSON lines.
 // The Rust test in crates/talk-adapters drives it. Requires `npm ci` in this folder.

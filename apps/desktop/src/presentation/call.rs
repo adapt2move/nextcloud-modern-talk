@@ -1498,6 +1498,22 @@ impl Desktop {
                                     cx,
                                 ))
                             })
+                            .when(call.encrypted, |header| {
+                                header.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .px_3()
+                                        .py_1()
+                                        .rounded_full()
+                                        .bg(t.stage_panel)
+                                        .text_color(t.stage_text)
+                                        .text_size(self.sp(12.))
+                                        .child(self.scaled_icon("lock", 12., t.stage_text))
+                                        .child(self.l("Ende-zu-Ende verschlüsselt")),
+                                )
+                            })
                             .when(call.recording == talk_core::ui::presentation::CallRecordingState::Active, |header| {
                                 header.child(div().px_3().py_1().rounded_full()
                                     .bg(if t.dark { t.danger_bg } else { t.danger })

@@ -158,6 +158,33 @@ impl Room {
         self.signals.push_back((bytes, event));
         Ok(())
     }
+    /// Key-exchange messages are small and few; beyond a bound they are dropped
+    /// (the exchange retries on its own timers) rather than ending the call.
+    fn push_encryption(
+        &mut self,
+        from: PeerSession,
+        wire: PeerSession,
+        payload: serde_json::Value,
+    ) {
+        let bytes = payload.to_string().len() + 512;
+        let count = self
+            .signals
+            .iter()
+            .filter(|(_, event)| matches!(event, Event::Encryption { .. }))
+            .count();
+        if count >= 32 || self.signals.len() >= 84 || self.signal_bytes + bytes > 192 * 1024 {
+            return;
+        }
+        self.signal_bytes += bytes;
+        self.signals.push_back((
+            bytes,
+            Event::Encryption {
+                from,
+                wire,
+                payload,
+            },
+        ));
+    }
     fn push_activity(&mut self, from: PeerSession, activity: crate::signaling::activity::Activity) {
         use crate::signaling::activity::Activity;
         // Coalesce each hand so a delayed raise cannot replace a later lower.
@@ -224,6 +251,14 @@ enum Command {
         cancel: Cancellation,
         reply: oneshot::Sender<Result<(), ErrorKind>>,
     },
+    Encryption {
+        generation: u64,
+        peer: PeerSession,
+        payload: serde_json::Value,
+        deadline: Moment,
+        cancel: Cancellation,
+        reply: oneshot::Sender<Result<(), ErrorKind>>,
+    },
     Send {
         generation: u64,
         stream: StreamKind,
@@ -242,6 +277,7 @@ impl Command {
             | Self::Typing { reply, .. }
             | Self::Send { reply, .. }
             | Self::Activity { reply, .. }
+            | Self::Encryption { reply, .. }
             | Self::ForceMute { reply, .. } => {
                 let _ = reply.send(Err(error));
             }
@@ -778,6 +814,65 @@ impl Route {
 
     /// Activity is ephemeral and never grants media authority. An abandoned
     /// command is dropped by the socket owner instead of retiring the call.
+    /// The SFU session id peers use to address this client.
+    pub(crate) fn own_wire_session(&self) -> Result<PeerSession, ErrorKind> {
+        let state = self
+            .handle
+            .shared
+            .state
+            .lock()
+            .map_err(|_| ErrorKind::Uncertain)?;
+        state.session.clone().ok_or(ErrorKind::Transport)
+    }
+    /// The SFU session id of a mapped call member.
+    pub(crate) fn wire_session(&self, peer: &PeerSession) -> Option<PeerSession> {
+        self.with_room(|room, _| {
+            Ok(room
+                .members
+                .iter()
+                .find(|member| &member.talk == peer)
+                .map(|member| member.sfu.clone()))
+        })
+        .ok()
+        .flatten()
+    }
+    pub(crate) async fn send_encryption(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        payload: serde_json::Value,
+    ) -> Result<(), ErrorKind> {
+        self.handle.shared.validate(context)?;
+        self.with_room(|room, _| {
+            if peer == &room.own || !room.members.iter().any(|member| &member.talk == peer) {
+                return Err(ErrorKind::WrongScope);
+            }
+            Ok(())
+        })?;
+        let (reply, receive) = oneshot::channel();
+        self.handle
+            .commands
+            .try_send(Command::Encryption {
+                generation: self.generation,
+                peer: peer.clone(),
+                payload,
+                deadline: context.deadline,
+                cancel: context.cancellation.clone(),
+                reply,
+            })
+            .map_err(|_| ErrorKind::Busy)?;
+        until(
+            &self.handle.shared,
+            context.deadline,
+            &context.cancellation,
+            async { receive.await.map_err(|_| ErrorKind::Transport)? },
+        )
+        .await?;
+        if self.is_closed() {
+            return Err(ErrorKind::Cancelled);
+        }
+        Ok(())
+    }
     pub(crate) async fn send_activity(
         &self,
         context: &OperationContext,

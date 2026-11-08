@@ -125,6 +125,11 @@ impl PeerSession {
     pub fn matches(&self, other: &Self) -> bool {
         self == other
     }
+    /// The exact session id, for the end-to-end key exchange that orders and
+    /// addresses sessions by it. It is session scoped and not logged.
+    pub fn wire_text(&self) -> &str {
+        self.0.as_str()
+    }
     pub fn local_should_offer(&self, peer: &Self) -> bool {
         peer.0.as_str() < self.0.as_str()
     }
@@ -215,6 +220,16 @@ pub enum Event {
         signal: Signal,
     },
     Membership(Vec<Member>),
+    /// A call end-to-end encryption message (`encryption.*`) from another
+    /// session. `wire` is the session id both clients compare when deciding who
+    /// opens a key session; behind an HPB it is the SFU session, otherwise it
+    /// equals `from`. The payload is bounded, validated JSON the caller may
+    /// forward only to the key exchange.
+    Encryption {
+        from: PeerSession,
+        wire: PeerSession,
+        payload: Value,
+    },
     /// Transient peer activity, scoped to this signaling session.
     Activity {
         from: PeerSession,
@@ -240,6 +255,28 @@ pub struct Member {
     pub in_call: Option<u32>,
     pub permissions: u64,
 }
+/// Largest accepted `encryption.*` payload and per-response message count.
+pub(crate) const ENCRYPTION_PAYLOAD_MAX: usize = 8 * 1024;
+const ENCRYPTION_PER_BATCH: usize = 32;
+
+/// A call message carrying key-exchange data, or None for any other message.
+pub(crate) fn encryption_payload(data: &Value) -> Result<Option<Value>, ErrorKind> {
+    if data["type"].as_str() != Some("message") {
+        return Ok(None);
+    }
+    let payload = &data["payload"];
+    let Some(kind) = payload["type"].as_str() else {
+        return Ok(None);
+    };
+    if !kind.starts_with("encryption.") {
+        return Ok(None);
+    }
+    if kind.len() > 32 || payload.to_string().len() > ENCRYPTION_PAYLOAD_MAX {
+        return Err(ErrorKind::TooLarge);
+    }
+    Ok(Some(payload.clone()))
+}
+
 /// One completely validated response, at most 84 events / 192 KiB retained signal text.
 pub struct SignalBatch {
     pub(crate) events: Vec<Event>,
@@ -391,6 +428,7 @@ pub(crate) fn parse_batch(
     let mut events = Vec::with_capacity(rows.len());
     let (mut descriptions, mut candidates, mut snapshots, mut hints, mut activities, mut retained) =
         (0, 0, 0, 0, 0, 0usize);
+    let mut encryptions = 0usize;
     for row in rows {
         match row["type"].as_str() {
             Some("usersInRoom") => {
@@ -446,6 +484,23 @@ pub(crate) fn parse_batch(
             Some("message") => {
                 let raw = text(row.get("data"), 131072)?;
                 let data = crate::json::json(raw.as_bytes())?;
+                if let Some(payload) = encryption_payload(&data)? {
+                    if data["to"].as_str() != Some(local) {
+                        return Err(ErrorKind::WrongScope);
+                    }
+                    encryptions += 1;
+                    if encryptions > ENCRYPTION_PER_BATCH {
+                        return Err(ErrorKind::TooLarge);
+                    }
+                    let from = PeerSession::parse(text(data.get("from"), 512)?)?;
+                    retained += from.0.len() + payload.to_string().len();
+                    events.push(Event::Encryption {
+                        wire: from.clone(),
+                        from,
+                        payload,
+                    });
+                    continue;
+                }
                 let stream = StreamKind::parse(&data["roomType"])?;
                 if data["to"].as_str() != Some(local) {
                     return Err(ErrorKind::WrongScope);

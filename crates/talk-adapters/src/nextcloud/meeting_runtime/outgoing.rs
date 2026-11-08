@@ -37,6 +37,7 @@ pub(super) async fn run(
     mut writer: MeetingActivityWriter,
     mut hands: watch::Receiver<Option<Message>>,
     mut reactions: mpsc::Receiver<Message>,
+    mut encryption: mpsc::Receiver<(PeerSession, serde_json::Value)>,
     session: Arc<Session>,
     network: NetworkRuntime,
     cancel: Cancellation,
@@ -53,6 +54,13 @@ pub(super) async fn run(
                 pending_hand = merge_hands(pending_hand, hands.borrow_and_update().clone());
                 retry_at = Instant::now();
                 backoff = Duration::from_millis(300);
+            }
+            message = encryption.recv() => {
+                // Key-exchange messages go out at once; the exchange owns their timeouts.
+                if let Some((peer, payload)) = message {
+                    let ctx = context(session.scope, &network, &cancel, 1500);
+                    let _ = writer.send_encryption(&ctx, &peer, &payload).await;
+                }
             }
             _ = tick.tick() => {}
         }

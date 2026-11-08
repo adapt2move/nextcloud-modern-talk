@@ -18,7 +18,10 @@ use crate::media::{
 };
 use nextcloud_talk_api::{
     self as api,
-    meeting::{MeetingReader, MeetingStop, MeetingWriter, Observation, ObservationError, Topology},
+    meeting::{
+        MeetingReader, MeetingStop, MeetingWriter, Observation, ObservationError, Topology,
+        WireResolver,
+    },
     models::ParticipantFlags,
     signaling::{
         DescriptionKind, Event as SignalEvent, Negotiation, PeerSession, Signal, SignalBatch,
@@ -40,6 +43,7 @@ use talk_core::{
     policy::{Observed, RecordingState},
 };
 use tokio::sync::{mpsc, watch};
+mod e2ee;
 const OBSERVATIONS: [Observation; 6] = [
     Observation::Account,
     Observation::Capabilities,
@@ -53,7 +57,7 @@ pub(crate) const SUPPORT: NativeSupport = NativeSupport {
     video: true,
     screen: cfg!(any(target_os = "linux", target_os = "macos")),
     external_signaling: true,
-    end_to_end_encryption: false,
+    end_to_end_encryption: true,
 };
 pub(crate) const DEVICES: DevicePermissions = DevicePermissions {
     microphone: true,
@@ -220,6 +224,7 @@ impl LiveCall {
             recording_control: None,
             recording_pending: false,
             recording_uncertain: false,
+            encrypted: false,
             hand_supported: false,
             hand_raised: false,
             reactions: talk_core::bounded::Page::empty(),
@@ -244,6 +249,7 @@ impl LiveCall {
         let (policy_tx, policy) = mpsc::channel(2);
         let (hand_tx, hands) = watch::channel(None);
         let (reaction_tx, reactions) = mpsc::channel(4);
+        let (encryption_tx, encryption_rx) = mpsc::channel(64);
         let (ring_tx, ring_requests) = mpsc::channel(1);
         let (ring_result_tx, ring_results) = mpsc::channel(2);
         let moderation_writer = writer
@@ -264,12 +270,14 @@ impl LiveCall {
             activity_writer,
             hands,
             reactions,
+            encryption_rx,
             session.clone(),
             network.clone(),
             cancel.clone(),
         ));
         let own = writer.own_session()?;
         let topology = writer.topology();
+        let wires = writer.wire_resolver();
         tokio::spawn(read_loop(
             reader,
             signals_tx,
@@ -303,6 +311,8 @@ impl LiveCall {
             cancel,
             stop.clone(),
             topology,
+            wires,
+            encryption_tx,
         ));
         Ok(Self {
             scope,
@@ -569,8 +579,15 @@ async fn write_loop(
     session.close();
     let _ = writer.leave(&context(scope, &network, &cancel, 3000)).await;
 }
-fn configuration(bundle: &Bundle) -> RtcConfiguration {
+/// Peer connection settings. With call end-to-end encryption the connection gets
+/// the key holders for `peer` (a connection never exists without them then).
+fn configuration(
+    bundle: &Bundle,
+    e2ee: Option<&mut e2ee::Call>,
+    peer: &PeerSession,
+) -> RtcConfiguration {
     RtcConfiguration {
+        e2ee: e2ee.map(|call| call.keys(peer)),
         ice_servers: bundle
             .settings
             .ice_servers
@@ -583,6 +600,14 @@ fn configuration(bundle: &Bundle) -> RtcConfiguration {
             .collect(),
         ..Default::default()
     }
+}
+/// Whether this call must be end-to-end encrypted (Talk's `isEnabled`: advertised
+/// and not explicitly disabled). Unknown policy is treated as required.
+fn requires_e2ee(bundle: &Bundle) -> bool {
+    !matches!(
+        bundle.inputs.host_configuration,
+        Observed::Known { value, .. } if !value.encryption_required
+    )
 }
 fn sid() -> Result<Negotiation, ()> {
     let mut value = [0; 16];
@@ -631,6 +656,7 @@ async fn reconcile(
     topology: Topology,
     sfu_members: &[PeerSession],
     participants: &activity::Participants,
+    mut e2ee: Option<&mut e2ee::Call>,
 ) -> Result<(), ()> {
     let wishes = session.publication();
     let local_media = wishes.microphone || wishes.camera;
@@ -659,7 +685,7 @@ async fn reconcile(
             .iter()
             .any(|p| p.role == Role::Publisher && p.stream == StreamKind::Camera)
     {
-        let mut config = configuration(bundle);
+        let mut config = configuration(bundle, e2ee.as_deref_mut(), own);
         config.role = Role::Publisher;
         let mut engine = NativePeer::new(config).await.map_err(|_| ())?;
         camera_guards(&mut engine, session);
@@ -729,7 +755,7 @@ async fn reconcile(
         } else {
             Role::Direct
         };
-        let mut config = configuration(bundle);
+        let mut config = configuration(bundle, e2ee.as_deref_mut(), &incoming.session);
         config.role = role;
         let mut engine = NativePeer::new(config).await.map_err(|_| ())?;
         camera_guards(&mut engine, session);
@@ -813,6 +839,8 @@ async fn media_loop(
     cancel: Cancellation,
     stop: MeetingStop,
     topology: Topology,
+    wires: WireResolver,
+    encryption_tx: mpsc::Sender<(PeerSession, serde_json::Value)>,
 ) {
     let scope = call.scope();
     let started = Instant::now();
@@ -850,6 +878,19 @@ async fn media_loop(
     let mut refreshes = 1u64;
     let mut stage = "initial peer reconciliation";
     let result: Result<(), ()> = async {
+        // Required call encryption is part of the call from its first frame. An
+        // owner that cannot start it ends the call; it never falls back to plain media.
+        let mut e2ee = if requires_e2ee(&bundle) {
+            stage = "call encryption keys";
+            let own_wire = wires.own().map_err(|_| ())?;
+            let resolve = wires.clone();
+            Some(
+                e2ee::Call::start(&own_wire, Arc::new(move |peer| resolve.peer(peer)), encryption_tx)
+                    .map_err(|_| ())?,
+            )
+        } else {
+            None
+        };
         reconcile_participants(&mut participants, &bundle, &invitee_ids)?;
         while session.live() && !stop.is_closed() && !cancel.is_cancelled() {
             tick.tick().await;
@@ -1000,7 +1041,7 @@ async fn media_loop(
                                 if !bundle.peers.iter().any(|p| p.session == from)
                                     || peers.iter().any(|p| p.stream == StreamKind::Screen) { continue; }
                                 if !matches!(&signal, Signal::Description(s) if s.kind() == DescriptionKind::Offer) { continue; }
-                                let mut config = configuration(&bundle);
+                                let mut config = configuration(&bundle, e2ee.as_mut(), &from);
                                 config.role = Role::Subscriber;
                                 let Ok(mut engine) = NativePeer::new(config).await else { continue; };
                                 engine.screen_profile();
@@ -1131,6 +1172,11 @@ async fn media_loop(
                                 }
                             }
                         }
+                        SignalEvent::Encryption { from, wire, payload } => {
+                            if let Some(call) = e2ee.as_mut() {
+                                call.message(Instant::now(), &from, &wire, &payload);
+                            }
+                        }
                         SignalEvent::PolicyChanged | SignalEvent::Hint { .. } => { refresh_needed = true; }
                     }
                 }
@@ -1148,10 +1194,18 @@ async fn media_loop(
                     refreshes = refreshes.saturating_add(1);
                     received_policy = next.after;
                     bundle = next.bundle;
+                    // A call that became encrypted while we were not keyed cannot
+                    // continue; a new admission starts the exchange from the beginning.
+                    if e2ee.is_none() && requires_e2ee(&bundle) { return Err(()); }
                     reconcile_participants(&mut participants, &bundle, &invitee_ids)?;
                 }
             }
             let policy_ready = transport_ready && received_policy >= required_policy;
+            if let Some(call) = e2ee.as_mut() {
+                let members: Vec<PeerSession> = bundle.peers.iter().map(|p| p.session.clone()).collect();
+                call.sync(Instant::now(), &members);
+                call.poll(Instant::now());
+            }
             if !call.wishes().microphone && !call.wishes().camera {
                 camera_offer_pending = true;
             }
@@ -1198,7 +1252,7 @@ async fn media_loop(
                 }
                 reconcile(&mut peers, &bundle, &own, &writes,
                     &session,
-                    topology, &sfu_members, &participants).await?;
+                    topology, &sfu_members, &participants, e2ee.as_mut()).await?;
                 limit
             } else {
                 session.suspend();
@@ -1243,7 +1297,7 @@ async fn media_loop(
                 for destination in destinations {
                     if peers.iter().any(|p| p.stream == StreamKind::Screen && p.session == destination && p.role != Role::Subscriber) { continue; }
                     if peers.iter().filter(|p| p.stream == StreamKind::Screen && p.role != Role::Subscriber).count() >= 4 { break; }
-                    let mut config = configuration(&bundle);
+                    let mut config = configuration(&bundle, e2ee.as_mut(), &destination);
                     config.role = if topology == Topology::Sfu { Role::Publisher } else { Role::Direct };
                     let role = config.role;
                     let mut engine = NativePeer::new(config).await.map_err(|_| ())?; engine.screen_profile();
@@ -1299,7 +1353,7 @@ async fn media_loop(
                         && since.elapsed() >= Duration::from_millis(500u64 << (2 * peer.restarts)) {
                         peer.restarts += 1; peer.restart_pending = false;
                         if peer.role == Role::Subscriber {
-                            let mut config = configuration(&bundle); config.role = Role::Subscriber;
+                            let mut config = configuration(&bundle, e2ee.as_mut(), &peer.session); config.role = Role::Subscriber;
                             peer.engine.close();
                             peer.engine = NativePeer::new(config).await.map_err(|_| ())?;
                             if peer.stream == StreamKind::Screen { peer.engine.screen_profile(); }
@@ -1551,6 +1605,7 @@ async fn media_loop(
                 } else { None };
                 snapshot.recording_pending = recording_pending.is_some();
                 snapshot.recording_uncertain = recording_uncertain;
+                snapshot.encrypted = e2ee.is_some();
                 snapshot.revision = snapshot.revision.saturating_add(1);
             }
         }

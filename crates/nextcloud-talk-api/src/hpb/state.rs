@@ -207,6 +207,31 @@ impl Shared {
                     }
                     return Ok(());
                 }
+                if let Some(payload) = crate::signaling::encryption_payload(data)? {
+                    let message = &value["message"];
+                    if message["sender"]["type"].as_str() != Some("session") {
+                        return Ok(());
+                    }
+                    let Ok(sender) = wire::text(&message["sender"]["sessionid"], 512)
+                        .and_then(PeerSession::parse)
+                    else {
+                        return Ok(());
+                    };
+                    if data.get("from").is_some()
+                        && data["from"].as_str() != Some(sender.0.as_str())
+                    {
+                        return Ok(());
+                    }
+                    if let Some(member) = room
+                        .members
+                        .iter()
+                        .find(|member| member.sfu == sender && member.talk != room.own)
+                    {
+                        let from = member.talk.clone();
+                        room.push_encryption(from, sender, payload);
+                    }
+                    return Ok(());
+                }
                 if matches!(data["type"].as_str(), Some("raiseHand" | "reaction")) {
                     let message = &value["message"];
                     if message["sender"]["type"].as_str() != Some("session")

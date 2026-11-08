@@ -1879,6 +1879,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             },
             recording_pending: false,
             recording_uncertain: false,
+            encrypted: false,
             hand_supported: matches!(
                 scenario,
                 "call-gallery" | "call-participants-raised" | "call-speaker" | "call-reactions"
@@ -3638,6 +3639,7 @@ impl NativeDesktopPort for DevelopmentPort {
                     recording_control: None,
                     recording_pending: false,
                     recording_uncertain: false,
+                    encrypted: false,
                     hand_supported: false,
                     hand_raised: false,
                     reactions: Page::empty(),

@@ -84,7 +84,7 @@ Calls use typed join/leave and participant observation, with internal signaling 
 
 The protocol owner maintains one account-bound HPB WebSocket session when the server supplies usable external-signaling settings. TLS uses native roots; reconnect and resume remain finite. Publisher/subscriber routes correlate HPB and Talk session identities, while current REST membership and policy authorize media. Live events invalidate bounded application observations; they do not grant capture, expose credentials or replace authoritative reads.
 
-The qualified profile uses Talk 25.0.6, signaling 2.1.1 and Janus 1.3.0. UDP STUN and TURN are supported by the pinned media engine; TCP/TLS TURN and live credential rotation remain unavailable. Guest/federated media, required call E2EE and screen publication are outside the profile. Unknown or unavailable required evidence leaves the action unavailable. A signaling receipt or local data-channel send is not proof of recipient delivery.
+The qualified profile uses Talk 25.0.6, signaling 2.1.1 and Janus 1.3.0. UDP STUN and TURN are supported by the pinned media engine; TCP/TLS TURN and live credential rotation remain unavailable. Guest/federated media and screen publication are outside the profile. Call E2EE is implemented to the Talk web protocol but has no live interoperability evidence in this profile ([limitations](../limitations.md)). Unknown or unavailable required evidence leaves the action unavailable. A signaling receipt or local data-channel send is not proof of recipient delivery.
 
 ## Authoritative account rejection
 

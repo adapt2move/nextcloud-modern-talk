@@ -4,6 +4,7 @@
 
 // These private interfaces are exercised by the native diagnostic driver. They
 // are intentionally not reachable from presentation or a production call grant.
+pub(crate) mod e2ee;
 #[cfg(unix)]
 #[allow(dead_code)]
 pub(crate) mod runtime;
@@ -12,9 +13,6 @@ pub(crate) mod runtime;
 pub(crate) mod supervisor;
 #[allow(dead_code)]
 pub(crate) mod wire;
-// Not reachable from a call until the key exchange and media hooks are connected.
-#[allow(dead_code)]
-pub(crate) mod e2ee;
 
 use talk_core::ids::{AccountScope, CallScope};
 use talk_core::policy::Moment;

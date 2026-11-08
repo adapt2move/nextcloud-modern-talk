@@ -1339,6 +1339,80 @@ async fn stopped_camera_subscription_can_readmit_a_current_member_without_old_si
     );
 }
 #[test]
+fn call_encryption_needs_a_mapped_sender_carries_both_session_ids_and_never_ends_the_call() {
+    let (_client, binding, _) = account();
+    let shared = state(binding);
+    let message = |sender: &str, payload: serde_json::Value| {
+        json!({"type":"message","message":{
+            "sender":{"type":"session","sessionid":sender},
+            "data":{"type":"message","to":"hpb-own","payload":payload}}})
+    };
+    let start = json!({"id":"1","type":"encryption.start","identity":"a","key":"b"});
+    // Unmapped sessions are ignored.
+    shared
+        .incoming(&message("hpb-other", start.clone()))
+        .unwrap();
+    assert!(
+        shared
+            .state
+            .lock()
+            .unwrap()
+            .room
+            .as_ref()
+            .unwrap()
+            .signals
+            .is_empty()
+    );
+    shared.incoming(&json!({"type":"event","event":{"target":"room","type":"join","join":[{"sessionid":"hpb-other","roomsessionid":"talk-other"}]}})).unwrap();
+    shared
+        .incoming(&message("hpb-other", start.clone()))
+        .unwrap();
+    // Not key exchange: no event.
+    shared
+        .incoming(&message("hpb-other", json!({"type":"other"})))
+        .unwrap();
+    {
+        let locked = shared.state.lock().unwrap();
+        let signals: Vec<_> = locked
+            .room
+            .as_ref()
+            .unwrap()
+            .signals
+            .iter()
+            .filter(|(_, event)| matches!(event, Event::Encryption { .. }))
+            .collect();
+        assert_eq!(signals.len(), 1);
+        assert!(
+            matches!(&signals[0].1, Event::Encryption { from, wire, payload }
+            if from == &peer("talk-other") && wire == &peer("hpb-other") && *payload == start)
+        );
+    }
+    // An oversized payload is refused with a protocol error; a flood is dropped,
+    // not turned into a cancelled call.
+    assert!(
+        shared
+            .incoming(&message(
+                "hpb-other",
+                json!({"type":"encryption.setkey","pad":"x".repeat(9000)})
+            ))
+            .is_err()
+    );
+    for _ in 0..100 {
+        shared
+            .incoming(&message("hpb-other", start.clone()))
+            .unwrap();
+    }
+    let locked = shared.state.lock().unwrap();
+    let room = locked.room.as_ref().unwrap();
+    assert!(!room.cancellation.is_cancelled());
+    let encryptions = room
+        .signals
+        .iter()
+        .filter(|(_, event)| matches!(event, Event::Encryption { .. }))
+        .count();
+    assert!(encryptions <= 32);
+}
+#[test]
 fn call_activity_requires_a_mapped_sender_and_never_crowds_out_policy() {
     use crate::signaling::activity::Activity;
     let (_client, binding, _) = account();

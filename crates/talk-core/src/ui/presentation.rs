@@ -589,6 +589,8 @@ pub struct CallView {
     pub recording_control: Option<bool>,
     pub recording_pending: bool,
     pub recording_uncertain: bool,
+    /// Call media is end-to-end encrypted by this client.
+    pub encrypted: bool,
     pub hand_supported: bool,
     pub hand_raised: bool,
     pub reactions: Page<Text<64>, 32>,

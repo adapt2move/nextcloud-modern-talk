@@ -9,7 +9,7 @@ use crate::{
     transport::{MeetingLifetime, Transport},
 };
 use reqwest::Method;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::sync::Arc;
 use zeroize::Zeroizing;
 
@@ -89,6 +89,29 @@ pub struct MeetingReader {
     transport: Transport,
     binding: Arc<Binding>,
 }
+/// Maps Talk call identities to the session ids both clients compare when they
+/// open end-to-end key sessions: the SFU session behind an HPB, the call
+/// session itself otherwise.
+#[derive(Clone)]
+pub struct WireResolver {
+    binding: Arc<Binding>,
+}
+impl WireResolver {
+    pub fn own(&self) -> Result<PeerSession, ErrorKind> {
+        match &self.binding.hpb {
+            Some(route) => route.own_wire_session(),
+            None => PeerSession::parse(&self.binding.session),
+        }
+    }
+    /// None while the participant has no mapped SFU session yet.
+    pub fn peer(&self, peer: &PeerSession) -> Option<PeerSession> {
+        match &self.binding.hpb {
+            Some(route) => route.wire_session(peer),
+            None => Some(peer.clone()),
+        }
+    }
+}
+
 pub struct MeetingWriter {
     transport: Transport,
     binding: Arc<Binding>,
@@ -618,6 +641,55 @@ impl MeetingActivityWriter {
     }
 }
 
+impl MeetingActivityWriter {
+    /// Send one call end-to-end encryption message to a participant. Delivery is
+    /// not proven by the receipt; the key exchange owns its timeouts.
+    pub async fn send_encryption(
+        &mut self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        payload: &Value,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        if peer.0.as_str() == self.binding.session.as_str()
+            || crate::signaling::encryption_payload(&json!({"type":"message","payload":payload}))
+                .map_err(|e| self.binding.error(e))?
+                .is_none()
+        {
+            return Err(self.binding.error(ErrorKind::WrongScope));
+        }
+        if let Some(route) = &self.binding.hpb {
+            route
+                .send_encryption(&context, peer, payload.clone())
+                .await
+                .map_err(|e| self.binding.error(e))?;
+        } else {
+            let inner = json!({"to":peer.0.as_str(),"type":"message","payload":payload});
+            let messages = serde_json::to_string(&[json!({
+                "ev":"message","sessionId":self.binding.session.as_str(),"fn":inner.to_string()
+            })])
+            .map_err(|_| self.binding.error(ErrorKind::Malformed))?;
+            let route = format!(
+                "ocs/v2.php/apps/spreed/api/v3/signaling/{}",
+                self.binding.room.as_str()
+            );
+            self.transport
+                .ocs(
+                    &context,
+                    Method::POST,
+                    &route,
+                    &[],
+                    &[("messages", messages)],
+                    false,
+                )
+                .await
+                .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        }
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+}
+
 impl MeetingReader {
     pub async fn poll(&mut self, context: &OperationContext) -> Result<SignalBatch, Error> {
         let context = self.binding.context(context)?;
@@ -804,6 +876,12 @@ impl MeetingWriter {
     }
     pub fn own_session(&self) -> Result<PeerSession, ErrorKind> {
         PeerSession::parse(&self.binding.session)
+    }
+    /// A cheap handle for the session ids peers address each other by.
+    pub fn wire_resolver(&self) -> WireResolver {
+        WireResolver {
+            binding: self.binding.clone(),
+        }
     }
     pub async fn observe(
         &mut self,

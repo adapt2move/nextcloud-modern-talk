@@ -250,6 +250,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Ya hay una solicitud en curso.",
     ),
     (
+        "Ende-zu-Ende verschlüsselt",
+        "End-to-end encrypted",
+        "Cifrado de extremo a extremo",
+    ),
+    (
         "Ende-zu-Ende-Verschlüsselung erforderlich",
         "End-to-end encryption required",
         "Se requiere cifrado de extremo a extremo",

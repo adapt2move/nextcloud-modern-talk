@@ -137,16 +137,6 @@ impl Exchange {
         std::mem::take(&mut self.outputs)
     }
 
-    /// When [`Exchange::poll`] next has work, for the caller's timer.
-    pub(crate) fn next_deadline(&self) -> Option<Instant> {
-        self.requests
-            .values()
-            .map(|(_, deadline)| *deadline)
-            .chain(self.rotate_at)
-            .chain(self.ratchet_at)
-            .min()
-    }
-
     fn announce_local(&mut self) {
         self.outputs.push(Output::SetKey {
             participant: Participant::Local,

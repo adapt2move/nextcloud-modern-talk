@@ -88,6 +88,12 @@ async fn bundle(mut capabilities: Value, changes: Value) -> Result<Bundle, Polic
     sources.finish(false)
 }
 fn advance(bundle: &Bundle) -> Result<talk_core::calls::Grant, Gate> {
+    advance_with(bundle, super::super::meeting_runtime::SUPPORT)
+}
+fn advance_with(
+    bundle: &Bundle,
+    support: talk_core::calls::NativeSupport,
+) -> Result<talk_core::calls::Grant, Gate> {
     let mut call = CallSession::new(bundle.inputs.scope, Entry::GroupAudio).unwrap();
     call.accept(bundle.inputs.scope, MediaWishes::default())
         .unwrap();
@@ -101,7 +107,7 @@ fn advance(bundle: &Bundle) -> Result<talk_core::calls::Grant, Gate> {
     call.advance(
         &bundle.inputs,
         bundle.exists,
-        super::super::meeting_runtime::SUPPORT,
+        support,
         super::super::meeting_runtime::DEVICES,
         now,
     )
@@ -148,8 +154,15 @@ async fn e2ee_support_and_requirement_match_official_feature_guard() {
             .push(json!("call-end-to-end-encryption"));
         caps["capabilities"]["spreed"]["config"]["call"]["end-to-end-encryption"] = enabled;
         let bundle = bundle(caps, json!({})).await.unwrap();
+        // This client implements call E2EE, so a required call is admitted...
+        assert!(advance(&bundle).is_ok());
+        // ...and is blocked, never downgraded, by a build or platform without it.
+        let without = talk_core::calls::NativeSupport {
+            end_to_end_encryption: false,
+            ..super::super::meeting_runtime::SUPPORT
+        };
         assert_eq!(
-            advance(&bundle).err(),
+            advance_with(&bundle, without).err(),
             expected.then_some(Gate::RequiredEncryption)
         );
     }

@@ -11,6 +11,7 @@ pub(crate) struct Keys {
     pub(crate) send: Arc<Mutex<frame::Encryptor>>,
     pub(crate) receive: Arc<Mutex<frame::Decryptor>>,
 }
+#[cfg(test)]
 impl Keys {
     pub(crate) fn new() -> Self {
         Self {
