@@ -292,6 +292,10 @@ impl Navigation {
             (old.y + delta).clamp(-scroll.max_offset().height, px(0.)),
         ));
     }
+    /// The docked thread pane scrolls independently of the timeline list.
+    pub(super) fn overlay_scroll(&self) -> gpui::ScrollHandle {
+        self.viewports[Region::Overlay.index()].scroll.clone()
+    }
     pub fn geometry(&self) -> [Bounds<Pixels>; 8] {
         std::array::from_fn(|i| self.viewports[i].scroll.bounds())
     }

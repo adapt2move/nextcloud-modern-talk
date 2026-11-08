@@ -310,7 +310,9 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             | "thread-offline"
             | "thread-paged"
             | "thread-reference"
-            | "thread-message-tools",
+            | "thread-message-tools"
+            | "thread-message-hover"
+            | "thread-message-menu",
         ) => Some(Overlay::Thread),
         Some("search" | "search-navigation" | "account-search") => Some(Overlay::Search),
         Some("account-reminders" | "account-reminders-partial") => Some(Overlay::Reminders),

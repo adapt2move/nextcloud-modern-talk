@@ -23,6 +23,21 @@ are available in Git history, not maintained alongside the current interface.
 [Dependency provenance](native-ui/dependencies.md) and [project notices](../../NOTICE.md)
 cover the native toolkit and assets.
 
+## Message rows
+
+- Calm by default, detail on demand. A row shows author, time and text. The hover
+  toolbar, earlier receipts and the unpin action appear only for the hovered or
+  keyboard-focused row, and never move its text.
+- The toolbar straddles the row's top edge at the content's right edge, identically in the
+  timeline and the thread pane. The hovered row is tinted with `surface.subtle`, so the
+  controls visibly belong to it. It fades in over 140 ms; Reduce Motion shows it at once.
+- States that need words say so under the message in 12 pt text: "Wird gesendet …",
+  "Wartet auf Versand", the unclear-status explanation (warning) and "Nicht gesendet"
+  (error) with plain-text actions. Only the newest own message keeps its sent or read
+  receipt at rest. A pinned message carries "Angeheftet" under its text.
+- A menu belongs to the surface that opened it: its open state, anchor and visibility are
+  judged against that surface's own scroll region.
+
 ## Interaction rules
 
 Selecting a conversation joins nothing and activates no capture. An explicit audio

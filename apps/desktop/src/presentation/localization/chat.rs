@@ -276,6 +276,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Scheduling failed",
         "Error al programar",
     ),
+    (
+        "Planung nicht gespeichert",
+        "Schedule not saved",
+        "Programación no guardada",
+    ),
     ("Reaktion hinzufügen", "Add reaction", "Añadir reacción"),
     (
         "Reaktionen sind derzeit nicht verfügbar.",
@@ -320,6 +325,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Forwarding is currently unavailable.",
         "Reenviar no está disponible en este momento.",
     ),
+    ("Wird erneut versucht …", "Retrying…", "Reintentando…"),
     ("Wird gesendet …", "Sending…", "Enviando…"),
     (
         "Wird leise gesendet",
@@ -352,6 +358,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Volver a cargar mensajes anteriores",
     ),
     ("Änderung fehlgeschlagen", "Edit failed", "Error al editar"),
+    (
+        "Änderung nicht gespeichert",
+        "Edit not saved",
+        "Cambio no guardado",
+    ),
     (
         "Öffne zuerst das Nachrichtenfeld.",
         "Open the message composer first.",

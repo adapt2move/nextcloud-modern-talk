@@ -333,6 +333,8 @@ pub struct Desktop {
     motion_trigger: Option<motion::MotionTrigger>,
     unread_pop: Option<(ConversationRef, Instant)>,
     toolbar_hover: motion::HoverMotion,
+    /// The message toolbar that currently holds keyboard focus, recorded each frame.
+    toolbar_focus: std::rc::Rc<std::cell::RefCell<Option<gpui::ElementId>>>,
     dialog_motion: motion::DialogMotion,
     motion_frames: std::rc::Rc<std::cell::Cell<u64>>,
     emoji_picker_pending: Option<(ConversationRef, u64)>,
@@ -747,6 +749,7 @@ impl Desktop {
             motion_trigger: None,
             unread_pop: None,
             toolbar_hover: motion::HoverMotion::default(),
+            toolbar_focus: Default::default(),
             dialog_motion: motion::DialogMotion::default(),
             motion_frames: Default::default(),
             emoji_picker_pending: None,

@@ -849,7 +849,9 @@ impl Desktop {
         .px_3()
     }
     fn thread_body(&self, cx: &Context<Self>) -> Div {
-        let mut body = div().flex().flex_col();
+        // The first row's hover toolbar overlaps its top edge; the scroll region
+        // clips what lies above it, so keep that overhang inside the pane.
+        let mut body = div().flex().flex_col().pt(px(24.));
         let Some((context, root)) = self
             .thread_parent
             .filter(|(context, _)| Some(*context) == self.snapshot.selected)

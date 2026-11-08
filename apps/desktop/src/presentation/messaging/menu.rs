@@ -997,12 +997,22 @@ impl Desktop {
                 );
             }
         }
+        // The anchor must be visible inside the surface that owns the row. The
+        // thread pane has its own scroll region; the timeline list's viewport
+        // and header band say nothing about it.
+        let viewport = if self.message_ui.menu.source.is_thread() {
+            Viewport::Pane(self.navigation.overlay_scroll())
+        } else {
+            Viewport::Timeline {
+                list: self.message_ui.list.clone(),
+                header_inset: self.message_ui.geometry.borrow().header_inset,
+            }
+        };
         Some(
             Popup {
                 target,
                 geometry,
-                list: self.message_ui.list.clone(),
-                header_inset: self.message_ui.geometry.borrow().header_inset,
+                viewport,
                 child: self.reveal_observation(
                     scoped_id(
                         "message-popup-reveal",
@@ -1189,10 +1199,33 @@ fn next_index(current: Option<usize>, count: usize, key: &str) -> Option<usize> 
 struct Popup {
     target: Target,
     geometry: Rc<RefCell<Geometry>>,
-    list: gpui::ListState,
-    header_inset: Pixels,
+    viewport: Viewport,
     child: AnyElement,
     width: Pixels,
+}
+/// The scrolling surface in which the anchor's row is shown.
+enum Viewport {
+    Timeline {
+        list: gpui::ListState,
+        header_inset: Pixels,
+    },
+    Pane(gpui::ScrollHandle),
+}
+impl Viewport {
+    /// Painted, unobscured area of the surface in window coordinates.
+    fn visible(&self) -> Bounds<Pixels> {
+        match self {
+            Self::Timeline { list, header_inset } => {
+                let bounds = list.viewport_bounds();
+                let inset = (*header_inset).min(bounds.size.height);
+                Bounds::from_corners(
+                    gpui::point(bounds.left(), bounds.top() + inset),
+                    bounds.bottom_right(),
+                )
+            }
+            Self::Pane(scroll) => scroll.bounds(),
+        }
+    }
 }
 impl IntoElement for Popup {
     type Element = Self;
@@ -1247,10 +1280,7 @@ impl Element for Popup {
         let Some(anchor) = anchor else {
             return false;
         };
-        let viewport = self.list.viewport_bounds();
-        if anchor.bottom() <= viewport.top() + self.header_inset
-            || anchor.top() >= viewport.bottom()
-        {
+        if !anchor_in_view(anchor, self.viewport.visible()) {
             self.geometry.borrow_mut().anchor = None;
             return false;
         }
@@ -1281,6 +1311,11 @@ impl Element for Popup {
             self.child.paint(window, cx);
         }
     }
+}
+
+/// A trigger scrolled out of its own surface cannot anchor a popup.
+fn anchor_in_view(anchor: Bounds<Pixels>, visible: Bounds<Pixels>) -> bool {
+    anchor.bottom() > visible.top() && anchor.top() < visible.bottom()
 }
 
 fn popup_origin(
@@ -1364,6 +1399,59 @@ mod tests {
         assert!(!session.accepts(first, Some(room(1))));
         session.open(room(2), 7).unwrap();
         assert!(!session.accepts(reopened, Some(room(2))));
+    }
+    #[test]
+    fn popup_origin_flips_above_and_clamps_inside_every_window_edge() {
+        let viewport = gpui::size(px(600.), px(500.));
+        let size = gpui::size(px(256.), px(200.));
+        let corner = |x: f32, y: f32| {
+            popup_origin(
+                Bounds::new(gpui::point(px(x), px(y)), gpui::size(px(32.), px(32.))),
+                size,
+                viewport,
+            )
+        };
+        // Top-right trigger: opens below, right edges aligned, clamped from the edge.
+        let top_right = corner(560., 20.);
+        assert_eq!(top_right.y, px(56.));
+        assert!(top_right.x + size.width <= viewport.width - px(12.));
+        // Bottom-right trigger: flips above instead of leaving the window.
+        let bottom_right = corner(560., 440.);
+        assert!(bottom_right.y + size.height < px(440.));
+        // Left-edge trigger: never starts left of the safety margin.
+        assert_eq!(corner(0., 20.).x, px(12.));
+    }
+    #[test]
+    fn the_thread_pane_anchor_is_judged_by_its_own_viewport_not_the_timeline_header_band() {
+        // A thread root sits at the top of the pane, in the vertical band the
+        // timeline reserves for its header and pinned message (until y = 165).
+        let anchor = Bounds::new(
+            gpui::point(px(1232.), px(124.)),
+            gpui::size(px(32.), px(32.)),
+        );
+        let timeline_visible = Bounds::from_corners(
+            gpui::point(px(262.), px(165.)),
+            gpui::point(px(866.), px(660.)),
+        );
+        let pane_visible = Bounds::new(
+            gpui::point(px(880.), px(122.)),
+            gpui::size(px(388.), px(540.)),
+        );
+        assert!(
+            !anchor_in_view(anchor, timeline_visible),
+            "the former check"
+        );
+        assert!(anchor_in_view(anchor, pane_visible));
+        // Scrolled fully above or below its own surface still dismisses.
+        let above = Bounds::new(
+            gpui::point(px(1232.), px(60.)),
+            gpui::size(px(32.), px(32.)),
+        );
+        let below = Bounds::new(
+            gpui::point(px(1232.), px(700.)),
+            gpui::size(px(32.), px(32.)),
+        );
+        assert!(!anchor_in_view(above, pane_visible) && !anchor_in_view(below, pane_visible));
     }
     #[test]
     fn popup_fits_above_low_anchor_and_keyboard_wraps() {

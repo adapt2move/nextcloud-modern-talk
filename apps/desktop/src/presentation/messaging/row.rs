@@ -12,6 +12,14 @@ use talk_core::ui::{
     presentation::{ContentState, DeliveryState, MessageView},
 };
 
+/// What the toolbar of one row needs to know about its surface and visibility.
+#[derive(Clone, Copy)]
+struct ToolbarState {
+    thread: bool,
+    shown: bool,
+    actions_open: bool,
+}
+
 pub(in crate::presentation) fn surface_id(
     name: &'static str,
     context: talk_core::ui::presentation::ConversationRef,
@@ -156,6 +164,18 @@ impl Desktop {
                     .iter()
                     .any(|reminder| reminder.message == m.local_id)
         });
+        let last_own = delivery.is_some() && self.is_last_own_message(context, m, thread);
+        // Receipts are ambient: the newest own message carries its state at rest and
+        // earlier ones reveal it on hover. States that need an explanation (sending,
+        // waiting, unclear, failed) always say so in words beneath the message.
+        let resting = delivery.filter(|indicator| !indicator.needs_attention());
+        let attention = delivery.filter(|indicator| indicator.needs_attention());
+        let sending = matches!(
+            delivery,
+            Some(
+                DeliveryIndicator::Pending | DeliveryIndicator::Queued | DeliveryIndicator::Offline
+            )
+        );
         let metadata = |text: &str| {
             self.hint(text)
                 .text_size(self.sp(13.))
@@ -175,7 +195,6 @@ impl Desktop {
                         .min_w_0()
                         .items_center()
                         .gap_2()
-                        .pr(px(if compact { 0. } else { 76. }))
                         .child(
                             self.person_trigger(
                                 person_source(true),
@@ -191,12 +210,16 @@ impl Desktop {
                         )
                         .when(m.own, |d| d.child(metadata(self.l("Du"))))
                         .child(metadata(&time_label))
-                        .when_some(delivery.filter(|_| !continuation), |d, indicator| {
-                            d.child(self.delivery_indicator(
-                                indicator,
-                                row_id("message-delivery", 0),
-                                cx,
-                            ))
+                        .when_some(resting.filter(|_| !continuation), |d, indicator| {
+                            d.child(
+                                self.delivery_indicator(
+                                    indicator,
+                                    row_id("message-delivery", 0),
+                                    cx,
+                                )
+                                .opacity(if last_own { 1. } else { 0. })
+                                .group_hover(action_group.clone(), |s| s.opacity(1.)),
+                            )
                         })
                         .when(m.metadata.edited, |d| {
                             d.child(metadata(self.l("Bearbeitet")))
@@ -248,7 +271,8 @@ impl Desktop {
                     .flex()
                     .items_start()
                     .gap_2()
-                    .pr(px(if compact { 0. } else { 76. }))
+                    // A send in flight is quieter than confirmed content but stays readable.
+                    .when(sending, |d| d.opacity(0.72))
                     .child(
                         div()
                             .flex_1()
@@ -262,15 +286,18 @@ impl Desktop {
                     ),
             );
         }
-        if reminded && !m.metadata.deleted {
-            content = content.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(self.scaled_icon("clock", 14., t.muted))
-                    .child(self.hint(self.l("Erinnerung"))),
-            );
+        if let Some(indicator) = attention {
+            content = content.child(self.delivery_status_line(indicator));
+        }
+        if (pinned || reminded) && !m.metadata.deleted {
+            content = content.child(self.message_flags(
+                context,
+                m.local_id,
+                (pinned, reminded),
+                &row_id("row-unpin-message", 0),
+                &action_group,
+                cx,
+            ));
         }
         if let Some(translation) = self.translation_row(context, m, thread, cx) {
             content = content.child(translation);
@@ -626,10 +653,32 @@ impl Desktop {
         let has_toolbar =
             !m.metadata.deleted && upload.is_none() && self.media_span(m.local_id).is_none();
         let toolbar_id = row_id("message-toolbar-reveal", 0);
-        let hovered_id = toolbar_id.clone();
+        let (actions_source, reactions_source) = if thread {
+            (menu::Source::ThreadActions, menu::Source::ThreadReactions)
+        } else {
+            (menu::Source::Actions, menu::Source::Reactions)
+        };
+        // Open state belongs to the surface that opened the menu: the thread root
+        // is also a timeline row, and only the row that owns the anchor reacts.
+        let actions_open = self
+            .message_ui
+            .menu
+            .anchored_to(context, m.local_id, actions_source);
+        let palette_open = self
+            .message_ui
+            .menu
+            .anchored_to(context, m.local_id, reactions_source);
+        let keyboard_here = self.toolbar_focus.borrow().as_ref() == Some(&toolbar_id);
+        let shown = has_toolbar
+            && (self.toolbar_hover.visible(&toolbar_id)
+                || actions_open
+                || palette_open
+                || keyboard_here);
         let toolbar_admission = self
             .toolbar_hover
             .admission(&toolbar_id, std::time::Instant::now());
+        let hovered_id = toolbar_id.clone();
+        let gutter = px(if compact { 4. } else { 12. });
         div()
         .when(!thread && self.message_ui.first_unread == Some((context, m.local_id)), |row| {
             row.child(
@@ -639,7 +688,7 @@ impl Desktop {
                     .child(div().flex_1().h(px(1.)).bg(t.accent)),
             )
         })
-        .child(
+        .child(div().px(gutter).child(
             div()
                 .id(row_id("message", 0))
                 .group(action_group.clone())
@@ -651,8 +700,9 @@ impl Desktop {
                     }))
                 })
                 .relative()
-                .px(px(if compact { 8. } else { 24. }))
-                .py(px(if continuation { 3. } else if compact { 4. } else { 12. }))
+                .rounded(px(8.))
+                .px(gutter)
+                .py(px(if continuation || compact { 4. } else { 12. }))
                 .when(m.own, |d| d.min_h(px(34.)))
                 .flex()
                 .gap_3()
@@ -673,22 +723,49 @@ impl Desktop {
                         })
                     },
                 )
+                // The tint and the toolbar share one visibility owner, so the
+                // controls always sit on the row they act on.
+                .when(shown, |d| d.bg(t.subtle))
                 .child(if continuation {
                     div()
+                        .relative()
                         .w(px(36.))
+                        .h(self.sp(20.))
                         .flex_none()
                         .text_size(self.sp(12.))
                         .line_height(self.sp(20.))
                         .text_color(t.muted)
                         .child(
-                            time_label
-                                .split_whitespace()
-                                .next()
-                                .unwrap_or("")
-                                .to_owned(),
+                            div()
+                                .child(
+                                    time_label
+                                        .split_whitespace()
+                                        .next()
+                                        .unwrap_or("")
+                                        .to_owned(),
+                                )
+                                .opacity(0.)
+                                .group_hover(action_group.clone(), |s| s.opacity(1.)),
                         )
-                        .opacity(0.)
-                        .group_hover(action_group.clone(), |s| s.opacity(1.))
+                        // A grouped newest own message keeps its receipt in the
+                        // gutter at rest; the time takes its place while hovered.
+                        .when_some(resting.filter(|_| last_own), |d, indicator| {
+                            d.child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .h(self.sp(20.))
+                                    .flex()
+                                    .items_center()
+                                    .group_hover(action_group.clone(), |s| s.opacity(0.))
+                                    .child(self.delivery_indicator(
+                                        indicator,
+                                        row_id("message-delivery", 0),
+                                        cx,
+                                    )),
+                            )
+                        })
                         .into_any_element()
                 } else {
                     self.person_trigger(
@@ -713,143 +790,338 @@ impl Desktop {
                 })
                 .child(content)
                 .when(!thread, |d| d.child(self.pin_source_anchor(context, m.local_id)))
-                .when(!m.metadata.deleted && (pinned || (continuation && delivery.is_some())), |d| {
-                    let status = div().flex_none().flex().items_center().gap(px(4.))
-                        .when(pinned, |d| {
-                            let allowed = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
-                                panel.context == context
-                                    && self.message_feature_enabled(MessageFeature::Pins)
-                                    && decision_allows_intent(panel.pin_change, self.local_message_intents())
-                                    && (!panel.state.pending() || self.local_message_intents())
-                            });
-                            d.child(self.icon_button(
-                                row_id("row-unpin-message", 0),
-                                ("pin", "Angeheftete Nachricht lösen"),
-                                ButtonStyle::Quiet,
-                                Availability::when(allowed, "Anheften ist derzeit nicht verfügbar."),
-                                LocalAction::MessageIn(context, Action::Command(talk_core::ui::messaging::MessageAction::Unpin(m.local_id))),
-                                cx,
-                            ).min_w(px(24.)).min_h(self.sp(20.)).h(self.sp(20.)).p_0())
-                        })
-                        .when_some(delivery.filter(|_| continuation), |d, indicator| {
-                            d.child(self.delivery_indicator(indicator, row_id("message-delivery", 0), cx))
-                        });
-                    let mut status = status;
-                    status.style().align_self = Some(gpui::AlignSelf::FlexEnd);
-                    d.child(status)
-                })
-                // Hover/menu controls never enter the message's flex layout.
-                // Revealing them cannot move text, metadata or delivery status.
-                .when(
-                    has_toolbar,
-                    |d| {
-                        d.child(self.reveal_observation(toolbar_id,
-                        div()
-                            .absolute()
-                            // One surface frames the tools without changing row geometry.
-                            .rounded(px(8.))
-                            .group_hover(action_group.clone(), |s| {
-                                s.bg(t.surface).border_1().border_color(t.border).shadow(t.elevation(crate::presentation::theme::Elevation::Raised))
-                            })
-                            .when(self.message_ui.menu.is_for(context, m.local_id), |d| {
-                                d.bg(t.surface).border_1().border_color(t.border).shadow(t.elevation(crate::presentation::theme::Elevation::Raised))
-                            })
-                            .when(thread, |d| d.top_0().right_2())
-                            .when(!thread, |d| { d.top(px(-20.)).right(if m.own {
-                                px(24.) + self.delivery_width() + self.sp(8.) + px(if pinned { 28. } else { 0. })
-                            } else { px(8.) })
-                            })
-                            .flex()
-                            .gap_1()
-                            .when(message_actions_allowed(m), |d| {
-                                let picker_open = self.message_ui.menu.is_for(context, m.local_id);
-                                d.children((0..3).map(|index| {
-                                    self.quick_reaction_button(m, index, thread, cx)
-                                        .opacity(0.)
-                                        .group_hover(action_group.clone(), |s| s.opacity(1.))
-                                        .focus(|s| s.opacity(1.))
-                                }))
-                                .child(
-                                    self.reaction_picker_button(m, if thread { menu::Source::ThreadReactions } else { menu::Source::Reactions }, cx)
-                                        .opacity(if picker_open { 1. } else { 0. })
-                                        .group_hover(action_group.clone(), |s| s.opacity(1.))
-                                        .focus(|s| s.opacity(1.)),
-                                )
-                            })
-                            .child(
-                                self.icon_button(
-                                    row_id("message-reply", 0),
-                                    ("reply", "Antworten"),
-                                    ButtonStyle::Quiet,
-                                    Availability::when(
-                                        if thread { self.thread_can_reply(context, m) } else { self.can_reply_to(m) },
-                                        "Auf diese Nachricht kann nicht geantwortet werden.",
-                                    ),
-                                    LocalAction::MessageIn(context, if thread { Action::ThreadReply(m.local_id) } else { Action::Reply(m.local_id) }),
-                                    cx,
-                                )
-                                .opacity(0.)
-                                .group_hover(action_group.clone(), |s| s.opacity(1.))
-                                .focus(|s| s.opacity(1.)),
-                            )
-                            .when(
-                                !thread && self.can_open_thread(context, m.metadata.thread.unwrap_or(m.local_id))
-                                    && (m.metadata.thread.is_some() || m.reply_count > 0),
-                                |d| {
-                                    d.child(
-                                        self.icon_button(
-                                            scoped_id("message-thread", context, m.local_id, 0),
-                                            ("chat", "Thread öffnen"),
-                                            ButtonStyle::Quiet,
-                                            Availability::available(),
-                                            LocalAction::Thread(
-                                                context,
-                                                m.metadata.thread.unwrap_or(m.local_id),
-                                            ),
-                                            cx,
-                                        )
-                                        .opacity(0.)
-                                        .group_hover(action_group.clone(), |s| s.opacity(1.))
-                                        .focus(|s| s.opacity(1.)),
-                                    )
-                                },
-                            )
-                            .child(
-                                self.icon_button(
-                                    scoped_id(if thread { "thread-message-menu" } else { "message-menu" }, context, m.local_id, 0),
-                                    ("more", "Nachrichtenaktionen"),
-                                    ButtonStyle::Quiet,
-                                    {
-                                        let available = Availability::when(
-                                            message_actions_allowed(m),
-                                            "Für diese Nachricht sind keine Aktionen verfügbar.",
-                                        );
-                                        if self.message_ui.menu.is_for(context, m.local_id) {
-                                            available.explained_elsewhere()
-                                        } else {
-                                            available
-                                        }
-                                    },
-                                    LocalAction::MessageIn(context, if thread { Action::ThreadMenu(m.local_id) } else { Action::Menu(m.local_id) }),
-                                    cx,
-                                )
-                                .child(self.message_menu_anchor(
-                                    context,
-                                    m.local_id,
-                                    if thread { menu::Source::ThreadActions } else { menu::Source::Actions },
-                                ))
-                                .opacity(if self.message_ui.menu.is_for(context, m.local_id) {
-                                    1.
-                                } else {
-                                    0.
-                                })
-                                .group_hover(action_group, |s| s.opacity(1.))
-                                .focus(|s| s.opacity(1.)),
-                            ),
-                        toolbar_admission))
+                // The toolbar never enters the message's flex layout: revealing it
+                // cannot move text, metadata or receipts.
+                .when(has_toolbar, |d| {
+                    d.child(self.message_toolbar(
+                        m,
+                        ToolbarState {
+                            thread,
+                            shown,
+                            actions_open,
+                        },
+                        toolbar_id,
+                        toolbar_admission,
+                        gutter,
+                        cx,
+                    ))
+                }),
+        ))
+    }
+
+    /// Quick reactions, emoji, reply, thread and "…" for one hovered or focused
+    /// message. The surface straddles the row's top edge at the content's right
+    /// edge, identically in the timeline and the thread pane. The controls stay
+    /// mounted (and tabbable) while hidden; showing only changes opacity.
+    fn message_toolbar(
+        &self,
+        m: &MessageView,
+        state: ToolbarState,
+        toolbar_id: ElementId,
+        admission: Option<std::time::Instant>,
+        gutter: gpui::Pixels,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        let ToolbarState {
+            thread,
+            shown,
+            actions_open,
+        } = state;
+        let t = self.theme;
+        let context = self.snapshot.selected.expect("message context");
+        let row_id = |name, extra| surface_id(name, context, m.local_id, extra, thread);
+        let bar_id = toolbar_id.clone();
+        let focus_slot = self.toolbar_focus.clone();
+        let focus_owner = toolbar_id.clone();
+        let focus_handle = self.control_focus(row_id("message-toolbar-focus", 0), cx);
+        let tracked = focus_handle.clone();
+        let divider = || {
+            div()
+                .flex_none()
+                .w(px(1.))
+                .h(px(16.))
+                .mx(px(2.))
+                .bg(t.border)
+        };
+        let bar = div()
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .p(px(2.))
+            .rounded(px(8.))
+            .bg(t.surface)
+            .border_1()
+            .border_color(t.border)
+            .shadow(t.elevation(crate::presentation::theme::Elevation::Raised))
+            .when(message_actions_allowed(m), |d| {
+                d.children((0..3).map(|index| {
+                    self.quick_reaction_button(m, index, thread, cx)
+                        .size(px(32.))
+                        .min_h(px(32.))
+                }))
+                .child(self.reaction_picker_button(
+                    m,
+                    if thread {
+                        menu::Source::ThreadReactions
+                    } else {
+                        menu::Source::Reactions
+                    },
+                    cx,
+                ))
+                .child(divider())
+            })
+            .child(self.icon_button(
+                row_id("message-reply", 0),
+                ("reply", "Antworten"),
+                ButtonStyle::Quiet,
+                Availability::when(
+                    if thread {
+                        self.thread_can_reply(context, m)
+                    } else {
+                        self.can_reply_to(m)
+                    },
+                    "Auf diese Nachricht kann nicht geantwortet werden.",
+                ),
+                LocalAction::MessageIn(
+                    context,
+                    if thread {
+                        Action::ThreadReply(m.local_id)
+                    } else {
+                        Action::Reply(m.local_id)
                     },
                 ),
-        )
+                cx,
+            ))
+            .when(
+                !thread
+                    && self.can_open_thread(context, m.metadata.thread.unwrap_or(m.local_id))
+                    && (m.metadata.thread.is_some() || m.reply_count > 0),
+                |d| {
+                    d.child(self.icon_button(
+                        scoped_id("message-thread", context, m.local_id, 0),
+                        ("chat", "Thread öffnen"),
+                        ButtonStyle::Quiet,
+                        Availability::available(),
+                        LocalAction::Thread(context, m.metadata.thread.unwrap_or(m.local_id)),
+                        cx,
+                    ))
+                },
+            )
+            .child(
+                self.icon_button(
+                    scoped_id(
+                        if thread {
+                            "thread-message-menu"
+                        } else {
+                            "message-menu"
+                        },
+                        context,
+                        m.local_id,
+                        0,
+                    ),
+                    ("more", "Nachrichtenaktionen"),
+                    ButtonStyle::Quiet,
+                    {
+                        let available = Availability::when(
+                            message_actions_allowed(m),
+                            "Für diese Nachricht sind keine Aktionen verfügbar.",
+                        );
+                        if actions_open {
+                            available.explained_elsewhere()
+                        } else {
+                            available
+                        }
+                    },
+                    LocalAction::MessageIn(
+                        context,
+                        if thread {
+                            Action::ThreadMenu(m.local_id)
+                        } else {
+                            Action::Menu(m.local_id)
+                        },
+                    ),
+                    cx,
+                )
+                .child(self.message_menu_anchor(
+                    context,
+                    m.local_id,
+                    if thread {
+                        menu::Source::ThreadActions
+                    } else {
+                        menu::Source::Actions
+                    },
+                ))
+                .bg(if actions_open {
+                    t.selected
+                } else {
+                    gpui::transparent_black()
+                }),
+            );
+        div()
+            .id(bar_id)
+            .absolute()
+            .top(px(-24.))
+            .right(gutter)
+            .opacity(if shown { 1. } else { 0. })
+            // Only a visible toolbar blocks what lies beneath its overhang, so the
+            // previous row's hover and clicks are untouched while it is hidden.
+            .when(shown, |d| d.occlude())
+            .when_some(tracked, |d, handle| d.track_focus(&handle.tab_stop(false)))
+            .on_hover(cx.listener({
+                let hovered_id = toolbar_id.clone();
+                move |this, hovered: &bool, _, cx| {
+                    if this.toolbar_hover.update_toolbar(
+                        &hovered_id,
+                        *hovered,
+                        this.reduced_motion,
+                        std::time::Instant::now(),
+                    ) {
+                        cx.notify();
+                    }
+                }
+            }))
+            .child(
+                // Keyboard focus inside the toolbar keeps the whole surface visible.
+                gpui::canvas(
+                    move |_, window, cx| {
+                        let within = focus_handle
+                            .as_ref()
+                            .is_some_and(|handle| handle.contains_focused(window, cx));
+                        let mut slot = focus_slot.borrow_mut();
+                        let held = slot.as_ref() == Some(&focus_owner);
+                        if within != held {
+                            *slot = within.then(|| focus_owner.clone());
+                            // A request made while painting is dropped at the end of
+                            // this draw; the next frame re-renders the row.
+                            window.request_animation_frame();
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .child(self.reveal_toolbar(
+                ElementId::Name(format!("{toolbar_id}:reveal").into()),
+                bar,
+                admission,
+            ))
+    }
+
+    /// Words for a send that needs them. Calm by default: small, no card, and a
+    /// warning color only where the outcome is genuinely unclear.
+    fn delivery_status_line(&self, indicator: DeliveryIndicator) -> Div {
+        let t = self.theme;
+        let (symbol, color) = match indicator {
+            DeliveryIndicator::Uncertain => ("info", t.warning),
+            DeliveryIndicator::Failed => ("info", t.danger),
+            _ => ("clock", t.muted),
+        };
+        div()
+            .flex()
+            .items_start()
+            .gap(px(6.))
+            .text_size(self.sp(12.))
+            .line_height(self.sp(18.))
+            .text_color(color)
+            .child(
+                div()
+                    .flex_none()
+                    .mt(px(3.))
+                    .child(self.scaled_icon(symbol, 12., color)),
+            )
+            .child(div().min_w_0().child(self.l(indicator.label()).to_owned()))
+    }
+
+    /// Pinned and reminder state attach to the message they describe instead of
+    /// floating at the row's far edge. Unpinning stays reachable on hover and focus.
+    fn message_flags(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        message: u128,
+        (pinned, reminded): (bool, bool),
+        unpin_id: &ElementId,
+        action_group: &gpui::SharedString,
+        cx: &Context<Self>,
+    ) -> Div {
+        let t = self.theme;
+        let allowed = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+            panel.context == context
+                && self.message_feature_enabled(MessageFeature::Pins)
+                && decision_allows_intent(panel.pin_change, self.local_message_intents())
+                && (!panel.state.pending() || self.local_message_intents())
+        });
+        let flag = |symbol: &'static str, color, label: &str| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .text_size(self.sp(12.))
+                .line_height(self.sp(18.))
+                .text_color(t.muted)
+                .child(self.scaled_icon(symbol, 12., color))
+                .child(label.to_owned())
+        };
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_x(px(12.))
+            .when(pinned, |d| {
+                d.child(
+                    flag("pin", t.focus, self.l("Angeheftet")).child(
+                        self.button(
+                            unpin_id.clone(),
+                            "Lösen",
+                            ButtonStyle::Quiet,
+                            Availability::when(allowed, "Anheften ist derzeit nicht verfügbar."),
+                            LocalAction::MessageIn(
+                                context,
+                                Action::Command(talk_core::ui::messaging::MessageAction::Unpin(
+                                    message,
+                                )),
+                            ),
+                            cx,
+                        )
+                        .min_h(self.sp(20.))
+                        .h(self.sp(20.))
+                        .px(px(6.))
+                        .py_0()
+                        .text_size(self.sp(12.))
+                        .line_height(self.sp(16.))
+                        .text_color(t.focus)
+                        .opacity(0.)
+                        .group_hover(action_group.clone(), |s| s.opacity(1.))
+                        .focus(|s| s.opacity(1.)),
+                    ),
+                )
+            })
+            .when(reminded, |d| {
+                d.child(flag("clock", t.muted, self.l("Erinnerung")))
+            })
+    }
+
+    /// The newest own message carries its receipt at rest; see `message_row_surface`.
+    fn is_last_own_message(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        message: &MessageView,
+        thread: bool,
+    ) -> bool {
+        let latest = if thread {
+            let Some((_, root)) = self.thread_parent.filter(|(room, _)| *room == context) else {
+                return false;
+            };
+            self.snapshot
+                .message_panel
+                .as_ref()
+                .filter(|panel| panel.context == context)
+                .and_then(|panel| latest_own(panel.thread_messages.as_slice().iter()))
+                .or_else(|| latest_own(self.thread_row(context, root).into_iter()))
+        } else {
+            latest_own(self.snapshot.messages.as_slice().iter())
+        };
+        latest == Some(message.local_id)
     }
     fn message_delivery(&self, message: &MessageView) -> Option<DeliveryIndicator> {
         let panel = self
@@ -882,7 +1154,8 @@ impl Desktop {
     ) -> Stateful<Div> {
         let t = self.theme;
         let color = match indicator {
-            DeliveryIndicator::Read => t.accent,
+            // `focus` is the palette's text-safe accent; `accent` is a fill color.
+            DeliveryIndicator::Read => t.focus,
             DeliveryIndicator::Failed => t.danger,
             DeliveryIndicator::Uncertain => t.warning,
             DeliveryIndicator::Queued
@@ -911,6 +1184,13 @@ impl Desktop {
                 )
             })
     }
+}
+
+/// The newest own message that can carry a receipt: not deleted, not a system line.
+fn latest_own<'a>(rows: impl DoubleEndedIterator<Item = &'a MessageView>) -> Option<u128> {
+    rows.rev()
+        .find(|row| row.own && !row.metadata.deleted && !row.metadata.system)
+        .map(|row| row.local_id)
 }
 
 fn call_status(message: &MessageView) -> Option<(&'static str, bool)> {
@@ -981,6 +1261,12 @@ enum DeliveryIndicator {
     Uncertain,
 }
 impl DeliveryIndicator {
+    /// Sending, waiting, unclear and failed sends explain themselves in words;
+    /// accepted and read are ambient receipts.
+    fn needs_attention(self) -> bool {
+        !matches!(self, Self::Accepted | Self::Read)
+    }
+
     fn with_connection(self, offline: bool) -> Self {
         if self == Self::Queued && offline {
             Self::Offline
@@ -996,7 +1282,7 @@ impl DeliveryIndicator {
             Self::Pending => "Wird gesendet …",
             Self::Accepted => "Vom Server angenommen",
             Self::Read => "Gelesen (öffentliche Lesebestätigungen)",
-            Self::Failed => "Senden fehlgeschlagen",
+            Self::Failed => "Nicht gesendet",
             Self::Uncertain => {
                 "Sendestatus unklar. Vor erneutem Senden muss der Status abgeglichen werden."
             }
@@ -1199,6 +1485,53 @@ mod tests {
         message.metadata.deleted = false;
         message.metadata.system = true;
         assert_eq!(delivery_indicator(&message, true, Some(11)), None);
+    }
+
+    #[test]
+    fn only_sent_and_read_are_ambient_and_every_other_state_explains_itself_in_words() {
+        for indicator in [
+            DeliveryIndicator::Queued,
+            DeliveryIndicator::Offline,
+            DeliveryIndicator::Pending,
+            DeliveryIndicator::Failed,
+            DeliveryIndicator::Uncertain,
+        ] {
+            assert!(indicator.needs_attention(), "{indicator:?}");
+            assert!(!indicator.label().is_empty());
+        }
+        for indicator in [DeliveryIndicator::Accepted, DeliveryIndicator::Read] {
+            assert!(!indicator.needs_attention(), "{indicator:?}");
+        }
+        // The unclear state keeps its honest explanation; failure names the outcome.
+        assert!(DeliveryIndicator::Uncertain.label().contains("abgeglichen"));
+        assert_eq!(DeliveryIndicator::Failed.label(), "Nicht gesendet");
+    }
+
+    #[test]
+    fn the_newest_own_message_is_the_one_that_keeps_its_receipt_at_rest() {
+        let mut rows = [
+            authored_message(1, Some("users:one"), 1),
+            authored_message(2, Some("users:one"), 2),
+            authored_message(3, Some("users:two"), 3),
+            authored_message(4, Some("users:one"), 4),
+        ];
+        assert_eq!(
+            latest_own(rows.iter()),
+            None,
+            "nobody is the current account"
+        );
+        rows[1].own = true;
+        rows[3].own = true;
+        assert_eq!(latest_own(rows.iter()), Some(4));
+        rows[3].metadata.deleted = true;
+        assert_eq!(
+            latest_own(rows.iter()),
+            Some(2),
+            "a tombstone has no receipt"
+        );
+        rows[1].metadata.system = true;
+        assert_eq!(latest_own(rows.iter()), None);
+        assert_eq!(latest_own([].iter()), None);
     }
 
     #[test]
