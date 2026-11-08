@@ -1417,12 +1417,13 @@ impl Desktop {
             .when(!narrow_controls, |d| d.child(div().w(px(120.)).flex_none()))
             .when(!lobby, |d| d.child(primary_controls))
             .child(
-                self.button_with_icon(
+                self.pill_button_with_icon(
                     "leave-call",
                     ("Verlassen", "phone-down"),
                     ButtonStyle::StageDanger,
                     true,
                     LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))),
+                    22.,
                     cx,
                 )
                 .min_w(px(120.))

@@ -1097,12 +1097,27 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
+        self.button_with_geometry(id, label, style, availability, action, (1., 8.), cx)
+    }
+    /// A button whose hover, press and focus shapes follow `(border, radius)`, so a
+    /// pill stays a pill in every state.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn button_with_geometry(
+        &self,
+        id: impl Into<ElementId>,
+        label: impl Into<SharedString>,
+        style: ButtonStyle,
+        availability: impl Into<Availability>,
+        action: LocalAction,
+        geometry: (f32, f32),
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
         let id = id.into();
         let mut availability = availability.into();
         availability.hover_hint = !availability.enabled && !availability.explained_elsewhere;
         let label: SharedString = label.into();
         let label: SharedString = self.l(label.as_ref()).to_owned().into();
-        self.control(id.clone(), style, availability, action, cx)
+        self.control_with_geometry(id.clone(), style, availability, action, geometry, cx)
             // An empty label is not a flex item. Custom icon/row contents
             // otherwise gain a phantom gap and lose their shared alignment.
             .when(!label.is_empty(), |d| {
@@ -1343,6 +1358,28 @@ impl Desktop {
         let availability = availability.into();
         let (_, foreground) = control_colors(self.theme, style, availability.enabled);
         self.button(id, content.0, style, availability, action, cx)
+            .justify_between()
+            .child(
+                div()
+                    .flex_none()
+                    .opacity(if availability.pending { 0. } else { 1. })
+                    .child(self.scaled_icon(content.1, 16., foreground)),
+            )
+    }
+    /// [`Self::button_with_icon`] for a button with its own corner radius.
+    pub(super) fn pill_button_with_icon(
+        &self,
+        id: impl Into<ElementId>,
+        content: (&'static str, &'static str),
+        style: ButtonStyle,
+        availability: impl Into<Availability>,
+        action: LocalAction,
+        radius: f32,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        let availability = availability.into();
+        let (_, foreground) = control_colors(self.theme, style, availability.enabled);
+        self.button_with_geometry(id, content.0, style, availability, action, (1., radius), cx)
             .justify_between()
             .child(
                 div()
