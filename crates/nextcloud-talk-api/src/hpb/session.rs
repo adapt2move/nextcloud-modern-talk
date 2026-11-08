@@ -559,16 +559,15 @@ async fn connected(
                             }
                             continue;
                     }
-                    if let Err(error) = shared.incoming(&value) {
+                    shared.incoming(&value).inspect_err(|_error| {
                         #[cfg(feature = "backend-test")]
                         {
                             let kind = match value["type"].as_str() { Some("event") => "event", Some("message") => "message", Some("error") => "error", Some("bye") => "bye", _ => "extension" };
                             let target = match value["event"]["target"].as_str() { Some("room") => "room", Some("participants") => "participants", Some("roomlist") => "roomlist", _ => "other" };
                             let event = match value["event"]["type"].as_str() { Some("join") => "join", Some("leave") => "leave", Some("update") => "update", Some("message") => "message", _ => "other" };
-                            eprintln!("HPB incoming stopped: {kind}/{target}/{event} {error:?}");
+                            eprintln!("HPB incoming stopped: {kind}/{target}/{event} {_error:?}");
                         }
-                        return Err(error);
-                    }
+                    })?;
                 }
             }
         }
