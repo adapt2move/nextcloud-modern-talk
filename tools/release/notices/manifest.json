@@ -565,6 +565,36 @@
       "provenance": "This older published crate has no VCS record. Every published file is byte-identical to the recorded immutable upstream commit. Its original Cargo.toml preserves the author and license declaration; no standalone license text exists in that revision. SUPPLIED-* files are complete standard license texts supplied separately, with template placeholders unchanged and no invented copyright notice."
     },
     {
+      "name": "matrix-pickle",
+      "version": "0.2.3",
+      "license": "Apache-2.0",
+      "crate_sha256": "b3d65d46b7379dd0afa4a42f9b2269821d31afdee0111b5e0d74e3bee03553a0",
+      "source_commit": "3eb007eae1ca87e3a3683c99a58fd19289abae52",
+      "files": [
+        {
+          "path": "matrix-pickle-0.2.3/LICENSE",
+          "source": "https://raw.githubusercontent.com/matrix-org/matrix-pickle/3eb007eae1ca87e3a3683c99a58fd19289abae52/LICENSE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        }
+      ],
+      "provenance": "The published crate omits its license text. This unmodified Apache-2.0 license comes from the immutable upstream commit recorded in its .cargo_vcs_info.json; the crate declares the same license."
+    },
+    {
+      "name": "matrix-pickle-derive",
+      "version": "0.2.3",
+      "license": "Apache-2.0",
+      "crate_sha256": "414b5e4c34009f2bc3fe35dd018f25755ca38858096574841c7332f99e2c7e77",
+      "source_commit": "3eb007eae1ca87e3a3683c99a58fd19289abae52",
+      "files": [
+        {
+          "path": "matrix-pickle-derive-0.2.3/LICENSE",
+          "source": "https://raw.githubusercontent.com/matrix-org/matrix-pickle/3eb007eae1ca87e3a3683c99a58fd19289abae52/LICENSE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        }
+      ],
+      "provenance": "The published crate omits its license text. This unmodified Apache-2.0 license comes from the immutable upstream commit recorded in its .cargo_vcs_info.json; the crate declares the same license."
+    },
+    {
       "name": "naga",
       "version": "25.0.1",
       "license": "MIT OR Apache-2.0",
