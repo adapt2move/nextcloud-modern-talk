@@ -1,11 +1,13 @@
 //! Retained, bounded texture layers for the native material surfaces.
 use crate::presentation::{Desktop, MaterialImages};
 use gpui::{
-    AnyView, Bounds, Context, Corners, Entity, Hsla, ImageSource, Pixels, Render, Styled, Window,
+    AnyView, Bounds, Context, ContentMask, Corners, Entity, Hsla, ImageSource, Pixels, Render, Styled, Window,
     canvas, div, point, prelude::*, px, size,
 };
 
 const TILE: f32 = 128.;
+const TILE_TEXELS: f32 = 128.;
+const PAD_TEXELS: f32 = crate::presentation::MATERIAL_TILE_PAD as f32;
 /// Backdrop blur radius in points for every floating glass surface.
 const BACKDROP_BLUR: f32 = 8.;
 const LIGHT_GLASS_ALPHA: f32 = 0.87;
@@ -179,7 +181,19 @@ impl Render for Layer {
                         };
                         // Missing GPU capacity must not compromise input or
                         // content; the opaque surface remains the fallback.
-                        let _ = window.paint_image(tile, radii, image.clone(), 0, false);
+                        // The image carries a wrapped margin so tile edges
+                        // sample like their interior; the mask trims it.
+                        let (pad_x, pad_y) = (
+                            (x1 - x0) / TILE_TEXELS * PAD_TEXELS,
+                            (y1 - y0) / TILE_TEXELS * PAD_TEXELS,
+                        );
+                        let padded = Bounds::new(
+                            point(px(x0 - pad_x), px(y0 - pad_y)),
+                            size(px(x1 - x0 + 2. * pad_x), px(y1 - y0 + 2. * pad_y)),
+                        );
+                        window.with_content_mask(Some(ContentMask { bounds: tile }), |window| {
+                            let _ = window.paint_image(padded, radii, image.clone(), 0, false);
+                        });
                     }
                 }
             },

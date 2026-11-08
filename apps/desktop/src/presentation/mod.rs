@@ -275,6 +275,9 @@ pub enum ButtonStyle {
 
 use crate::presentation::probes::Probe;
 
+/// Wrapped margin, in texels, that composition adds around each 128-texel material tile.
+pub const MATERIAL_TILE_PAD: u32 = 1;
+
 /// Prepared, bounded decorative images; composition owns decoding the embedded assets.
 pub struct MaterialImages {
     pub grain: Option<gpui::ImageSource>,

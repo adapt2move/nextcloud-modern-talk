@@ -2,7 +2,7 @@
 use crate::presentation::{Desktop, Overlay};
 use gpui::{Div, div, prelude::*, px};
 
-use super::{Texture, material};
+use super::material;
 use crate::presentation::theme::Elevation;
 
 pub(in crate::presentation) const CONTENT_RADIUS: f32 = 16.;
@@ -98,7 +98,6 @@ impl Desktop {
             16.,
             Elevation::Dialog,
         )
-        .children(self.materials.layer(Texture::Card, t.reduced_transparency))
     }
 
     pub(in crate::presentation) fn style_floating_surface<T: Styled + ParentElement>(
@@ -132,6 +131,8 @@ impl Desktop {
             .gap_3()
             .px_4()
             .py_4()
+            .rounded_t(px(15.))
+            .bg(self.theme.subtle)
             .border_b_1()
             .border_color(self.theme.border)
     }
@@ -145,6 +146,8 @@ impl Desktop {
             .gap_2()
             .px_4()
             .py_3()
+            .rounded_b(px(15.))
+            .bg(self.theme.subtle)
             .border_t_1()
             .border_color(self.theme.border)
     }
@@ -173,7 +176,6 @@ impl Desktop {
                 gpui::rgba(0x26354b14)
             })
             .shadow(t.elevation(Elevation::Card))
-            .children(self.materials.layer(Texture::Card, t.reduced_transparency))
             .child(
                 content
                     .relative()

@@ -16,8 +16,18 @@ pub(super) fn materials() -> crate::presentation::MaterialImages {
         for pixel in pixels.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2); // GPUI uses straight-alpha BGRA.
         }
+        // Surround the tile with its own wrapped neighbors. The sampler clamps
+        // at the image edge, so a bare edge texel renders with more contrast
+        // than its filtered interior and every tile seam shows as a dashed
+        // line. The painter hides the one-texel margin behind a content mask.
+        let pad = crate::presentation::MATERIAL_TILE_PAD;
+        let span = 128 + 2 * pad;
+        let padded = image::RgbaImage::from_fn(span, span, |x, y| {
+            let wrap = |at: u32| (at + 128 - pad) % 128;
+            *pixels.get_pixel(wrap(x), wrap(y))
+        });
         Some(gpui::ImageSource::Render(std::sync::Arc::new(
-            gpui::RenderImage::new([image::Frame::new(pixels)]),
+            gpui::RenderImage::new([image::Frame::new(padded)]),
         )))
     }
     crate::presentation::MaterialImages {
