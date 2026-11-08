@@ -286,3 +286,210 @@ impl Drop for Codec {
         let _ = self.pipeline.set_state(gst::State::Null);
     }
 }
+
+/// The path every real call uses, without a network: encode, seal, packetize, then
+/// feed the RTP into the decoder pipeline whose probe opens the frames.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::media::e2ee::frame::{Decryptor, Encryptor, FrameKind, KEY_LEN};
+    use rtc::{
+        rtp::{
+            codec::opus::OpusPayloader, codec::vp8::Vp8Payloader, header::Header, packet::Packet,
+            packetizer::Payloader,
+        },
+        shared::marshal::Marshal,
+    };
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
+
+    /// Wrap payload chunks into marshalled RTP packets.
+    macro_rules! rtp {
+        ($payloads:expr, $payload_type:expr, $sequence:expr, $timestamp:expr) => {{
+            let payloads = $payloads;
+            let last = payloads.len().saturating_sub(1);
+            payloads
+                .into_iter()
+                .enumerate()
+                .map(|(index, payload)| {
+                    $sequence = $sequence.wrapping_add(1);
+                    Packet {
+                        header: Header {
+                            version: 2,
+                            marker: index == last,
+                            payload_type: $payload_type,
+                            sequence_number: $sequence,
+                            timestamp: $timestamp,
+                            ssrc: 0x1234,
+                            ..Default::default()
+                        },
+                        payload,
+                    }
+                    .marshal()
+                    .unwrap()
+                    .to_vec()
+                })
+                .collect::<Vec<Vec<u8>>>()
+        }};
+    }
+    fn holders(
+        send: Option<[u8; KEY_LEN]>,
+        receive: Option<[u8; KEY_LEN]>,
+    ) -> (Arc<Mutex<Encryptor>>, Arc<Mutex<Decryptor>>) {
+        let (mut encryptor, mut decryptor) = (Encryptor::default(), Decryptor::default());
+        if let Some(key) = send {
+            encryptor.set_key(&key, 2).unwrap();
+        }
+        if let Some(key) = receive {
+            decryptor.set_key(&key, 2).unwrap();
+        }
+        (
+            Arc::new(Mutex::new(encryptor)),
+            Arc::new(Mutex::new(decryptor)),
+        )
+    }
+    fn wait<T>(mut poll: impl FnMut() -> Option<T>) -> Option<T> {
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(3) {
+            if let Some(value) = poll() {
+                return Some(value);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        None
+    }
+
+    /// Opus frames through the sealed path; the decoded PCM must be audible.
+    fn audio(send: Option<[u8; KEY_LEN]>, receive: Option<[u8; KEY_LEN]>) -> bool {
+        let (encryptor, decryptor) = holders(send, receive);
+        let encoder = Codec::audio_encoder().unwrap();
+        let decoder = Codec::decoder(false, 111, false, Some(decryptor)).unwrap();
+        let mut sequence = 0_u16;
+        for frame in 0..40_u32 {
+            let pcm: Vec<u8> = (0..480)
+                .flat_map(|n| {
+                    ((((frame * 480 + n) as f64 * 0.06).sin() * 6000.0) as i16).to_le_bytes()
+                })
+                .collect();
+            encoder
+                .push(
+                    pcm,
+                    Some(Duration::from_millis(10 * u64::from(frame))),
+                    Some(Duration::from_millis(10)),
+                )
+                .unwrap();
+            let Some((opus, _)) = wait(|| encoder.encoded(4096).unwrap()) else {
+                continue;
+            };
+            let Ok(sealed) =
+                encryptor
+                    .lock()
+                    .unwrap()
+                    .encrypt(0x1234, frame * 480, FrameKind::Audio, &opus)
+            else {
+                continue;
+            };
+            let payloads = OpusPayloader.payload(1200, &sealed.into()).unwrap();
+            for packet in rtp!(payloads, 111, sequence, frame * 480) {
+                decoder.push(packet, None, None).unwrap();
+            }
+        }
+        wait(|| {
+            decoder.sample().unwrap().and_then(|sample| {
+                let map = sample.buffer()?.map_readable().ok()?;
+                map.as_slice()
+                    .chunks_exact(2)
+                    .any(|b| i16::from_le_bytes([b[0], b[1]]).unsigned_abs() > 500)
+                    .then_some(())
+            })
+        })
+        .is_some()
+    }
+
+    #[test]
+    fn sealed_opus_is_audible_only_with_the_right_key() {
+        gst::init().unwrap();
+        let key = [5_u8; KEY_LEN];
+        assert!(audio(Some(key), Some(key)), "the right key plays");
+        assert!(
+            !audio(Some(key), Some([6; KEY_LEN])),
+            "a wrong key plays nothing"
+        );
+        assert!(!audio(Some(key), None), "no key plays nothing");
+        assert!(
+            !audio(None, Some(key)),
+            "unsealed audio does not pass a strict receiver"
+        );
+    }
+
+    fn video(send: Option<[u8; KEY_LEN]>, receive: Option<[u8; KEY_LEN]>) -> Option<(u32, u32)> {
+        let (encryptor, decryptor) = holders(send, receive);
+        let encoder = Codec::video_encoder(320, 240, false).unwrap();
+        let decoder = Codec::decoder(true, 96, false, Some(decryptor)).unwrap();
+        let mut sequence = 0_u16;
+        let mut shown = None;
+        for frame in 0..8_u32 {
+            let mut rgba = vec![0_u8; 320 * 240 * 4];
+            for pixel in rgba.as_chunks_mut::<4>().0 {
+                pixel.copy_from_slice(&[(frame * 20) as u8, 90, 170, 255]);
+            }
+            encoder
+                .push(
+                    rgba,
+                    Some(Duration::from_millis(33 * u64::from(frame))),
+                    Some(Duration::from_millis(33)),
+                )
+                .unwrap();
+            let Some((vp8, _)) = wait(|| encoder.encoded(1 << 20).unwrap()) else {
+                continue;
+            };
+            let kind = if vp8[0] & 1 == 0 {
+                FrameKind::VideoKey
+            } else {
+                FrameKind::VideoDelta
+            };
+            let Ok(sealed) = encryptor
+                .lock()
+                .unwrap()
+                .encrypt(0x1234, frame * 3000, kind, &vp8)
+            else {
+                continue;
+            };
+            let payloads = Vp8Payloader::default()
+                .payload(1200, &sealed.into())
+                .unwrap();
+            for packet in rtp!(payloads, 96, sequence, frame * 3000) {
+                decoder.push(packet, None, None).unwrap();
+            }
+            // The jitter buffer plays out in real time.
+            std::thread::sleep(Duration::from_millis(33));
+            shown = shown.or(decoder
+                .video()
+                .unwrap()
+                .map(|frame| (frame.width, frame.height)));
+        }
+        shown.or(wait(|| decoder.video().unwrap()).map(|frame| (frame.width, frame.height)))
+    }
+
+    #[test]
+    fn sealed_vp8_decodes_only_with_the_right_key() {
+        gst::init().unwrap();
+        let key = [5_u8; KEY_LEN];
+        assert_eq!(
+            video(Some(key), Some(key)),
+            Some((320, 240)),
+            "the right key decodes"
+        );
+        assert_eq!(
+            video(Some(key), Some([6; KEY_LEN])),
+            None,
+            "a wrong key decodes nothing"
+        );
+        assert_eq!(video(Some(key), None), None, "no key decodes nothing");
+        assert_eq!(
+            video(None, Some(key)),
+            None,
+            "unsealed video does not pass a strict receiver"
+        );
+    }
+}

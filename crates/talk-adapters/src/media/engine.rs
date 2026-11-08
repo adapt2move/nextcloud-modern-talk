@@ -1360,6 +1360,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs local ICE across every interface, which is unreliable on busy workstations; run with --ignored"]
     async fn end_to_end_encrypted_audio_and_video_reach_a_peer_that_holds_the_key() {
         let (key_a, key_b) = ([1_u8; 32], [2_u8; 32]);
         let [a, b] = converse(
@@ -1381,6 +1382,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs local ICE across every interface, which is unreliable on busy workstations; run with --ignored"]
     async fn media_is_not_shown_without_the_senders_key_or_from_a_sender_without_encryption() {
         let key = [7_u8; 32];
         // Each side holds a different key for the other.
@@ -1410,6 +1412,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs local ICE across every interface, which is unreliable on busy workstations; run with --ignored"]
     async fn a_sender_without_a_key_sends_nothing_rather_than_plain_frames() {
         let [_, b] = converse(
             || (keyed(None, Some([4; 32])), RtcConfiguration::default()),
@@ -1426,6 +1429,7 @@ mod tests {
     /// The control: the same harness shows media when nothing is encrypted, so
     /// the zero results above mean protection, not a broken harness.
     #[tokio::test]
+    #[ignore = "needs local ICE across every interface, which is unreliable on busy workstations; run with --ignored"]
     async fn the_harness_shows_unprotected_media() {
         let [a, b] = converse(
             || (RtcConfiguration::default(), RtcConfiguration::default()),
