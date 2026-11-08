@@ -635,6 +635,17 @@ impl Desktop {
         {
             return feedback.dismiss_theme(self.theme);
         }
+        // Actions on the failed-message banner sit on a red wash. The palette's
+        // green hover would clash with it, so they darken the wash in place.
+        if matches!(id, ElementId::Name(name) if name.starts_with("failed-")) {
+            return super::Theme {
+                hover: gpui::Hsla {
+                    a: 0.08,
+                    ..self.theme.text
+                },
+                ..self.theme
+            };
+        }
         // Header controls use the same opaque Windows fallback as their host.
         // Keep this on the shared control path so icon, disabled and focus
         // colors resolve together instead of inheriting dark-theme foregrounds.

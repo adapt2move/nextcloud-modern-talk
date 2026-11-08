@@ -486,6 +486,10 @@ impl Desktop {
         let gate = super::state::composer_send_decision(&self.snapshot, row);
         let result = self.thread_drafts.send(context, gate, self.port.as_mut());
         if let Ok(request) = result {
+            self.thread_composer.update(cx, |input, cx| {
+                input.reset();
+                cx.notify();
+            });
             self.thread_drafts.capture_editor(
                 context,
                 request,

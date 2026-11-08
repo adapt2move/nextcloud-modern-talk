@@ -252,6 +252,7 @@ pub struct Drafts {
     entries: Vec<Draft>,
     next_request: u64,
     targets: Vec<(ConversationRef, talk_core::ui::messaging::ComposeTarget)>,
+    restored: bool,
 }
 impl Drafts {
     pub fn restore_durable(
@@ -585,6 +586,10 @@ impl Drafts {
         draft.pending_may_clear = true;
         Ok(request)
     }
+    /// True once after a failed completion returned the submitted words to the draft.
+    pub fn take_restored(&mut self) -> bool {
+        std::mem::take(&mut self.restored)
+    }
     /// Capture the editor revision immediately after a successful send, only
     /// for the admitted request in the current compose target.
     pub fn capture_editor(
@@ -660,8 +665,11 @@ impl Drafts {
         let mut completed_reply = None;
         match result.result {
             Completion::Queued | Completion::ServerAccepted => {
-                // Never erase text the user changed while the operation was in flight.
-                if draft.pending_may_clear && draft.text == *submitted {
+                // The view empties the field on admission, so an empty draft is
+                // as settled as an unchanged one. Text the user changed while
+                // the operation was in flight is never erased.
+                let settled = draft.text == *submitted || draft.text.as_str().is_empty();
+                if draft.pending_may_clear && settled {
                     draft.text = Text::new("").expect("empty bounded text");
                     if draft.target.reply_to.is_some()
                         || draft.target.private_reply.is_some()
@@ -677,6 +685,20 @@ impl Drafts {
                 draft.uncertain = false;
             }
             Completion::Failed(_) => {
+                // Nothing was kept anywhere else: give the words back, ahead of
+                // anything typed meanwhile, unless both would not fit.
+                let kept = draft.text.as_str();
+                let restored = if kept.is_empty() {
+                    Some(submitted.clone())
+                } else if kept == submitted.as_str() {
+                    None
+                } else {
+                    Text::new(&format!("{}\n{kept}", submitted.as_str())).ok()
+                };
+                if let Some(restored) = restored {
+                    draft.text = restored;
+                    self.restored = true;
+                }
                 draft.pending = None;
                 draft.pending_origin = None;
                 draft.pending_editor = None;
@@ -1938,6 +1960,53 @@ pub(super) mod tests {
         }));
         assert!(!drafts.target(c).new_thread);
         assert!(drafts.text(c).is_empty());
+    }
+    #[test]
+    fn an_emptied_field_still_settles_and_a_failed_send_gives_its_words_back() {
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        let c = context(1);
+        let result = |request, result| SubmissionResult {
+            request,
+            context: c,
+            result,
+        };
+        // The view empties the field on admission; success leaves it empty.
+        let mut drafts = Drafts::default();
+        drafts.save(c, "gesendet").unwrap();
+        let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+        drafts.save(c, "").unwrap();
+        assert!(drafts.complete(result(request, Completion::Queued)));
+        assert!(drafts.text(c).is_empty() && !drafts.take_restored());
+        // Failure returns the words to the empty field exactly once.
+        drafts.save(c, "verloren?").unwrap();
+        let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+        drafts.save(c, "").unwrap();
+        assert!(drafts.complete(result(
+            request,
+            Completion::Failed(UnavailableReason::Unconfigured)
+        )));
+        assert_eq!(drafts.text(c), "verloren?");
+        assert!(drafts.take_restored() && !drafts.take_restored());
+        // Newer typing is kept after the returned words; an unchanged field is not doubled.
+        let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+        drafts.save(c, "neu").unwrap();
+        assert!(drafts.complete(result(
+            request,
+            Completion::Failed(UnavailableReason::Unconfigured)
+        )));
+        assert_eq!(drafts.text(c), "verloren?\nneu");
+        assert!(drafts.take_restored());
+        drafts.save(c, "gleich").unwrap();
+        let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+        assert!(drafts.complete(result(
+            request,
+            Completion::Failed(UnavailableReason::Unconfigured)
+        )));
+        assert_eq!(drafts.text(c), "gleich");
+        assert!(!drafts.take_restored());
     }
     #[test]
     fn only_correlated_confirmation_clears_unchanged_text() {

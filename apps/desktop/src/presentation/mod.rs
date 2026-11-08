@@ -1218,7 +1218,8 @@ impl Desktop {
                     .in_conversation(completed_context.unwrap_or(result.context))
                     .on_surface(None)
             });
-            reset_draft = completed_context == next.selected && composer_unchanged;
+            let restored = self.drafts.take_restored();
+            reset_draft = completed_context == next.selected && (composer_unchanged || restored);
             // A Busy acknowledgement leaves the same result in the producer's latest slot.
             self.pending_ack = Some(result);
         }
@@ -1228,7 +1229,8 @@ impl Desktop {
         if let Some(result) = next.submission
             && self.thread_drafts.complete(result)
         {
-            if thread_unchanged
+            let restored = self.thread_drafts.take_restored();
+            if (thread_unchanged || restored)
                 && self.thread_parent.is_some_and(|(context, _)| {
                     Some(context) == thread_completed_context && Some(context) == next.selected
                 })
@@ -2773,6 +2775,12 @@ impl Desktop {
                     let gate = state::composer_send_decision(&self.snapshot, row);
                     let result = self.drafts.send(context, gate, self.port.as_mut());
                     if let Ok(request) = &result {
+                        // The message already left the field; a rejected send
+                        // returns its words through the draft.
+                        self.composer.update(cx, |input, cx| {
+                            input.reset();
+                            cx.notify();
+                        });
                         self.drafts.capture_editor(
                             context,
                             *request,

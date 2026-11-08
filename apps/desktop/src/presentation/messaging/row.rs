@@ -189,17 +189,14 @@ impl Desktop {
             || keyboard_here;
         let shown = has_toolbar && surface_active;
         let last_own = delivery.is_some() && self.is_last_own_message(context, m, thread);
-        // Receipts are ambient: the newest own message carries its state at rest and
-        // earlier ones reveal it on hover. States that need an explanation (sending,
-        // waiting, unclear, failed) always say so in words beneath the message.
+        // A send feels instant: the message looks delivered and only the small
+        // clock where the ticks go reveals that it is still on its way. Receipts
+        // are ambient: the newest own message carries its state at rest and
+        // earlier ones reveal it on hover. Only an unclear or failed send says so
+        // in words beneath the message.
         let resting = delivery.filter(|indicator| !indicator.needs_attention());
         let attention = delivery.filter(|indicator| indicator.needs_attention());
-        let sending = matches!(
-            delivery,
-            Some(
-                DeliveryIndicator::Pending | DeliveryIndicator::Queued | DeliveryIndicator::Offline
-            )
-        );
+        let unsettled = delivery.is_some_and(DeliveryIndicator::is_unsettled);
         let metadata = |text: &str| {
             self.hint(text)
                 .text_size(self.sp(13.))
@@ -243,7 +240,11 @@ impl Desktop {
                                 )
                                 // Share the toolbar owner: GPUI group-hover styles
                                 // can retain the last in-window position on exit.
-                                .opacity(if last_own || surface_active { 1. } else { 0. }),
+                                .opacity(if last_own || surface_active || unsettled {
+                                    1.
+                                } else {
+                                    0.
+                                }),
                             )
                         })
                         .when(m.metadata.edited, |d| {
@@ -296,8 +297,6 @@ impl Desktop {
                     .flex()
                     .items_start()
                     .gap_2()
-                    // A send in flight is quieter than confirmed content but stays readable.
-                    .when(sending, |d| d.opacity(0.72))
                     .child(
                         div()
                             .flex_1()
@@ -750,7 +749,7 @@ impl Desktop {
                         )
                         // A grouped newest own message keeps its receipt in the
                         // gutter at rest; the time takes its place while hovered.
-                        .when_some(resting.filter(|_| last_own), |d, indicator| {
+                        .when_some(resting.filter(|_| last_own || unsettled), |d, indicator| {
                             d.child(
                                 div()
                                     .absolute()
@@ -1262,10 +1261,15 @@ enum DeliveryIndicator {
     Uncertain,
 }
 impl DeliveryIndicator {
-    /// Sending, waiting, unclear and failed sends explain themselves in words;
-    /// accepted and read are ambient receipts.
+    /// Unclear and failed sends explain themselves in words; sending and
+    /// waiting show a clock, accepted and read are ambient receipts.
     fn needs_attention(self) -> bool {
-        !matches!(self, Self::Accepted | Self::Read)
+        matches!(self, Self::Failed | Self::Uncertain)
+    }
+
+    /// Still on its way: shown as the clock, never as words.
+    fn is_unsettled(self) -> bool {
+        matches!(self, Self::Queued | Self::Offline | Self::Pending)
     }
 
     fn with_connection(self, offline: bool) -> Self {
@@ -1489,11 +1493,17 @@ mod tests {
     }
 
     #[test]
-    fn only_sent_and_read_are_ambient_and_every_other_state_explains_itself_in_words() {
+    fn only_unclear_and_failed_sends_explain_themselves_in_words() {
         for indicator in [
             DeliveryIndicator::Queued,
             DeliveryIndicator::Offline,
             DeliveryIndicator::Pending,
+        ] {
+            assert!(!indicator.needs_attention(), "{indicator:?}");
+            assert!(indicator.is_unsettled(), "{indicator:?}");
+            assert!(!indicator.label().is_empty());
+        }
+        for indicator in [
             DeliveryIndicator::Failed,
             DeliveryIndicator::Uncertain,
         ] {

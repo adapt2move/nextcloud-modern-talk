@@ -225,8 +225,7 @@ impl Desktop {
                     .line_height(self.sp(18.))
                     .text_color(color)
             };
-        // `focus` is the palette's text-safe accent (4.5:1 in every theme); `accent` is a fill.
-        let separator = || div().text_color(t.muted).child("·");
+                let separator = || div().text_color(t.muted).child("·");
         let role = if draft.retrying {
             crate::presentation::controls::BannerRole::Info
         } else {
@@ -300,7 +299,7 @@ impl Desktop {
                                                 retry,
                                                 "Diese Aktion kann gerade nicht erneut versucht werden.",
                                             ),
-                                            if retry { t.focus } else { t.disabled_fg },
+                                            if retry { t.text } else { t.disabled_fg },
                                             action(RecoveryAction::Retry(operation)),
                                         ))
                                         .when(draft.kind != FailedDraftKind::File, |row| {
@@ -311,7 +310,7 @@ impl Desktop {
                                                     restore,
                                                     "Beende zuerst die aktuelle Eingabe. Ein vorhandener Entwurf wird nicht überschrieben.",
                                                 ),
-                                                if restore { t.focus } else { t.disabled_fg },
+                                                if restore { t.text } else { t.disabled_fg },
                                                 action(RecoveryAction::Restore(operation)),
                                             ))
                                         })
