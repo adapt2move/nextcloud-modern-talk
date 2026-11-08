@@ -27,6 +27,7 @@ mod reference;
 mod resources;
 mod room_access;
 mod search_navigation;
+mod shell;
 mod sidebar_notifications;
 mod threads;
 mod typing;
@@ -59,6 +60,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         discovery::MESSAGES,
         reference::MESSAGES,
         search_navigation::MESSAGES,
+        shell::MESSAGES,
         sidebar_notifications::MESSAGES,
         resources::MESSAGES,
         threads::MESSAGES,
@@ -284,6 +286,7 @@ mod tests {
         for catalog in [
             account_search::MESSAGES,
             search_navigation::MESSAGES,
+            shell::MESSAGES,
             sidebar_notifications::MESSAGES,
             resources::MESSAGES,
             threads::MESSAGES,

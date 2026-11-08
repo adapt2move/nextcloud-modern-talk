@@ -394,7 +394,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('send-later cancellation returns focus to the composer', ['Notizen morgen teilen.X'])
     elif scenario == 'thread-message-tools':
         expect('thread translation and account navigation coexist',
-               ['Design review', 'Das passt', 'Original anzeigen', 'Threads', 'Erinnerungen'])
+               ['Design review', 'Das passt', 'Original anzeigen', 'Aktivität', 'Gespräche'])
         click('anzeigen', xmin=950, ymin=300)
         expect('thread translation can return to its original', ['Das klingt gut.'], ['Das passt'])
         click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1030,700))
@@ -412,7 +412,7 @@ def exercise(scenario, env, xid, out, label, large=False):
              'click', '--repeat', '12', '--delay', '70', '5'], env)
         expect_settled('thread reminder presets and submit remain reachable by native scrolling',
                        ['In 20 Minuten', 'THREADTOOLS'], footer_height=500)
-        click('Erinnern', xmin=890, ymin=570, inspected_point=(1280,800,1215,608))
+        click('Erinnern', xmin=890, ymin=560, inspected_point=(1280,800,1215,607))
         run(['xdotool', 'mousemove', '--window', xid, '1150', '550',
              'click', '--repeat', '6', '--delay', '70', '5'], env)
         expect_settled('unavailable fixture clock reports failure and retains the thread draft',
@@ -423,7 +423,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('Nachricht', xmin=280, ymin=650, inspected_point=(1280,800,400,700))
         type_text('MAINCALENDAR')
         expect_settled('main and thread composers retain independent drafts', ['MAINCALENDAR', 'THREADTOOLSX'])
-        click('send-later', inspected_point=(1280,800,770,716))
+        click('send-later', inspected_point=(1280,800,769,715))
         expect('main send-later stays beside the open thread', ['Nachricht planen', 'Design review', 'THREADTOOLSX'])
         key('Escape')
         type_text('X')
@@ -687,10 +687,48 @@ def exercise(scenario, env, xid, out, label, large=False):
         type_text('X')
         expect('modal returns focus to invoking composer', ['DRAFTALPHAX'])
     elif scenario == 'thread-list':
-        expect('subscribed threads page is visible', ['Threads', 'Design review'])
-        click('Designteam', ymin=250)
-        expect_settled('sidebar conversation leaves the Threads page',
-                       ['Nachricht an Designteam'], ['Design review'])
+        expect('subscribed threads open inside the single Activity destination',
+               ['Aktivität', 'Ungelesen', 'Design review', 'Antworten'])
+        click('Mara', ymin=200)
+        expect_settled('sidebar conversation leaves the Activity page',
+                       ['Nachricht an Mara Fischer'], ['Design review'])
+    elif scenario == 'sidebar-activity':
+        expect('Activity bundles unread, mentions, threads and reminders behind one entry',
+               ['Aktivität', 'Erwähnungen', 'Threads', 'Erinnerungen',
+                'Einladungen von anderen Servern', 'Perfekt'])
+        click('Erwähnungen', xmin=900, ymin=60)
+        expect_settled('mentions filter keeps mentioned rooms and drops other unread rooms',
+                       ['Neue Kampagne ab Montag'], ['Hast du später kurz Zeit'])
+        click('Threads', xmin=900, ymin=60)
+        expect_settled('threads filter lists subscribed threads', ['Design review', 'Offsite planen'])
+        click('Erinnerungen', xmin=900, ymin=60)
+        expect_settled('reminders filter lists reminders without a dialog',
+                       ['Die neue Navigation ist bereit', 'Aktivität'])
+        click('Mara', ymin=200)
+        expect_settled('opening a conversation leaves Activity', ['Nachricht an Mara Fischer'],
+                       ['Die neue Navigation ist bereit für einen letzten'])
+    elif scenario == 'sidebar-new-menu':
+        expect('plus menu offers a new conversation and the open-conversation directory',
+               ['Neues Gespräch', 'Offene Gespräche durchsuchen'])
+        key('Escape')
+        expect_settled('Escape closes the plus menu', ['Favoriten'], ['Offene Gespräche durchsuchen'])
+    elif scenario == 'sidebar-list-menu':
+        expect('list menu exposes filters and the archive',
+               ['Alle Gespräche', 'Nur Ungelesene', 'Nur Erwähnungen', 'Archiv'])
+        click('Archiv', xmin=20, ymin=330)
+        expect_settled('archive replaces the list and offers a way back',
+                       ['Archiv', 'Alt-Projekt 2024'], ['Nur Ungelesene'])
+    elif scenario == 'connection-details':
+        expect('status pill opens calm details with queue and retry',
+               ['Offline', 'Wartet auf Senden', 'Jetzt erneut verbinden'])
+        key('Escape')
+        expect_settled('Escape closes the details and keeps the pill', ['Offline'], ['Wartet auf Senden'])
+    elif scenario == 'chat-access-denied':
+        expect('revoked access shows one centered explanation instead of a banner',
+               ['Kein Zugriff auf dieses Gespräch', 'Erneut prüfen'], ['Nachricht an'])
+    elif scenario == 'chat-read-only':
+        expect('read-only rooms keep their timeline and show one slim bar',
+               ['Nur Lesezugriff', 'Du kannst hier nicht schreiben', 'Perfekt'], ['Nachricht an Produktteam'])
     elif scenario == 'thread':
         words = expect('thread pane uses shared message and composer surfaces',
                        ['Design review', '2 Antworten', 'Mara Fischer', 'Im Thread antworten'])
@@ -937,10 +975,13 @@ def exercise(scenario, env, xid, out, label, large=False):
         time.sleep(1)
         expect('sidebar action opens the selected room notification controls', ['Alle Nachrichten', 'Nur Erwähnungen', 'Anrufbenachrichtigungen'])
     elif scenario == 'search-filter':
-        click('Alle', ymin=190)
-        expect_settled('sidebar filters start with the loaded rooms', ['Produktteam', 'Designbesprechung', 'Erwähnungen'])
-        click('Erwähnungen')
-        expect_settled('mention filter keeps known mentions and explains unknown state', ['Produktteam', 'Erwähnungen sind noch nicht bekannt'], ['Designbesprechung'])
+        # The visibility filter lives in the list menu, not in permanent tabs.
+        # The "..." button of the 1280x800 fixture's list header (inspected capture).
+        run(['xdotool', 'mousemove', '--window', xid, '232', '153', 'click', '1'], env)
+        expect_settled('list menu offers the former tab filters', ['Alle Gespräche', 'Nur Ungelesene', 'Nur Erwähnungen'])
+        click('Erwähnungen', xmin=20, ymin=200)
+        expect_settled('mention filter keeps known mentions and explains unknown state',
+                       ['Produktteam', 'Erwähnungen sind noch nicht bekannt'], ['Designbesprechung'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])

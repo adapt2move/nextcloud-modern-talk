@@ -1,6 +1,7 @@
 //! Explicit development scenarios only. No server, credential or media operation occurs.
 mod content;
 mod dialog;
+mod shell;
 pub(super) use content::images as content_images;
 use talk_core::ui::presentation::{
     AccountView, CallStage, CallStreamView, CallTileKind, CallView, Completion, ContentState,
@@ -83,6 +84,16 @@ pub const SCENARIOS: &[&str] = &[
     "storage-recovery",
     "chat",
     "chat-grouped",
+    "sidebar-rich",
+    "sidebar-activity",
+    "sidebar-activity-mentions",
+    "sidebar-new-menu",
+    "sidebar-list-menu",
+    "sidebar-archive",
+    "sidebar-load-failed",
+    "connection-details",
+    "chat-access-denied",
+    "chat-read-only",
     "chat-busy",
     "chat-send-pending",
     "chat-message-states",
@@ -325,6 +336,9 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if let Some(state) = shell::snapshot_for(scenario) {
+        return state;
+    }
     if matches!(
         scenario,
         Some("connection-reconnecting" | "offline-with-queue" | "startup-from-cache")

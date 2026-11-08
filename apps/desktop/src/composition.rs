@@ -315,7 +315,6 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             | "thread-message-menu",
         ) => Some(Overlay::Thread),
         Some("search" | "search-navigation" | "account-search") => Some(Overlay::Search),
-        Some("account-reminders" | "account-reminders-partial") => Some(Overlay::Reminders),
         Some("federation-invitations" | "federation-pending") => Some(Overlay::Federation),
         Some("create34" | "create35") => Some(Overlay::Create),
         Some("poll-dialog" | "poll-drafts") => Some(Overlay::CreatePoll),
@@ -336,6 +335,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("status-picker") => Probe::Status,
         Some("status-message") => Probe::StatusMessage,
         Some("people-card") => Probe::PeopleCard,
+        Some("connection-details") => Probe::ConnectionDetails,
         _ => Probe::None,
     };
     let fixture_images = if services.accounts.is_none() {
@@ -420,7 +420,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             cx.new(|cx|{
                 #[cfg(feature = "dev-probes")]
                 if options.dev_latency { println!("DEV_STAGE desktop"); }
-                let mut desktop=Desktop::new(port,InitialView{probe,development,material_preview,material_images,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),threads_fixture:options.scenario.as_deref()==Some("thread-list"),thread_options_fixture:matches!(options.scenario.as_deref(),Some("thread-options"|"thread-offline")),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),sidebar_menu_fixture:options.scenario.as_deref()==Some("sidebar-room-menu"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
+                let mut desktop=Desktop::new(port,InitialView{probe,development,material_preview,material_images,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),sidebar_fixture:crate::presentation::sidebar::Fixture::for_scenario(options.scenario.as_deref()),thread_options_fixture:matches!(options.scenario.as_deref(),Some("thread-options"|"thread-offline")),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),sidebar_menu_fixture:options.scenario.as_deref()==Some("sidebar-room-menu"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
                 #[cfg(feature = "dev-probes")]
                 if options.dev_latency { println!("DEV_STAGE constructed"); }
                 #[cfg(feature = "dev-probes")]

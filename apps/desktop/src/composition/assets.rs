@@ -22,8 +22,6 @@ pub(super) fn materials() -> crate::presentation::MaterialImages {
     }
     crate::presentation::MaterialImages {
         grain: prepare(include_bytes!("../../assets/materials/grain.png")),
-        light: prepare(include_bytes!("../../assets/materials/grid-light.png")),
-        dark: prepare(include_bytes!("../../assets/materials/grid-dark.png")),
     }
 }
 impl AssetSource for Assets {

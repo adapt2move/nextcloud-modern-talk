@@ -681,7 +681,7 @@ impl Desktop {
                     self.overlay,
                 )
             } else {
-                self.destination != super::SidebarDestination::Inbox
+                self.destination != super::SidebarDestination::Activity
             };
         self.settle_pin_scroll_for_reduced_motion();
         self.message_ui
@@ -2214,24 +2214,22 @@ impl Desktop {
             };
         } else if state.initial_loading() || context_pending {
             body = body.child(self.collection_skeleton(Skeleton::Messages, "messages"));
+        } else if let Some(context) = self.snapshot.selected
+            && let Some(unavailable) = self.room_unavailable(state, context, cx)
+        {
+            // One calm, centered explanation instead of a banner over a blank
+            // timeline. The retained draft and the header stay in place.
+            body = body.child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(unavailable),
+            );
         } else {
             body = body.child(div().flex_1());
-        }
-        if !matches!(
-            self.snapshot.content,
-            ContentState::Ready | ContentState::Loading | ContentState::Offline
-        ) && let Some(context) = self.snapshot.selected
-        {
-            body = body.child(div().px_3().py_2().child(
-                self.room_entry_feedback(context, cx).unwrap_or_else(|| {
-                    self.collection_feedback(
-                        state,
-                        "retry-content",
-                        LocalAction::Intent(UiIntent::Refresh(context)),
-                        cx,
-                    )
-                }),
-            ));
         }
         if let Some(panel) = self
             .snapshot
@@ -2302,17 +2300,17 @@ impl Desktop {
         }
         body
     }
-    fn room_entry_feedback(&self, context: ConversationRef, cx: &Context<Self>) -> Option<Div> {
+    pub(super) fn room_entry_feedback(&self, context: ConversationRef, cx: &Context<Self>) -> Option<Div> {
         use talk_core::ui::{UnavailableReason, conversation::RemoteState};
         let reason = match self.snapshot.message_panel.as_ref()?.history {
             RemoteState::Failed(_, reason) => reason,
             _ => return None,
         };
-        let mut body = div().flex().items_center().gap_2();
+        let mut body = self.banner_frame(BannerRole::Warning).flex_wrap().gap_y_2();
         match reason {
             UnavailableReason::PasswordRequired => {
                 body = body
-                    .child(self.hint(self.l("Dieses Gespräch benötigt ein Passwort.")))
+                    .child(div().flex_1().min_w_0().child(self.l("Dieses Gespräch benötigt ein Passwort.")))
                     .child(
                         self.input_surface(&self.room_ui.join_password, cx)
                             .flex_1()

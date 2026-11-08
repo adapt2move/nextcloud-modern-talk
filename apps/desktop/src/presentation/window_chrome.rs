@@ -45,38 +45,51 @@ impl Desktop {
             Some(Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent)
         )
         .then(|| self.modal_scrim_color());
-        let drag = div()
-            .id("window-drag-region")
-            .window_control_area(WindowControlArea::Drag)
-            .h_full()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .items_center()
+        // Two drag regions flank the status pill: a pill is a control and must
+        // not start a window move. Both share the double-click and Linux
+        // move/menu behavior.
+        let drag_region = |id: &'static str| {
+            div()
+                .id(id)
+                .window_control_area(WindowControlArea::Drag)
+                .h_full()
+                .flex()
+                .items_center()
+                .on_click(|event, window, _| {
+                    if event.click_count() == 2 {
+                        if cfg!(target_os = "macos") {
+                            window.titlebar_double_click();
+                        } else if cfg!(target_os = "linux") {
+                            window.zoom_window();
+                        }
+                    }
+                })
+                .when(cfg!(target_os = "linux"), |d| {
+                    d.on_mouse_move(|event, window, _| {
+                        if event.pressed_button == Some(MouseButton::Left) {
+                            window.start_window_move();
+                        }
+                    })
+                    .on_mouse_down(MouseButton::Right, |event, window, _| {
+                        window.show_window_menu(event.position);
+                    })
+                })
+        };
+        let connection = self
+            .connection_status(cx)
+            .filter(|_| !self.projection_blocked);
+        let drag = drag_region("window-drag-region")
+            .when(connection.is_some(), |d| d.flex_none())
+            .when(connection.is_none(), |d| d.flex_1().min_w_0())
             .px_4()
+            .when(connection.is_some(), |d| d.pr_0())
             .when(traffic_lights && !navigation, |d| d.pl(px(88.)))
             .text_size(px(12.))
             .text_color(self.theme.muted)
-            .child("NextCloud Talk")
-            .on_click(|event, window, _| {
-                if event.click_count() == 2 {
-                    if cfg!(target_os = "macos") {
-                        window.titlebar_double_click();
-                    } else if cfg!(target_os = "linux") {
-                        window.zoom_window();
-                    }
-                }
-            })
-            .when(cfg!(target_os = "linux"), |d| {
-                d.on_mouse_move(|event, window, _| {
-                    if event.pressed_button == Some(MouseButton::Left) {
-                        window.start_window_move();
-                    }
-                })
-                .on_mouse_down(MouseButton::Right, |event, window, _| {
-                    window.show_window_menu(event.position);
-                })
-            });
+            .child("NextCloud Talk");
+        let drag_fill = connection
+            .is_some()
+            .then(|| drag_region("window-drag-fill").flex_1().min_w_0());
         div()
             .id("application-titlebar")
             .relative()
@@ -113,6 +126,8 @@ impl Desktop {
                 )
             })
             .child(drag)
+            .children(connection)
+            .children(drag_fill)
             .when_some(
                 self.download_status(cx)
                     .filter(|_| !self.projection_blocked),

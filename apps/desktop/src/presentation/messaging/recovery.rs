@@ -227,13 +227,16 @@ impl Desktop {
             };
         // `focus` is the palette's text-safe accent (4.5:1 in every theme); `accent` is a fill.
         let separator = || div().text_color(t.muted).child("·");
-        let status_color = if draft.retrying { t.muted } else { t.danger };
+        let role = if draft.retrying {
+            crate::presentation::controls::BannerRole::Info
+        } else {
+            crate::presentation::controls::BannerRole::Error
+        };
+        let status_color = role.foreground(t);
         Some(
-            div()
-                .flex()
+            self.banner_frame(role)
                 .items_start()
                 .gap_3()
-                .py(px(4.))
                 .child(
                     div()
                         .w(px(36.))

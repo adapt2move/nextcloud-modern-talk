@@ -194,10 +194,6 @@ impl Availability {
         self.help = Some(text);
         self
     }
-    pub fn beside_control(mut self) -> Self {
-        self.beside_control = true;
-        self
-    }
     pub fn explained_elsewhere(mut self) -> Self {
         self.explained_elsewhere = true;
         self
@@ -790,7 +786,7 @@ impl Desktop {
         let selected = match action {
             LocalAction::Navigate(context) if navigation_row => {
                 Some(context) == self.snapshot.selected
-                    && self.destination != super::SidebarDestination::Inbox
+                    && self.destination != super::SidebarDestination::Activity
             }
             LocalAction::Destination(destination) => self.destination == destination,
             LocalAction::Scale(n) => self.scale == n,
