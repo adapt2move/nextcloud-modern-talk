@@ -1,21 +1,14 @@
 //! Central own-copy resources: German source key, English, Spanish.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     (" · Du", " · You", " · Tú"),
-    (
-        "ARCHIVIERTE GESPRÄCHE",
-        "ARCHIVED CONVERSATIONS",
-        "CONVERSACIONES ARCHIVADAS",
-    ),
     ("Abbrechen", "Cancel", "Cancelar"),
     ("Ablehnen", "Decline", "Rechazar"),
-    ("Abmelden", "Sign out", "Cerrar sesión"),
     (
         "Abstand der Gesprächszeilen. Der Nachrichtenverlauf bleibt unverändert.",
         "Conversation row spacing. Message history spacing stays unchanged.",
         "Espaciado de las conversaciones. El historial de mensajes no cambia.",
     ),
     ("Abwesend", "Away", "Ausente"),
-    ("Aktiv", "Active", "Activas"),
     ("Alle", "All", "Todas"),
     ("Alles", "All", "Todo"),
     ("Allgemein", "General", "General"),
@@ -32,11 +25,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Anderer Host", "Different host", "Otro servidor"),
     ("Anheften", "Pin", "Fijar"),
-    (
-        "Anheften ist für dieses Gespräch nicht verfügbar.",
-        "Pinning is unavailable for this conversation.",
-        "No se puede fijar esta conversación.",
-    ),
     ("Ankommen", "Get started", "Empezar"),
     ("Anmeldung", "Sign in", "Inicio de sesión"),
     (
@@ -61,7 +49,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Annehmen", "Accept", "Aceptar"),
     ("Anruf beendet", "Call ended", "Llamada finalizada"),
-    ("Anruf beitreten", "Join call", "Unirse a la llamada"),
     ("Anruf verlassen", "Leave call", "Salir de la llamada"),
     (
         "Anruf wird angefragt …",
@@ -85,32 +72,12 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Vista temporalmente no disponible",
     ),
     ("Antworten", "Replies", "Respuestas"),
-    (
-        "Antworten ist erst möglich, wenn der Antwortverlauf geladen wurde.",
-        "You can reply once the thread has loaded.",
-        "Podrás responder cuando se haya cargado el hilo.",
-    ),
-    (
-        "Antworten noch nicht verfügbar",
-        "Replies are not available yet",
-        "Las respuestas aún no están disponibles",
-    ),
     ("Archiv", "Archive", "Archivo"),
     ("Archivieren", "Archive", "Archivar"),
     (
         "Archivstatus noch nicht bekannt.",
         "Archive status is not known yet.",
         "El estado de archivo aún no se conoce.",
-    ),
-    (
-        "Audio und Video stehen möglicherweise nicht zur Verfügung.",
-        "Audio and video may be unavailable.",
-        "Es posible que el audio y el vídeo no estén disponibles.",
-    ),
-    (
-        "Auf diesem Computer gespeichert.",
-        "Saved on this computer.",
-        "Guardado en este equipo.",
     ),
     (
         "Auf diesem Gerät gespeichert · unverschlüsselte private Datei.",
@@ -122,17 +89,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Save on this device",
         "Guardar en este dispositivo",
     ),
-    (
-        "Auffindbarkeit und Beitrittsrechte sind noch nicht bekannt. Ein Gastlink allein macht ein Gespräch nicht öffentlich auffindbar.",
-        "Discoverability and joining permissions are not known yet. A guest link alone does not make a conversation publicly discoverable.",
-        "Aún no se conocen la visibilidad ni los permisos de acceso. Un enlace de invitados no hace que una conversación aparezca públicamente.",
-    ),
     ("Auflegen", "Hang up", "Colgar"),
-    (
-        "Aufräumen des Schlüsselspeichers noch ausstehend.",
-        "Credential store cleanup is still pending.",
-        "La limpieza del almacén de credenciales está pendiente.",
-    ),
     ("Aus", "Off", "Desactivado"),
     ("Aus Archiv holen", "Unarchive", "Desarchivar"),
     (
@@ -176,38 +133,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Shown automatically when several accounts are signed in. Account selection is always available here.",
         "Se muestra automáticamente al iniciar sesión en varias cuentas. Siempre puedes elegir la cuenta aquí.",
     ),
-    (
-        "Automatischer Start ist ausgeschaltet.",
-        "Launch at login is turned off.",
-        "El inicio automático está desactivado.",
-    ),
-    (
-        "Automatischer Start ist eingerichtet.",
-        "Launch at login is registered.",
-        "El inicio automático está configurado.",
-    ),
-    (
-        "Automatischer Start wird eingerichtet …",
-        "Setting up launch at login …",
-        "Configurando el inicio automático…",
-    ),
     ("Banner", "Banner", "Aviso"),
-    (
-        "Banner bei minimiertem Fenster",
-        "Banners while minimized",
-        "Avisos con la ventana minimizada",
-    ),
     (
         "Banner erscheinen bei minimiertem Fenster. Fokus- und Ruhemodi des Betriebssystems gelten weiter.",
         "Banners appear when the window is minimized. OS Focus and Do Not Disturb still apply.",
         "Los banners aparecen con la ventana minimizada. Se respetan los modos de concentración y no molestar del sistema.",
-    ),
-    ("Banner: an", "Banners: on", "Banners: activados"),
-    ("Banner: aus", "Banners: off", "Banners: desactivados"),
-    (
-        "Bei Kameras wird das erste verfügbare Gerät verwendet.",
-        "For cameras, the first available device is used.",
-        "Para las cámaras se usa el primer dispositivo disponible.",
     ),
     (
         "Beim Anmelden starten",
@@ -230,21 +160,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "La entrada espera autorización",
     ),
     (
-        "Beitritte zu Konferenzanrufen, an denen dein Konto beteiligt ist, und persönliche Nachrichtenerinnerungen.",
-        "People joining conference calls your account belongs to, and personal message reminders.",
-        "Personas que se unen a llamadas de conferencia de tu cuenta y recordatorios personales de mensajes.",
-    ),
-    (
         "Benachrichtigung konnte nicht ausgegeben werden.",
         "The notification could not be submitted.",
         "No se pudo emitir la notificación.",
     ),
     ("Benachrichtigungen", "Notifications", "Notificaciones"),
-    (
-        "Benachrichtigungen des Betriebssystems anzeigen, wenn Talk minimiert ist.",
-        "Show system notifications when Talk is minimized.",
-        "Mostrar notificaciones del sistema cuando Talk está minimizado.",
-    ),
     (
         "Benachrichtigungen erlauben",
         "Allow notifications",
@@ -259,11 +179,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Benachrichtigungen sind auf diesem System nicht verfügbar.",
         "Notifications are unavailable on this system.",
         "Las notificaciones no están disponibles en este sistema.",
-    ),
-    (
-        "Benachrichtigungen sind noch nicht verfügbar.",
-        "Notifications are not available yet.",
-        "Las notificaciones aún no están disponibles.",
     ),
     (
         "Benachrichtigungsfreigabe wird geprüft.",
@@ -297,11 +212,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Bis zum Beitritt bleiben Mikrofon und Kamera aus. Erforderliche Freigaben werden vorher geprüft.",
         "Microphone and camera stay off until you join. Required permissions are checked first.",
         "El micrófono y la cámara permanecen apagados hasta que entres. Los permisos necesarios se comprueban antes.",
-    ),
-    (
-        "Bis zur Annahme bleiben Mikrofon und Kamera aus.\nBeim Annehmen: Mikrofon an, Kamera aus — nach Freigabe.",
-        "Microphone and camera stay off until you accept.\nOn accepting: microphone on, camera off — after permission.",
-        "El micrófono y la cámara permanecen apagados hasta que aceptes.\nAl aceptar: micrófono activado, cámara apagada, tras dar permiso.",
     ),
     (
         "Bitte eine HTTPS-Serveradresse ohne Zugangsdaten, Abfrage oder Fragment eingeben.",
@@ -355,17 +265,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudo abrir el navegador.",
     ),
     ("Chat", "Chat", "Chat"),
-    (
-        "Chat funktioniert ohne Mikrofon, Kamera oder Bildschirmfreigabe. Du kannst den Zugriff jetzt prüfen oder später freigeben.",
-        "Chat works without microphone, camera or screen sharing access. Check access now or grant it later.",
-        "El chat funciona sin acceso al micrófono, la cámara ni la pantalla. Puedes comprobarlo ahora o permitirlo después.",
-    ),
     ("Chat im Anruf", "Call chat", "Chat de la llamada"),
-    (
-        "Chat, Dateien und Anrufe für euer Team.",
-        "Chat, files and calls for your team.",
-        "Chat, archivos y llamadas para vuestro equipo.",
-    ),
     ("Cloud verbinden", "Connect cloud", "Conectar nube"),
     (
         "Control-Zustände · UI-Entwicklung",
@@ -424,11 +324,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "La conversación aún se está cargando.",
     ),
     (
-        "Das Gesprächsverzeichnis ist in diesem Client noch nicht verfügbar.",
-        "The conversation directory is not available in this client yet.",
-        "El directorio de conversaciones aún no está disponible en este cliente.",
-    ),
-    (
         "Das Konto hat sich geändert. Bitte wähle es erneut aus.",
         "The account has changed. Select it again.",
         "La cuenta ha cambiado. Vuelve a seleccionarla.",
@@ -437,16 +332,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Das Konto konnte nicht entfernt werden. Bitte versuche das Entfernen erneut.",
         "The account could not be removed. Please try removing it again.",
         "No se pudo eliminar la cuenta. Vuelve a intentar eliminarla.",
-    ),
-    (
-        "Das Konto konnte nicht verbunden werden. Bitte erneut versuchen.",
-        "Could not connect the account. Try again.",
-        "No se pudo conectar la cuenta. Inténtalo de nuevo.",
-    ),
-    (
-        "Das Konto konnte nicht vollständig aus dieser App entfernt werden. Bitte erneut versuchen oder den Speicherstatus prüfen.",
-        "The account could not be fully removed from this app. Try again or check the credential storage status.",
-        "No se pudo eliminar por completo la cuenta de esta aplicación. Vuelve a intentarlo o revisa el estado de las credenciales guardadas.",
     ),
     (
         "Das Update ist installiert.",
@@ -463,14 +348,8 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "The selected account changed. Please reload.",
         "Ha cambiado la cuenta seleccionada. Vuelve a cargarla.",
     ),
-    ("Datei anhängen", "Attach file", "Adjuntar archivo"),
     ("Datei herunterladen", "Download file", "Descargar archivo"),
     ("Dateien", "Files", "Archivos"),
-    (
-        "Dateien anhängen ist derzeit nicht verfügbar.",
-        "Attaching files is currently unavailable.",
-        "Actualmente no se pueden adjuntar archivos.",
-    ),
     (
         "Dateien anhängen ist in diesem Client noch nicht verfügbar.",
         "Attaching files is not available in this client yet.",
@@ -483,11 +362,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Guardar en un archivo privado sin cifrar. Solo tu usuario del sistema tendrá acceso.",
     ),
     (
-        "Dein Entwurf bleibt erhalten. Versuche es erneut, wenn du wieder verbunden bist.",
-        "Your draft is preserved. Try again when you are connected.",
-        "Se conserva el borrador. Vuelve a intentarlo cuando tengas conexión.",
-    ),
-    (
         "Dein Konto wurde nicht verbunden. Du kannst die Anmeldung erneut starten.",
         "Your account was not connected. You can start signing in again.",
         "No se ha conectado tu cuenta. Puedes volver a iniciar sesión.",
@@ -496,16 +370,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Deine Anmeldung ist nicht gespeichert.",
         "Your sign-in is not saved.",
         "Tu inicio de sesión no está guardado.",
-    ),
-    (
-        "Deine Anmeldung speichern.",
-        "Save your sign-in.",
-        "Guardar tu inicio de sesión.",
-    ),
-    (
-        "Deine Anmeldung wurde nicht als gespeichert bestätigt. Bitte versuche es erneut.",
-        "Your sign-in was not confirmed as saved. Please try again.",
-        "No se ha confirmado que tu sesión esté guardada. Vuelve a intentarlo.",
     ),
     (
         "Deine Berechtigungen können sich geändert haben.",
@@ -517,11 +381,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Deine Gespräche sind noch nicht bereit.",
         "Your conversations are not ready yet.",
         "Tus conversaciones aún no están listas.",
-    ),
-    (
-        "Deine Kamera ist aus",
-        "Your camera is off",
-        "Tu cámara está apagada",
     ),
     (
         "Deine Kamera ist nicht aktiv",
@@ -578,11 +437,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Der Link ist abgelaufen.",
         "The link has expired.",
         "El enlace ha caducado.",
-    ),
-    (
-        "Der Mikrofonpegel wird hier nach Freigabe automatisch gemessen. Kamera und Klingelton starten auf deinen Wunsch.",
-        "The microphone meter starts here after access is allowed. Start the camera and ringtone when you want.",
-        "El medidor del micrófono se inicia aquí al permitir el acceso. Inicia la cámara y el tono cuando quieras.",
     ),
     (
         "Der Schlüsselspeicher des Betriebssystems ist nicht verfügbar. Stelle den Zugriff wieder her und versuche das Entfernen erneut.",
@@ -660,11 +514,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Es necesario recuperar el estado de sesión guardado.",
     ),
     (
-        "Der geteilte Inhalt ist hier noch nicht verfügbar.",
-        "Shared content is not available here yet.",
-        "El contenido compartido aún no está disponible aquí.",
-    ),
-    (
         "Der laufende Anruf wird beendet.",
         "The current call will end.",
         "La llamada en curso finalizará.",
@@ -715,11 +564,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El permiso de llamada aún no se conoce.",
     ),
     (
-        "Die Antworten konnten noch nicht geladen werden. Dein Entwurf im Gespräch bleibt erhalten.",
-        "Replies have not loaded yet. Your conversation draft is preserved.",
-        "Las respuestas aún no se han cargado. Se conserva el borrador de la conversación.",
-    ),
-    (
         "Die Berechtigung zum Erstellen ist nicht bekannt. Bitte neu laden.",
         "Permission to create conversations is unknown. Please reload.",
         "Se desconoce el permiso para crear conversaciones. Vuelve a cargar.",
@@ -745,29 +589,14 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudieron guardar los ajustes. Se han restaurado los valores confirmados.",
     ),
     (
-        "Die Entfernung ist noch nicht bestätigt. Bitte prüfe den Speicherstatus und versuche es erneut.",
-        "Removal is not confirmed yet. Check the credential storage status and try again.",
-        "La eliminación aún no está confirmada. Revisa el estado de las credenciales guardadas y vuelve a intentarlo.",
-    ),
-    (
         "Die Freigabe für den Schlüsselspeicher wurde abgebrochen. Versuche das Entfernen erneut und bestätige die Systemabfrage.",
         "Credential-store authorization was cancelled. Try removing the account again and confirm the system prompt.",
         "Se canceló la autorización del almacén de credenciales. Vuelve a eliminar la cuenta y confirma la solicitud del sistema.",
     ),
     (
-        "Die Freigabe kann hier noch nicht einzeln beendet werden. Du kannst den Anruf verlassen.",
-        "Sharing cannot be stopped separately here yet. You can leave the call.",
-        "Aún no se puede detener la pantalla compartida por separado. Puedes salir de la llamada.",
-    ),
-    (
         "Die Geräteauswahl hat sich geändert. Bitte erneut versuchen.",
         "The device selection changed. Please try again.",
         "Ha cambiado la selección de dispositivos. Inténtalo de nuevo.",
-    ),
-    (
-        "Die Geräteauswahl ist derzeit nicht verfügbar.",
-        "Device selection is currently unavailable.",
-        "La selección de dispositivos no está disponible en este momento.",
     ),
     (
         "Die Gerätefreigabe wurde nicht erteilt.",
@@ -793,16 +622,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die Kontoverwaltung ist nicht verfügbar. Bitte starte die App neu und versuche das Entfernen erneut.",
         "Account management is unavailable. Restart the app and try removing the account again.",
         "La gestión de cuentas no está disponible. Reinicia la app y vuelve a eliminar la cuenta.",
-    ),
-    (
-        "Die Mediensteuerung ist in diesem Client noch nicht verfügbar.",
-        "Media controls are not available in this client yet.",
-        "Los controles multimedia aún no están disponibles en este cliente.",
-    ),
-    (
-        "Die Personensuche ist noch nicht verfügbar.",
-        "People search is not available yet.",
-        "La búsqueda de personas aún no está disponible.",
     ),
     (
         "Die Prüfung ist derzeit nicht möglich. Bitte versuche es später erneut.",
@@ -865,11 +684,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Se ha cancelado la solicitud de acceso.",
     ),
     (
-        "Die Zugriffsprüfung ist fehlgeschlagen. Bitte erneut prüfen.",
-        "The access check failed. Check again.",
-        "La comprobación de acceso falló. Compruébalo de nuevo.",
-    ),
-    (
         "Die Zugriffsprüfung ist nicht verfügbar.",
         "The access check is unavailable.",
         "La comprobación de acceso no está disponible.",
@@ -878,11 +692,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die Zugriffsprüfung wurde beendet.",
         "The access check has shut down.",
         "La comprobación de acceso se ha detenido.",
-    ),
-    (
-        "Die empfohlene Ablage deines Betriebssystems.",
-        "The storage recommended by your operating system.",
-        "El almacenamiento recomendado por tu sistema operativo.",
     ),
     (
         "Die gespeicherte Anmeldung konnte nicht sicher entfernt werden. Bitte versuche es erneut. Der Speicherfehler steht im lokalen Diagnoseprotokoll.",
@@ -1032,11 +841,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Puedes chatear sin estos permisos y cambiarlos más tarde en Ajustes.",
     ),
     (
-        "Du kannst währenddessen ein anderes Gespräch öffnen.",
-        "You can open another conversation in the meantime.",
-        "Mientras tanto, puedes abrir otra conversación.",
-    ),
-    (
         "Du trittst erst mit „Jetzt teilnehmen“ bei.",
         "You join only when you choose “Join now”.",
         "Solo entrarás cuando elijas «Unirse ahora».",
@@ -1094,11 +898,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Un guardado anterior de este inicio de sesión no se ha completado. La cuenta sigue desconectada. Vuelve a intentar eliminarla.",
     ),
     (
-        "Ein gemeinsames Gespräch erstellen",
-        "Create a group conversation",
-        "Crear una conversación de grupo",
-    ),
-    (
         "Ein konsistenter Kontostand ist erforderlich. Inhalte und normale Aktionen sind gesperrt.",
         "A consistent account state is required. Content and ordinary actions are blocked.",
         "Se necesita un estado de cuenta coherente. El contenido y las acciones normales están bloqueados.",
@@ -1107,11 +906,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Ein ruhiger Platz für alles,\nwas ihr miteinander besprecht.",
         "A calm space for everything\nyou discuss together.",
         "Un espacio tranquilo para todo\nlo que compartís en equipo.",
-    ),
-    (
-        "Eine Kameravorschau ist derzeit nicht verfügbar.",
-        "Camera preview is currently unavailable.",
-        "La vista previa de la cámara no está disponible en este momento.",
     ),
     (
         "Eine Notiz an dich selbst hat keinen Anruf.",
@@ -1145,11 +939,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Invitations are currently unavailable.",
         "Las invitaciones no están disponibles en este momento.",
     ),
-    (
-        "Einladungen, Gastlink und Sichtbarkeit stellst du im nächsten Schritt ein.",
-        "Set invitations, guest link and visibility in the next step.",
-        "Configura invitaciones, enlace de invitados y visibilidad en el siguiente paso.",
-    ),
     ("Einstellungen", "Settings", "Ajustes"),
     (
         "Einstellungen schließen",
@@ -1157,19 +946,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Cerrar ajustes",
     ),
     ("Einstellungen öffnen", "Open settings", "Abrir ajustes"),
-    ("Entdecken", "Discover", "Descubrir"),
-    ("Enter senden", "Enter to send", "Intro para enviar"),
-    (
-        "Enter senden · ⇧ Enter neue Zeile",
-        "Enter to send · ⇧ Enter for a new line",
-        "Intro para enviar · ⇧ Intro para una nueva línea",
-    ),
     ("Entspannt", "Relaxed", "Espaciosa"),
-    (
-        "Ergebnis ausstehend",
-        "Result pending",
-        "Resultado pendiente",
-    ),
     (
         "Erlaube den Kamerazugriff für Desktop-Apps.",
         "Allow desktop apps to access your camera.",
@@ -1204,12 +981,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Erstellen", "Create", "Crear"),
     ("Euer Team.", "Your team.", "Vuestro equipo."),
     ("Eure Cloud.", "Your cloud.", "Vuestra nube."),
-    (
-        "Eure NextCloud. Deine gewohnten Zugangsdaten.",
-        "Your team's NextCloud. Your familiar sign-in details.",
-        "La NextCloud de tu equipo. Tus datos de acceso habituales.",
-    ),
-    ("FAVORITEN", "FAVORITES", "FAVORITAS"),
     ("Farbwelt", "Color palette", "Paleta de colores"),
     ("Favoriten", "Favorites", "Favoritas"),
     ("Fenster minimieren", "Minimize window", "Minimizar ventana"),
@@ -1224,12 +995,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Fictional availability. No network or file action.",
         "Disponibilidad ficticia. Sin acciones de red ni de archivos.",
     ),
-    ("Filter leeren", "Clear filter", "Borrar filtro"),
-    (
-        "Finde Gespräche, die für dich im Verzeichnis freigegeben sind.",
-        "Find conversations available to you in the directory.",
-        "Encuentra conversaciones disponibles para ti en el directorio.",
-    ),
     ("Freigabe abgelehnt.", "Access denied.", "Acceso denegado."),
     (
         "Freigabe ausstehend",
@@ -1237,26 +1002,15 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Permiso pendiente",
     ),
     ("Freigabe beenden", "Stop sharing", "Dejar de compartir"),
-    ("Freigabe prüfen", "Check permission", "Comprobar permiso"),
     (
         "Für Stimmen und Hinweistöne.",
         "For voices and notification sounds.",
         "Para voces y sonidos de aviso.",
     ),
     (
-        "Für Vorträge mit vielen Zuhörenden.",
-        "For talks with a large audience.",
-        "Para charlas con muchos oyentes.",
-    ),
-    (
         "Für alle Gespräche.",
         "For all conversations.",
         "Para todas las conversaciones.",
-    ),
-    (
-        "Für diesen Test ist kein verfügbares Gerät ausgewählt.",
-        "No available device is selected for this check.",
-        "No hay un dispositivo disponible seleccionado para esta prueba.",
     ),
     (
         "Für diesen Test ist kein verfügbares Gerät mit Freigabe ausgewählt.",
@@ -1273,21 +1027,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Choose a screen or window for each share.",
         "Elige una pantalla o ventana cada vez que compartas.",
     ),
-    (
-        "Für spontane Gespräche. Beitritt mit Gerätecheck.",
-        "For spontaneous conversations. Join after a device check.",
-        "Para conversaciones espontáneas. Se realiza una comprobación de dispositivos antes de entrar.",
-    ),
     ("Gastzugang", "Guest access", "Acceso de invitados"),
     (
         "Geladene Inhalte durchsuchen …",
         "Search loaded content …",
         "Buscar en el contenido cargado…",
-    ),
-    (
-        "Gerät wird gestartet …",
-        "Starting device…",
-        "Iniciando dispositivo…",
     ),
     ("Geräte", "Devices", "Dispositivos"),
     (
@@ -1314,11 +1058,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Gespeichert · nicht verbunden",
         "Saved · disconnected",
         "Guardada · desconectada",
-    ),
-    (
-        "Gespeicherte Auswahl für diesen Computer. Tests starten nur auf deinen Wunsch.",
-        "Saved device choices for this computer. Checks start only when you request them.",
-        "Dispositivos guardados para este ordenador. Las pruebas solo empiezan cuando las solicitas.",
     ),
     (
         "Gespeicherte Geräteauswahl",
@@ -1359,11 +1098,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Filter conversations …",
         "Filtrar conversaciones…",
     ),
-    (
-        "Gespräche neu laden",
-        "Reload conversations",
-        "Recargar conversaciones",
-    ),
     ("Gesprächsart", "Conversation type", "Tipo de conversación"),
     (
         "Gesprächsdetails",
@@ -1371,11 +1105,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Detalles de la conversación",
     ),
     ("Gesprächsraum", "Conversation room", "Sala de conversación"),
-    (
-        "Geteilte Dateien erscheinen hier, sobald sie verfügbar sind.",
-        "Shared files appear here when available.",
-        "Los archivos compartidos aparecerán aquí cuando estén disponibles.",
-    ),
     (
         "Gib die Adresse eurer NextCloud ein.",
         "Enter your team's NextCloud address.",
@@ -1385,11 +1114,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Gib einen Namen für das Gespräch ein.",
         "Enter a conversation name.",
         "Introduce un nombre para la conversación.",
-    ),
-    (
-        "Gib einen Namen oder einen Suchbegriff ein.",
-        "Enter a name or search term.",
-        "Introduce un nombre o un término de búsqueda.",
     ),
     (
         "Gilt nur beim automatischen Start. Ein normaler Start öffnet das Fenster.",
@@ -1404,13 +1128,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Conversación de grupo",
     ),
     ("Gäste", "Guests", "Invitados"),
-    ("Hallo, {name}.", "Hello, {name}.", "Hola, {name}."),
     ("Hell", "Light", "Claro"),
-    (
-        "Herunterladen ist derzeit nicht verfügbar.",
-        "Downloading is currently unavailable.",
-        "La descarga no está disponible en este momento.",
-    ),
     (
         "Herunterladen ist in diesem Client noch nicht verfügbar.",
         "Downloading is not available in this client yet.",
@@ -1463,11 +1181,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "In diesem UI-Beispiel nicht verfügbar.",
         "Unavailable in this UI example.",
         "No disponible en este ejemplo de interfaz.",
-    ),
-    (
-        "In geladenen Inhalten suchen",
-        "Search loaded content",
-        "Buscar en el contenido cargado",
     ),
     ("Jetzt teilnehmen", "Join now", "Unirse ahora"),
     ("Kalender", "Calendar", "Calendario"),
@@ -1532,21 +1245,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No hay ningún dispositivo disponible.",
     ),
     (
-        "Kein Videobild verfügbar",
-        "No video available",
-        "Vídeo no disponible",
-    ),
-    (
-        "Kein Zugriff auf dieses Gespräch.",
-        "No access to this conversation.",
-        "Sin acceso a esta conversación.",
-    ),
-    (
-        "Keine Berechtigung für diese Aktion. Dein Entwurf bleibt erhalten.",
-        "This action is not permitted. Your draft is preserved.",
-        "No tienes permiso para esta acción. Se conserva el borrador.",
-    ),
-    (
         "Keine Dateien geladen",
         "No files loaded",
         "No hay archivos cargados",
@@ -1555,11 +1253,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Keine Gespräche in diesem Filter.",
         "No conversations match this filter.",
         "Ninguna conversación coincide con este filtro.",
-    ),
-    (
-        "Keine Kameravorschau aktiv.",
-        "No camera preview running.",
-        "No hay vista previa de cámara activa.",
     ),
     (
         "Keine archivierten Gespräche geladen.",
@@ -1589,11 +1282,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Entradas en conferencias y recordatorios personales.",
     ),
     ("Konferenzen", "Conferences", "Conferencias"),
-    (
-        "Konferenzen, an denen dein Konto beteiligt ist, und persönliche Nachrichtenerinnerungen.",
-        "Conferences your account belongs to and personal message reminders.",
-        "Conferencias a las que pertenece tu cuenta y recordatorios personales de mensajes.",
-    ),
     ("Konten", "Accounts", "Cuentas"),
     ("Konto", "Account", "Cuenta"),
     (
@@ -1622,11 +1310,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Kontoeinstellungen neu laden",
         "Reload account settings",
         "Recargar ajustes de la cuenta",
-    ),
-    (
-        "Kontoeinstellungen werden gespeichert …",
-        "Saving account settings…",
-        "Guardando ajustes de la cuenta…",
     ),
     (
         "Kopieren ist für diesen Entwurf nicht freigegeben.",
@@ -1701,11 +1384,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El acceso al micrófono permite que los demás te oigan.",
     ),
     (
-        "Mit Warteraum und geregelten Sprechrechten.",
-        "With a lobby and managed speaking permissions.",
-        "Con sala de espera y permisos de intervención gestionados.",
-    ),
-    (
         "Mit deiner Cloud verbinden",
         "Connect to your team's cloud",
         "Conectar con la nube de tu equipo",
@@ -1714,21 +1392,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Mit einer Person sprechen",
         "Talk to one person",
         "Hablar con una persona",
-    ),
-    (
-        "Mitteilungen für neue Nachrichten und Anrufe erhalten.",
-        "Receive notifications for new messages and calls.",
-        "Recibe notificaciones de nuevos mensajes y llamadas.",
-    ),
-    (
-        "Nach dem Beenden erneut anmelden. Es wird nicht automatisch später gespeichert.",
-        "Sign in again after quitting. It will not be saved automatically later.",
-        "Vuelve a iniciar sesión después de cerrar. No se guardará automáticamente más tarde.",
-    ),
-    (
-        "Nach einer Freigabe kann ein Neustart der App nötig sein.",
-        "You may need to restart the app after granting access.",
-        "Puede ser necesario reiniciar la aplicación después de permitir el acceso.",
     ),
     ("Nach oben", "Move up", "Subir"),
     ("Nach unten", "Move down", "Bajar"),
@@ -1741,19 +1404,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Nachricht senden", "Send message", "Enviar mensaje"),
     ("Nachrichten", "Messages", "Mensajes"),
     (
-        "Nachrichten bleiben in diesem Gespräch.",
-        "Messages stay in this conversation.",
-        "Los mensajes permanecen en esta conversación.",
-    ),
-    (
         "Nachrichten dieses Anrufs sind noch nicht geöffnet.",
         "Messages for this call have not been opened yet.",
         "Los mensajes de esta llamada aún no están abiertos.",
-    ),
-    (
-        "Nachrichten konnten nicht aktualisiert werden.",
-        "Messages could not be updated.",
-        "No se pudieron actualizar los mensajes.",
     ),
     ("Nachrichten testen", "Test messages", "Probar mensajes"),
     ("Name", "Name", "Nombre"),
@@ -1781,24 +1434,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Nicht stören", "Do not disturb", "No molestar"),
     ("Nicht verbunden", "Disconnected", "Desconectada"),
     (
-        "Nichts Wichtiges verpassen",
-        "Stay informed",
-        "Mantente al día",
-    ),
-    (
-        "Noch kein Eingangssignal gemessen.",
-        "No input signal measured yet.",
-        "Aún no se ha medido ninguna señal de entrada.",
-    ),
-    (
         "Noch kein Konto verbunden.",
         "No account connected yet.",
         "Aún no hay ninguna cuenta conectada.",
-    ),
-    (
-        "Noch kein automatischer Updater.",
-        "Automatic updates are not available yet.",
-        "Las actualizaciones automáticas aún no están disponibles.",
     ),
     (
         "Noch keine Nachrichten.",
@@ -1811,12 +1449,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Aún no hay una vista previa disponible",
     ),
     ("Noch nicht bekannt", "Not known yet", "Aún no se conoce"),
-    (
-        "Noch nicht verbunden.",
-        "Not connected yet.",
-        "Aún sin conexión.",
-    ),
-    ("Normale Nachrichten", "Messages", "Mensajes"),
     ("Notiz an mich", "Note to self", "Nota personal"),
     (
         "Nur für diese Sitzung",
@@ -1828,28 +1460,13 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Signed in for this session only. Sign in again after quitting.",
         "Sesión iniciada solo temporalmente. Vuelve a iniciarla después de cerrar.",
     ),
-    (
-        "Nur geladene Gespräche sowie Nachrichten und Dateien des offenen Gesprächs.",
-        "Only loaded conversations, and messages and files in the open conversation.",
-        "Solo las conversaciones cargadas y los mensajes y archivos de la conversación abierta.",
-    ),
     ("Nächstes Element", "Next control", "Siguiente control"),
     (
         "Offene Gespräche",
         "Open conversations",
         "Conversaciones abiertas",
     ),
-    (
-        "Offene Gespräche entdecken",
-        "Discover open conversations",
-        "Descubrir conversaciones abiertas",
-    ),
     ("Offline", "Offline", "Sin conexión"),
-    (
-        "Offline · Letzter geladener Stand. Entwürfe werden nicht automatisch gesendet.",
-        "Offline · Last loaded state. Drafts are not sent automatically.",
-        "Sin conexión · Última información cargada. Los borradores no se envían automáticamente.",
-    ),
     (
         "Optional für eine bestätigte NextCloud-Kalenderquelle dieses Kontos. Standardmäßig aus.",
         "Optional for a verified NextCloud Calendar source for this account. Off by default.",
@@ -1924,11 +1541,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Step {step} of 3",
         "Paso {step} de 3",
     ),
-    (
-        "Schön, dass du da bist.",
-        "Welcome to your workspace.",
-        "Te damos la bienvenida a tu espacio de trabajo.",
-    ),
     ("Seitenleiste", "Sidebar", "Barra lateral"),
     (
         "Seitenleiste ausblenden",
@@ -1950,11 +1562,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten.",
         "Sending is currently unavailable. Your draft is preserved.",
         "No se puede enviar en este momento. Se conserva el borrador.",
-    ),
-    (
-        "Senden nicht verfügbar",
-        "Sending unavailable",
-        "Envío no disponible",
     ),
     (
         "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich.",
@@ -1983,11 +1590,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Iniciar sesión de forma segura",
     ),
     (
-        "Sicherer Schlüsselspeicher",
-        "Secure credential store",
-        "Almacén seguro de credenciales",
-    ),
-    (
         "Sicherheitsvorgabe noch nicht erfüllt",
         "Security requirement not met yet",
         "Aún no se cumple el requisito de seguridad",
@@ -1999,7 +1601,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Así se ven tus mensajes.",
     ),
     ("Speicher", "Storage", "Almacenamiento"),
-    ("Speichern läuft …", "Saving …", "Guardando…"),
     (
         "Speicherwahl erforderlich",
         "Choose credential storage",
@@ -2014,19 +1615,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Später ansehen", "View later", "Ver más tarde"),
     ("Später einrichten", "Set up later", "Configurar más tarde"),
     (
-        "Stable enthält reguläre Versionen. Prerelease enthält Vorabversionen. Beide werden künftig über GitHub Releases angeboten.",
-        "Stable contains regular releases. Prerelease contains preview versions. Both will use GitHub Releases in the future.",
-        "Stable incluye versiones estables y Prerelease versiones preliminares. Ambas se ofrecerán a través de GitHub Releases.",
-    ),
-    (
         "Standardbereich verwenden",
         "Use default section",
         "Usar sección predeterminada",
-    ),
-    (
-        "Standardwerte aktiv.",
-        "Default settings are active.",
-        "Se están usando los ajustes predeterminados.",
     ),
     (
         "Starte die App nur neu, wenn macOS dich nach der Freigabe dazu auffordert.",
@@ -2060,11 +1651,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Predeterminado del sistema",
     ),
     (
-        "Systemstandard wird verwendet, weil das gespeicherte Gerät fehlt.",
-        "Using the system default because the saved device is missing.",
-        "Se usa el predeterminado del sistema porque falta el dispositivo guardado.",
-    ),
-    (
         "Talk zusammen mit deinem Betriebssystem starten.",
         "Start Talk when you sign in to your computer.",
         "Iniciar Talk al entrar en tu equipo.",
@@ -2075,7 +1661,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Teamwork with NextCloud.",
         "Trabajo en equipo con NextCloud.",
     ),
-    ("Teilen", "Share", "Compartir"),
     ("Teilnehmende", "Participants", "Participantes"),
     (
         "Teilnehmende nicht verfügbar",
@@ -2087,8 +1672,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Participant information is not available yet.",
         "Los datos de participantes aún no están disponibles.",
     ),
-    ("Test aktiv", "Check running", "Prueba activa"),
-    ("Test beenden", "Stop check", "Detener prueba"),
     (
         "Testbenachrichtigung",
         "Test notification",
@@ -2111,24 +1694,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Textgröße", "Text size", "Tamaño del texto"),
     ("Ton", "Sound", "Sonido"),
-    ("Ton: an", "Sound: on", "Sonido: activado"),
-    ("Ton: aus", "Sound: off", "Sonido: desactivado"),
-    ("Töne abspielen", "Play sounds", "Reproducir sonidos"),
-    (
-        "Töne für zugelassene Benachrichtigungen.",
-        "Sounds for permitted notifications.",
-        "Sonidos para las notificaciones permitidas.",
-    ),
-    (
-        "UI-ENTWICKLUNG · Fiktive Daten · Kein Backend · Keine Aufnahme",
-        "UI DEVELOPMENT · Fictional data · No backend · No capture",
-        "DESARROLLO DE INTERFAZ · Datos ficticios · Sin servidor · Sin captura",
-    ),
-    (
-        "UI-ENTWICKLUNG · Fiktive Gespräche · Lokaler Gerätetest aktiv",
-        "UI DEVELOPMENT · Fictional conversations · Local device check running",
-        "DESARROLLO DE INTERFAZ · Conversaciones ficticias · Prueba local de dispositivos activa",
-    ),
     ("Unbekannt", "Unknown", "Desconocido"),
     (
         "Unbekannte Gesprächsart",
@@ -2162,11 +1727,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Check for updates",
         "Buscar actualizaciones",
     ),
-    (
-        "Verbinde dein Konto, um deine Gespräche zu sehen.",
-        "Connect your account to see your conversations.",
-        "Conecta tu cuenta para ver tus conversaciones.",
-    ),
     ("Verbinden", "Connect", "Conectar"),
     (
         "Verbindung fehlgeschlagen",
@@ -2188,11 +1748,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Connection interrupted",
         "Conexión interrumpida",
     ),
-    (
-        "Verbindung unterbrochen · Verbindung wird wiederhergestellt.",
-        "Connection interrupted · Reconnecting.",
-        "Conexión interrumpida · Reconectando.",
-    ),
     ("Verbindung wird aufgebaut …", "Connecting …", "Conectando…"),
     (
         "Verbindung wird wiederhergestellt …",
@@ -2201,57 +1756,20 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Verbunden", "Connected", "Conectado"),
     ("Verfügbar", "Available", "Disponible"),
-    (
-        "Verfügbarkeit noch unbekannt.",
-        "Availability is not known yet.",
-        "La disponibilidad aún no se conoce.",
-    ),
     ("Verlassen", "Leave", "Salir"),
     ("Vertraulich", "Classified", "Clasificada"),
-    ("Verzeichnis laden", "Load directory", "Cargar directorio"),
-    (
-        "Verzeichnis nicht verfügbar",
-        "Directory unavailable",
-        "Directorio no disponible",
-    ),
     (
         "Vom Server angenommen",
         "Accepted by server",
         "Aceptado por el servidor",
     ),
-    (
-        "Vom Server angenommen. Empfängerzustellung ist damit nicht bestätigt.",
-        "Accepted by the server. Delivery to recipients is not confirmed.",
-        "Aceptado por el servidor. No se confirma la entrega a los destinatarios.",
-    ),
     ("Vorheriges Element", "Previous control", "Control anterior"),
     ("Vorlage", "Preset", "Plantilla"),
-    (
-        "Vorlagen sind derzeit nicht verfügbar. Es wird kein Gespräch erstellt.",
-        "Presets are currently unavailable. No conversation will be created.",
-        "Las plantillas no están disponibles. No se creará ninguna conversación.",
-    ),
     ("Vorschau", "Preview", "Vista previa"),
-    ("Vorschau testen", "Test preview", "Probar vista previa"),
-    (
-        "Vorschauversion · Noch nicht verbunden",
-        "Preview version · Not connected yet",
-        "Versión preliminar · Aún sin conexión",
-    ),
-    (
-        "WEITERE GESPRÄCHE",
-        "OTHER CONVERSATIONS",
-        "OTRAS CONVERSACIONES",
-    ),
     (
         "WILLKOMMEN BEI TALK",
         "WELCOME TO TALK",
         "TE DAMOS LA BIENVENIDA A TALK",
-    ),
-    (
-        "Warte auf deine Anmeldung …",
-        "Waiting for you to sign in …",
-        "Esperando a que inicies sesión…",
     ),
     (
         "Wartet auf Hochladen …",
@@ -2261,29 +1779,14 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Webinar", "Webinar", "Seminario web"),
     ("Weiter", "Continue", "Continuar"),
     (
-        "Weiter: Teilnehmende",
-        "Next: participants",
-        "Siguiente: participantes",
-    ),
-    (
         "Weitere Gespräche",
         "Other conversations",
         "Otras conversaciones",
     ),
     (
-        "Weitere Gespräche durch Scrollen",
-        "Scroll for more conversations",
-        "Desplázate para ver más conversaciones",
-    ),
-    (
         "Weitere Teilnehmende sind nicht geladen.",
         "More participants have not been loaded.",
         "Hay más participantes que aún no se han cargado.",
-    ),
-    (
-        "Wichtig und dringend",
-        "Important and urgent",
-        "Importantes y urgentes",
     ),
     (
         "Wichtige Hinweise testen",
@@ -2296,22 +1799,15 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Recuperación necesaria",
     ),
     ("Wiederholen", "Redo", "Rehacer"),
-    ("Wird gespeichert …", "Saving …", "Guardando…"),
     (
         "Wird im Gespräch bestätigt …",
         "Confirming in the conversation …",
         "Confirmando en la conversación …",
     ),
-    ("Wird verarbeitet", "Processing", "Procesando"),
     (
         "Wähle ein Gespräch.",
         "Select a conversation.",
         "Selecciona una conversación.",
-    ),
-    (
-        "Wähle eine Vorlage. Teilnehmende und Zugang legst du danach fest.",
-        "Choose a preset. Set participants and access next.",
-        "Elige una plantilla. Después podrás configurar participantes y acceso.",
     ),
     (
         "Wähle „Aufnahme von Bildschirm & Systemaudio“ und aktiviere NextCloud Modern Talk.",
@@ -2354,11 +1850,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Elige cómo quieres entrar.",
     ),
     (
-        "Wähle, wie du dich auf diesem Gerät anmelden möchtest.",
-        "Choose how to stay signed in on this device.",
-        "Elige cómo mantener la sesión en este dispositivo.",
-    ),
-    (
         "Zu deinen Gesprächen",
         "Go to your conversations",
         "Ir a tus conversaciones",
@@ -2381,12 +1872,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Access has not been granted yet.",
         "Aún no se ha permitido el acceso.",
     ),
-    (
-        "Zugriff noch nicht geprüft.",
-        "Access has not been checked yet.",
-        "Aún no se ha comprobado el acceso.",
-    ),
-    ("Zugriff prüfen", "Check access", "Comprobar acceso"),
     ("Zugriff verweigert.", "Access denied.", "Acceso denegado."),
     (
         "Zugriff verweigert. Erlaube Mikrofon oder Kamera in den Systemeinstellungen.",
@@ -2403,17 +1888,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "For example, the address where you open your team's files.",
         "Por ejemplo, la dirección donde abres los archivos del equipo.",
     ),
-    (
-        "Zum Fortfahren muss eine freigegebene Vorlage verfügbar sein.",
-        "An allowed preset must be available to continue.",
-        "Para continuar debe haber una plantilla permitida disponible.",
-    ),
     ("Zurück", "Back", "Atrás"),
-    (
-        "Zurück zu deinen Gesprächen",
-        "Back to your conversations",
-        "Volver a tus conversaciones",
-    ),
     (
         "Zurück zum Gespräch",
         "Back to conversation",
@@ -2423,11 +1898,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Zustimmung zur Aufzeichnung erforderlich",
         "Recording consent required",
         "Se requiere consentimiento para grabar",
-    ),
-    (
-        "Zwischenablage für diesen Entwurf nicht freigegeben.",
-        "Clipboard use is not permitted for this draft.",
-        "No se permite usar el portapapeles con este borrador.",
     ),
     (
         "macOS hat den Zugriff auf den Schlüsselbund verweigert. Erlaube dieser App den Zugriff auf ihre gespeicherte Anmeldung und versuche das Entfernen erneut.",
@@ -2441,32 +1911,12 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("macOS-Freigabe", "macOS permission", "Permiso de macOS"),
     ("{n} Antwort", "{n} reply", "{n} respuesta"),
-    (
-        "{n} Antwort angekündigt",
-        "{n} reply indicated",
-        "{n} respuesta indicada",
-    ),
     ("{n} Antworten", "{n} replies", "{n} respuestas"),
-    (
-        "{n} Antworten angekündigt",
-        "{n} replies indicated",
-        "{n} respuestas indicadas",
-    ),
     ("{n} Teilnehmende", "{n} participants", "{n} participantes"),
-    (
-        "{n} Teilnehmende angezeigt",
-        "{n} participants shown",
-        "{n} participantes visibles",
-    ),
     (
         "{n} teilnehmende Person",
         "{n} participant",
         "{n} participante",
-    ),
-    (
-        "{n} teilnehmende Person angezeigt",
-        "{n} participant shown",
-        "{n} participante visible",
     ),
     (
         "Öffne in den Windows-Einstellungen „Datenschutz & Sicherheit → Kamera“.",

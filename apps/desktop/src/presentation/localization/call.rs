@@ -65,11 +65,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Finalizando grabación…",
     ),
     (
-        "Aufzeichnungsstatus unbekannt",
-        "Recording status unknown",
-        "Estado de grabación desconocido",
-    ),
-    (
         "Bestätige zuerst die Zustimmung.",
         "Select your consent first.",
         "Selecciona primero tu consentimiento.",
@@ -88,11 +83,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Bildschirmzugriff verweigert. Prüfe die Systemeinstellungen.",
         "Screen access was denied. Check system settings.",
         "Se ha denegado el acceso a la pantalla. Revisa los ajustes del sistema.",
-    ),
-    (
-        "Bis zur Annahme bleiben Mikrofon und Kamera aus. Die Geräte werden erst nach Freigabe aktiviert.",
-        "Microphone and camera stay off until you accept. Devices are enabled only after permission is granted.",
-        "El micrófono y la cámara permanecen apagados hasta que aceptes. Los dispositivos se activan solo después de conceder permiso.",
     ),
     (
         "Dauer {duration}",
@@ -115,11 +105,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El servidor puede grabar audio y vídeo. No puedes unirte sin dar tu consentimiento.",
     ),
     (
-        "Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden sehen die Aufzeichnung.",
-        "The server will record this call’s audio and video. Everyone in the call can see the recording.",
-        "El servidor grabará el audio y el vídeo de esta llamada. Todas las personas de la llamada pueden ver la grabación.",
-    ),
-    (
         "Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden werden informiert.",
         "The server will record this call’s audio and video. Everyone will be informed.",
         "El servidor grabará el audio y el vídeo de esta llamada. Se informará a todas las personas participantes.",
@@ -140,11 +125,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Se ha agotado el tiempo para compartir pantalla. Inténtalo de nuevo.",
     ),
     (
-        "Die Moderation lässt dich gleich hinein.",
-        "A moderator will admit you shortly.",
-        "Una persona moderadora te dejará entrar pronto.",
-    ),
-    (
         "Die Sicherheitsvorgaben für diesen Anruf sind noch nicht erfüllt.",
         "The security requirements for this call are not yet satisfied.",
         "Aún no se cumplen los requisitos de seguridad de esta llamada.",
@@ -153,11 +133,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Die geteilte Quelle wurde geschlossen. Wähle erneut einen Bildschirm oder ein Fenster.",
         "The shared source closed. Choose a screen or window again.",
         "La fuente compartida se ha cerrado. Elige otra vez una pantalla o ventana.",
-    ),
-    (
-        "Ein Gerätewechsel stoppt die aktuelle Übertragung. Aktiviere das Gerät danach erneut.",
-        "Changing devices stops the current stream. Enable the device again afterwards.",
-        "Cambiar de dispositivo detiene la transmisión actual. Vuelve a activarlo después.",
     ),
     (
         "Eine Anfrage wird bereits bearbeitet.",
@@ -257,7 +232,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ("Raster", "Gallery", "Galería"),
     ("Reaktion senden", "Send reaction", "Enviar reacción"),
     ("Sprecheransicht", "Speaker view", "Vista de orador"),
-    ("Spricht", "Speaking", "Hablando"),
     (
         "Studiomikrofon",
         "Studio microphone",
@@ -295,21 +269,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Talk necesita acceso a la cámara para que puedan verte.",
     ),
     (
-        "Tastenkürzel: H",
-        "Keyboard shortcut: H",
-        "Atajo de teclado: H",
-    ),
-    (
-        "Tastenkürzel: M",
-        "Keyboard shortcut: M",
-        "Atajo de teclado: M",
-    ),
-    (
-        "Tastenkürzel: V",
-        "Keyboard shortcut: V",
-        "Atajo de teclado: V",
-    ),
-    (
         "Ton oder Bild fehlen?",
         "Missing sound or video?",
         "¿Falta sonido o imagen?",
@@ -318,11 +277,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Vollbild umschalten",
         "Toggle fullscreen",
         "Alternar pantalla completa",
-    ),
-    (
-        "Warte auf Bildschirmdaten …",
-        "Waiting for screen data…",
-        "Esperando datos de pantalla…",
     ),
     (
         "Wartet auf Freigabe",
