@@ -39,18 +39,8 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Set call alerts separately from messages.",
         "Configura los avisos de llamadas por separado.",
     ),
-    (
-        "Antwort auf eine Nachricht",
-        "Reply to a message",
-        "Responder a un mensaje",
-    ),
     ("Antwort im Thread", "Reply in thread", "Respuesta en hilo"),
     ("Audio veröffentlichen", "Publish audio", "Publicar audio"),
-    (
-        "Auf dem Server speichern",
-        "Save on server",
-        "Guardar en el servidor",
-    ),
     (
         "Auf diese Nachricht kann nicht geantwortet werden.",
         "This message cannot be replied to.",
@@ -138,29 +128,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Datei", "File", "Archivo"),
     ("Datei gespeichert.", "File saved.", "Archivo guardado."),
     (
-        "Datei mit diesem Gespräch teilen",
-        "Share file with this conversation",
-        "Compartir archivo con esta conversación",
-    ),
-    (
-        "Datum und Zeitzonenversatz sind ungültig.",
-        "Invalid date or timezone offset.",
-        "Fecha o zona horaria no válidas.",
-    ),
-    (
-        "Datum, Uhrzeit und UTC-Versatz: JJJJ-MM-TT HH:MM +HH:MM",
-        "Date, time and UTC offset: YYYY-MM-DD HH:MM +HH:MM",
-        "Fecha, hora y zona UTC: AAAA-MM-DD HH:MM +HH:MM",
-    ),
-    (
         "Dein Entwurf bleibt erhalten.",
         "Your draft is retained.",
         "Tu borrador se conserva.",
-    ),
-    (
-        "Der Browser konnte nicht geöffnet werden.",
-        "The browser could not be opened.",
-        "No se pudo abrir el navegador.",
     ),
     (
         "Der CSV-Import ist für dieses Gespräch nicht verfügbar.",
@@ -298,28 +268,13 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "A password is set.",
         "Hay una contraseña configurada.",
     ),
-    (
-        "Eine neue Version ist verfügbar.",
-        "A new version is available.",
-        "Hay una nueva versión disponible.",
-    ),
     ("Einladen", "Invite", "Invitar"),
     (
         "Emoji als Avatar setzen",
         "Set emoji as avatar",
         "Usar emoji como avatar",
     ),
-    (
-        "Emoji als Bild",
-        "Use emoji as picture",
-        "Usar emoji como imagen",
-    ),
     ("Entfernen", "Remove", "Eliminar"),
-    (
-        "Entwürfe bleiben nur in dieser Sitzung erhalten.",
-        "Drafts are kept only for this session.",
-        "Los borradores se conservan solo durante esta sesión.",
-    ),
     (
         "Ergebnis unklar. Prüfe deine Gesprächsliste, bevor du erneut ein Gespräch erstellst.",
         "Outcome unknown. Check your conversation list before creating another conversation.",
@@ -331,21 +286,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El resultado es incierto. Vuelve a cargar antes de realizar otro cambio.",
     ),
     (
-        "Erinnerung auf dem Server bestätigt.",
-        "Reminder confirmed on the server.",
-        "Recordatorio confirmado en el servidor.",
-    ),
-    (
         "Erinnerung löschen",
         "Delete reminder",
         "Eliminar recordatorio",
     ),
     ("Erinnerungen", "Reminders", "Recordatorios"),
-    (
-        "Erstelle ein Gruppengespräch. Danach kannst du Personen einladen.",
-        "Create a group conversation, then invite people.",
-        "Crea una conversación de grupo y después invita a personas.",
-    ),
     ("Folgt", "Following", "Siguiendo"),
     ("Für dich", "For you", "Para ti"),
     (
@@ -388,17 +333,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Conversation settings",
         "Ajustes de la conversación",
     ),
-    (
-        "Gilt als Standard für Teilnehmende.",
-        "Default permission for participants.",
-        "Permiso predeterminado para participantes.",
-    ),
     ("Gruppenräume", "Breakout rooms", "Salas de grupos"),
-    (
-        "Gruppenräume teilen das Meeting auf. Sie sind keine Verzeichnisgruppen.",
-        "Breakout rooms divide the meeting. They are separate from directory groups.",
-        "Las salas de grupos dividen la reunión. Son independientes de los grupos del directorio.",
-    ),
     ("Gruppierung", "Grouping", "Agrupación"),
     (
         "Gäste warten auf die Freigabe durch die Moderation.",
@@ -414,11 +349,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Gästelink kopieren",
         "Copy guest link",
         "Copiar enlace para invitados",
-    ),
-    (
-        "Hochgeladen. Erst beim Teilen wird die Datei im Gespräch sichtbar.",
-        "Uploaded. The file appears in this conversation only after you share it.",
-        "Subido. El archivo aparece en esta conversación solo después de compartirlo.",
     ),
     (
         "Im Gespräch",
@@ -584,18 +514,12 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Contraseña para invitados",
     ),
     ("Passwort setzen", "Set password", "Establecer contraseña"),
-    ("Person entfernen", "Remove person", "Eliminar persona"),
     ("Personen", "People", "Personas"),
     ("Personen suchen …", "Search people…", "Buscar personas…"),
     (
         "Planung abbrechen",
         "Cancel schedule",
         "Cancelar programación",
-    ),
-    (
-        "Release im Browser öffnen",
-        "Open release in browser",
-        "Abrir versión en el navegador",
     ),
     ("Schreibgeschützt", "Read only", "Solo lectura"),
     (
@@ -609,7 +533,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Valor predeterminado del servidor",
     ),
     ("Sperre aufheben", "Remove ban", "Quitar bloqueo"),
-    ("Sperrliste laden", "Load bans", "Cargar bloqueos"),
     ("Später erinnern", "Remind later", "Recordar más tarde"),
     (
         "Standardrechte",
@@ -635,11 +558,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Updates sind momentan nicht verfügbar.",
         "Updates are currently unavailable.",
         "Las actualizaciones no están disponibles.",
-    ),
-    (
-        "Updates werden nur auf deine Anfrage bei GitHub geprüft. Downloads öffnen sich im Browser.",
-        "GitHub is checked for updates only on request. Downloads open in your browser.",
-        "GitHub se consulta solo cuando solicitas actualizaciones. Las descargas se abren en el navegador.",
     ),
     (
         "Ursprüngliche Nachricht nicht mehr verfügbar.",
@@ -672,21 +590,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Search directory",
         "Buscar en el directorio",
     ),
-    (
-        "Verzeichnis · Einladungsvorschau",
-        "Directory · Invitation preview",
-        "Directorio · Vista previa de invitaciones",
-    ),
     ("Video veröffentlichen", "Publish video", "Publicar vídeo"),
     ("Vorabversionen", "Prereleases", "Versiones preliminares"),
     ("Vorschau schließen", "Close preview", "Cerrar vista previa"),
     ("Warteraum", "Lobby", "Sala de espera"),
     ("Weitere Treffer", "More results", "Más resultados"),
-    (
-        "Weitere Vorlagen sind in diesem Client noch nicht verfügbar.",
-        "Other templates are not yet available in this client.",
-        "Otras plantillas aún no están disponibles en este cliente.",
-    ),
     (
         "Weitergeben ist durch die Gesprächsrichtlinie gesperrt.",
         "Sharing is blocked by this conversation’s policy.",
@@ -719,11 +627,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Volver a los miembros",
     ),
     (
-        "Zwei Gruppenräume vorbereiten",
-        "Prepare two breakout rooms",
-        "Preparar dos salas de grupos",
-    ),
-    (
         "{duplicates} doppelte und {invalid} ungültige Zeilen.",
         "{duplicates} duplicate and {invalid} invalid rows.",
         "{duplicates} filas duplicadas y {invalid} no válidas.",
@@ -732,12 +635,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Ältere Nachrichten laden",
         "Load earlier messages",
         "Cargar mensajes anteriores",
-    ),
-    ("Änderung bestätigen", "Confirm change", "Confirmar cambio"),
-    (
-        "Änderung vom Server bestätigt.",
-        "Change confirmed by the server.",
-        "Cambio confirmado por el servidor.",
     ),
     (
         "Änderungen an Standardrechten setzen individuelle Ausnahmen zurück.",

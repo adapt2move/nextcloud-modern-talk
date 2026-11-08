@@ -170,11 +170,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El servidor puede grabar audio y vídeo. No puedes unirte sin dar tu consentimiento.",
     ),
     (
-        "Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden sehen die Aufzeichnung.",
-        "The server will record this call’s audio and video. Everyone in the call can see the recording.",
-        "El servidor grabará el audio y el vídeo de esta llamada. Todas las personas de la llamada pueden ver la grabación.",
-    ),
-    (
         "Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden werden informiert.",
         "The server will record this call’s audio and video. Everyone will be informed.",
         "El servidor grabará el audio y el vídeo de esta llamada. Se informará a todas las personas participantes.",
@@ -382,7 +377,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Señalización no compatible",
     ),
     ("Sprecheransicht", "Speaker view", "Vista de orador"),
-    ("Spricht", "Speaking", "Hablando"),
     (
         "Studiomikrofon",
         "Studio microphone",
@@ -420,21 +414,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Talk necesita acceso a la cámara para que puedan verte.",
     ),
     (
-        "Tastenkürzel: H",
-        "Keyboard shortcut: H",
-        "Atajo de teclado: H",
-    ),
-    (
-        "Tastenkürzel: M",
-        "Keyboard shortcut: M",
-        "Atajo de teclado: M",
-    ),
-    (
-        "Tastenkürzel: V",
-        "Keyboard shortcut: V",
-        "Atajo de teclado: V",
-    ),
-    (
         "Ton oder Bild fehlen?",
         "Missing sound or video?",
         "¿Falta sonido o imagen?",
@@ -454,11 +433,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Vollbild umschalten",
         "Toggle fullscreen",
         "Alternar pantalla completa",
-    ),
-    (
-        "Warte auf Bildschirmdaten …",
-        "Waiting for screen data…",
-        "Esperando datos de pantalla…",
     ),
     (
         "Wartet auf Freigabe",

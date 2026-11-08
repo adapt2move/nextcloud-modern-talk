@@ -395,14 +395,6 @@
       "upstream_sha256": "fbe81d6b4e00ee35dfc9100ddeaaee72e2e1aeb4acb16568b768c316588d104d"
     },
     {
-      "asset": "panel-right.svg",
-      "upstream_path": "icons/panel-right.svg",
-      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/panel-right.svg",
-      "sha256": "c74b4b0857ce0974043a2fdb97656ef54192429443df0a31fadf59c628462ff6",
-      "transformation": "stroke width 2 to 1.75; geometry unchanged",
-      "upstream_sha256": "327d197328f9feb1f88c36c9db04e9b00fe717d877459f92fcd892f5e4c349fa"
-    },
-    {
       "asset": "paperclip.svg",
       "upstream_path": "icons/paperclip.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/paperclip.svg",
@@ -539,14 +531,6 @@
       "upstream_sha256": "e9b9aa831b0491cfc08c41fe72c41a4815456fc1421b19a0c7f7378efd4c9d29"
     },
     {
-      "asset": "sparkles.svg",
-      "upstream_path": "icons/sparkles.svg",
-      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/sparkles.svg",
-      "sha256": "4a3ee84cc2edc6ea4d2eee69d80909cc017768fbba2ee9ea29d6f17095edd545",
-      "transformation": "stroke width 2 to 1.75; geometry unchanged",
-      "upstream_sha256": "cc8061ee31c43138e081522260d2ddd35465dfb2a4435fddd3d9857952d7231e"
-    },
-    {
       "asset": "speaker.svg",
       "upstream_path": "icons/volume-2.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/volume-2.svg",
@@ -585,14 +569,6 @@
       "sha256": "2c7d53efbdcfc8192c8ab2fbc7ae415cbfbb58e7dd3f39d08a7f6b486c8951fc",
       "transformation": "stroke width 2 to 1.75; geometry unchanged",
       "upstream_sha256": "a3955c8b0425fcc5c9ba12d2bdd77fe53b2cd5dd05e7742a56f342e996fb2ef8"
-    },
-    {
-      "asset": "thumbs-up.svg",
-      "upstream_path": "icons/thumbs-up.svg",
-      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/thumbs-up.svg",
-      "sha256": "53b8dc1b7558d3c73da5f44035aa026df43ac3bdf6774a6a2f269c858b070f8a",
-      "transformation": "stroke width 2 to 1.75; geometry unchanged",
-      "upstream_sha256": "f66a57d3b8491f866e7da9375c04b9b7627a4ed898fbfe1a0a331dc12b16fbd8"
     },
     {
       "asset": "trash-2.svg",

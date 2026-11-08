@@ -22,12 +22,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Nie", "Never", "Nunca"),
     ("Speichern", "Save", "Guardar"),
     ("Status festlegen", "Set status", "Establecer estado"),
-    ("Status löschen", "Clear status", "Borrar estado"),
-    (
-        "Status löschen nach",
-        "Clear status after",
-        "Borrar estado después de",
-    ),
     (
         "Status wird aktualisiert.",
         "Status is updating.",

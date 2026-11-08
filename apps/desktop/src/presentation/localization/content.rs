@@ -86,11 +86,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El resultado es incierto. Revisa la conversación antes de volver a publicar.",
     ),
     (
-        "Ergebnisse bis zum Abschluss verbergen",
-        "Hide results until the poll closes",
-        "Ocultar los resultados hasta que termine la encuesta",
-    ),
-    (
         "Ergebnisse werden nach Abschluss angezeigt.",
         "Results will be shown after the poll closes.",
         "Los resultados se mostrarán cuando termine la encuesta.",
@@ -104,11 +99,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Frage der Umfrage",
         "Poll question",
         "Pregunta de la encuesta",
-    ),
-    (
-        "Geladene Inhalte sofort filtern oder Personen im Serververzeichnis suchen.",
-        "Filter loaded content instantly or search the server directory for people.",
-        "Filtra el contenido cargado o busca personas en el directorio del servidor.",
     ),
     (
         "Gespräche und Personen suchen",
@@ -143,11 +133,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Vista previa pequeña · Cargando original…",
     ),
     (
-        "Letzte Option entfernen",
-        "Remove last option",
-        "Eliminar la última opción",
-    ),
-    (
         "Mehrere Antworten erlauben",
         "Allow multiple answers",
         "Permitir varias respuestas",
@@ -158,48 +143,18 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Introduce al menos dos opciones de respuesta diferentes.",
     ),
     (
-        "Mit „Personen suchen“ das freigegebene Serververzeichnis durchsuchen.",
-        "Use “Search people” to search the permitted server directory.",
-        "Usa «Buscar personas» para buscar en el directorio autorizado del servidor.",
-    ),
-    (
         "Nachrichten, Gespräche und Personen suchen …",
         "Search messages, conversations and people…",
         "Buscar mensajes, conversaciones y personas…",
     ),
     ("Nächste Datei", "Next file", "Archivo siguiente"),
     ("Option hinzufügen", "Add option", "Añadir opción"),
-    (
-        "PDF-Vorschau · erste Seite",
-        "PDF preview · first page",
-        "Vista previa del PDF · primera página",
-    ),
     ("Pause", "Pause", "Pausa"),
     ("Personen", "People", "Personas"),
     ("Personen suchen", "Search people", "Buscar personas"),
-    (
-        "Personen werden gesucht …",
-        "Searching for people…",
-        "Buscando personas…",
-    ),
-    (
-        "Personensuche fehlgeschlagen. Erneut versuchen.",
-        "People search failed. Try again.",
-        "La búsqueda de personas ha fallado. Inténtalo de nuevo.",
-    ),
-    (
-        "Sendestatus unklar. Bitte im Gespräch prüfen.",
-        "Send status unknown. Please check the conversation.",
-        "Estado de envío desconocido. Comprueba la conversación.",
-    ),
     ("Umfrage beenden", "Close poll", "Finalizar encuesta"),
     ("Umfrage beendet.", "Poll closed.", "Encuesta finalizada."),
     ("Umfrage erstellen", "Create poll", "Crear encuesta"),
-    (
-        "Umfrage veröffentlichen",
-        "Publish poll",
-        "Publicar encuesta",
-    ),
     ("Umfrage öffnen", "Open poll", "Abrir encuesta"),
     (
         "Videowiedergabe fehlgeschlagen.",
@@ -230,18 +185,8 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Weitere Optionen", "More options", "Más opciones"),
     ("Wird hochgeladen …", "Uploading…", "Subiendo…"),
     (
-        "Zum Senden von Dateien zuerst den Antwort- oder Spezialmodus schließen.",
-        "Exit reply or special sending mode before sending files.",
-        "Sal del modo de respuesta o de envío especial antes de enviar archivos.",
-    ),
-    (
         "Zwischenablage.{extension}",
         "Clipboard.{extension}",
         "Portapapeles.{extension}",
-    ),
-    (
-        "Öffne die Datei erneut aus dem Gespräch.",
-        "Open the file again from the conversation.",
-        "Vuelve a abrir el archivo desde la conversación.",
     ),
 ];

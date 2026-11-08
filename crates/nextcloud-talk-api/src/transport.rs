@@ -281,17 +281,6 @@ pub(crate) struct DiagnosticCallAdmission {
     call: CallKey,
     duplex_started: bool,
 }
-#[cfg(any(test, feature = "backend-test"))]
-#[allow(
-    dead_code,
-    reason = "Consumed by the coordinated diagnostic signaling state"
-)]
-impl DiagnosticCallAdmission {
-    pub(crate) fn scope(&self) -> CallKey {
-        self.call
-    }
-}
-
 impl Transport {
     /// An account-owned chat signaling session has its own cookie jar, so
     /// opening or replacing it cannot move an existing call's HTTP room session.

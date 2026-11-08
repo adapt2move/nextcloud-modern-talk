@@ -32,11 +32,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Nachrichten suchen", "Search messages", "Buscar mensajes"),
     (
-        "Nachrichten werden gesucht …",
-        "Searching messages …",
-        "Buscando mensajes…",
-    ),
-    (
         "Nachrichtensuche benötigt eine Verbindung.",
         "Message search needs a connection.",
         "La búsqueda de mensajes requiere conexión.",

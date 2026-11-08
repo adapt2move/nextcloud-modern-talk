@@ -402,23 +402,9 @@ impl Desktop {
                     .items_center()
                     .justify_center()
                     .child(
-                        self.style_card(div(), super::controls::CardStyle::Raised)
+                        self.notice(BannerRole::Warning, self.l(title), Some(self.l(description)), Some("lock"))
                             .w_full()
                             .max_w(px(480.))
-                            .p_6()
-                            .bg(if t.dark { t.stage_panel } else { t.surface })
-                            .border_1().border_color(if t.dark { gpui::rgb(0x52677f).into() } else { t.border })
-                            .text_color(if t.dark { t.stage_text } else { t.text })
-                            .flex()
-                            .flex_col()
-                            .gap_4()
-                            .child(
-                                div()
-                                    .text_size(self.sp(20.))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(self.l(title)),
-                            )
-                            .child(div().text_size(self.sp(14.)).text_color(if t.dark { t.stage_text } else { t.muted }).child(self.l(description)))
                             .when(matches!(gate, RequiredGate::CallPolicy(_)), |d| {
                                 d.child(self.button("retry-call-policy", "Erneut verbinden", ButtonStyle::Secondary, true,
                                     LocalAction::Intent(UiIntent::ReconnectCall(call.scope)), cx))

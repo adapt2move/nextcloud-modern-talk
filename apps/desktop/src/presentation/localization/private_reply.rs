@@ -6,11 +6,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Responder en privado",
     ),
     (
-        "Private Antworten können nicht geplant werden.",
-        "Private replies cannot be scheduled.",
-        "Las respuestas privadas no se pueden programar.",
-    ),
-    (
         "Privater Entwurf konnte nicht geöffnet werden.",
         "Could not open the private draft.",
         "No se pudo abrir el borrador privado.",

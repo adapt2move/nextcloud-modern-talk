@@ -2300,7 +2300,11 @@ impl Desktop {
         }
         body
     }
-    pub(super) fn room_entry_feedback(&self, context: ConversationRef, cx: &Context<Self>) -> Option<Div> {
+    pub(super) fn room_entry_feedback(
+        &self,
+        context: ConversationRef,
+        cx: &Context<Self>,
+    ) -> Option<Div> {
         use talk_core::ui::{UnavailableReason, conversation::RemoteState};
         let reason = match self.snapshot.message_panel.as_ref()?.history {
             RemoteState::Failed(_, reason) => reason,
@@ -2310,7 +2314,12 @@ impl Desktop {
         match reason {
             UnavailableReason::PasswordRequired => {
                 body = body
-                    .child(div().flex_1().min_w_0().child(self.l("Dieses Gespräch benötigt ein Passwort.")))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.l("Dieses Gespräch benötigt ein Passwort.")),
+                    )
                     .child(
                         self.input_surface(&self.room_ui.join_password, cx)
                             .flex_1()

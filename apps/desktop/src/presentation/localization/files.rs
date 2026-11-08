@@ -54,11 +54,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "This folder is empty.",
         "Esta carpeta está vacía.",
     ),
-    (
-        "Dieses Bildformat wird nicht unterstützt.",
-        "This image format is not supported.",
-        "Este formato de imagen no es compatible.",
-    ),
     ("Eine Ebene nach oben", "Up one level", "Subir un nivel"),
     ("Erstellen", "Create", "Crear"),
     (
@@ -84,7 +79,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Sin conexión · archivos guardados",
     ),
     ("Ordner auswählen", "Choose folder", "Elegir carpeta"),
-    ("Sortieren nach", "Sort by", "Ordenar por"),
     ("Sortieren: {name}", "Sort: {name}", "Ordenar: {name}"),
     (
         "Sortierung gilt für diese Seite.",
@@ -103,11 +97,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Selecciona al menos un archivo.",
     ),
     ("Zuletzt", "Recent", "Recientes"),
-    (
-        "Zur Auswahl hinzufügen",
-        "Add to selection",
-        "Añadir a la selección",
-    ),
     ("{n} ausgewählt", "{n} selected", "{n} seleccionados"),
     ("Änderungsdatum", "Modified", "Modificación"),
 ];

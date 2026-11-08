@@ -41,11 +41,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Este borrador se conserva solo durante esta sesión.",
     ),
     (
-        "Mikrofon, Kamera und Freigabe bleiben beim erneuten Verbinden aus.",
-        "Microphone, camera and screen sharing stay off while reconnecting.",
-        "El micrófono, la cámara y la pantalla compartida permanecen apagados al reconectar.",
-    ),
-    (
         "Offline – Änderungen werden gesendet, sobald du wieder online bist",
         "Offline – changes will be sent when you are back online",
         "Sin conexión – los cambios se enviarán cuando vuelvas a conectarte",
