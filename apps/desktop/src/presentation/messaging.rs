@@ -3189,6 +3189,29 @@ impl Desktop {
                 .collect();
             if !scheduled.is_empty() {
                 rows.push(self.composer_card().children(scheduled).into_any_element());
+            } else if self.message_ui.show_scheduled {
+                // Asking for the list must always answer, also when it is empty.
+                rows.push(
+                    self.composer_card()
+                        .p_3()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(self.hint(self.l("Keine geplanten Nachrichten."))),
+                        )
+                        .child(self.button(
+                            "scheduled-empty-close",
+                            "Schließen",
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::MessageIn(context, Action::ToggleScheduled),
+                            cx,
+                        ))
+                        .into_any_element(),
+                );
             }
             let reminders: Vec<_> = panel
                 .reminders

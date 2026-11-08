@@ -150,7 +150,7 @@ impl Desktop {
         &mut self,
         repeated: RepeatedTime,
         window: &mut Window,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         if self.message_ui.scheduled_input.read(cx).composing() {
             return;
@@ -166,7 +166,7 @@ impl Desktop {
         &mut self,
         choice: DeadlineChoice,
         window: &mut Window,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         let Some(target) = self.message_ui.time_target else {
             return;
@@ -214,9 +214,19 @@ impl Desktop {
         } else {
             None
         };
+        let scheduled_draft = matches!(command, Some(MessageAction::Schedule { .. }));
         if let Some(command) = command
             && self.submit_message(command).is_some()
         {
+            if scheduled_draft {
+                // The words now wait in the schedule; a failure comes back through
+                // the failed-message recovery, which can restore them for editing.
+                self.composer.update(cx, |input, cx| {
+                    input.reset();
+                    cx.notify();
+                });
+                let _ = self.drafts.save(context, "");
+            }
             let thread = self.message_ui.time_thread;
             self.message_ui.time_target = None;
             self.message_ui.time_thread = None;

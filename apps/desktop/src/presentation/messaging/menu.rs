@@ -11,7 +11,6 @@ pub(crate) struct Target {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Choice {
-    React,
     Reaction(u8),
     MoreReactions,
     Edit,
@@ -20,7 +19,6 @@ pub(crate) enum Choice {
     Pin,
     Unpin,
     Remind,
-    RemoveReminder,
     Translate,
     PollDetails,
     VoiceDownload,
@@ -28,7 +26,6 @@ pub(crate) enum Choice {
     PrivateReply,
     MarkUnread,
     MarkUnreadFrom,
-    Thread,
     Back,
 }
 
@@ -157,6 +154,8 @@ struct Item {
     label: String,
     enabled: bool,
     reason: &'static str,
+    /// Neighboring sections are set apart by a hairline.
+    section: u8,
 }
 impl Item {
     fn new(choice: Choice, label: impl Into<String>, enabled: bool, reason: &'static str) -> Self {
@@ -165,6 +164,7 @@ impl Item {
             label: label.into(),
             enabled,
             reason,
+            section: 0,
         }
     }
     fn id(&self, target: Target) -> ElementId {
@@ -179,14 +179,12 @@ impl Item {
 impl Choice {
     fn icon(self) -> &'static str {
         match self {
-            Self::React => "smile",
             Self::Reaction(_) => "smile", // The emoji grid does not render this icon.
             Self::MoreReactions => "plus",
             Self::Edit => "file",
             Self::Delete | Self::ConfirmDelete => "trash-2",
             Self::Pin | Self::Unpin => "pin",
             Self::Remind => "clock",
-            Self::RemoveReminder => "trash-2",
             Self::Translate => "globe",
             Self::PollDetails => "chat",
             Self::VoiceDownload => "download",
@@ -194,13 +192,11 @@ impl Choice {
             Self::PrivateReply => "reply",
             Self::MarkUnread => "inbox",
             Self::MarkUnreadFrom => "inbox",
-            Self::Thread => "chat",
             Self::Back => "arrow-left",
         }
     }
     fn ordinal(self) -> u128 {
         match self {
-            Self::React => 0,
             Self::Reaction(index) => 32 + u128::from(index),
             Self::MoreReactions => 7,
             Self::Edit => 1,
@@ -209,7 +205,6 @@ impl Choice {
             Self::Pin => 4,
             Self::Unpin => 10,
             Self::Remind => 5,
-            Self::RemoveReminder => 11,
             Self::Translate => 12,
             Self::PollDetails => 16,
             Self::VoiceDownload => 17,
@@ -217,7 +212,6 @@ impl Choice {
             Self::PrivateReply => 13,
             Self::MarkUnread => 14,
             Self::MarkUnreadFrom => 15,
-            Self::Thread => 8,
             Self::Back => 9,
         }
     }
@@ -334,68 +328,12 @@ impl Desktop {
             });
         let back = || Item::new(Choice::Back, "Zurück", true, "");
         match self.message_ui.menu.session.mode {
+            // Reactions, replying and opening a thread live on the hover toolbar;
+            // this menu holds the rest, grouped by purpose: respond, keep track,
+            // then what only concerns the author. Unavailable author actions on
+            // someone else's message are left out rather than greyed.
             Mode::Actions => {
-                let mut items = vec![
-                    Item::new(
-                        Choice::React,
-                        "Reaktion hinzufügen",
-                        self.reaction_available(target.message).is_enabled(),
-                        "Reaktionen sind derzeit nicht verfügbar.",
-                    ),
-                    Item::new(
-                        Choice::Edit,
-                        "Bearbeiten",
-                        edit,
-                        "Diese Nachricht kann nicht bearbeitet werden.",
-                    ),
-                    Item::new(
-                        Choice::Delete,
-                        "Löschen",
-                        delete,
-                        "Diese Nachricht kann nicht gelöscht werden.",
-                    ),
-                    Item::new(
-                        if pinned { Choice::Unpin } else { Choice::Pin },
-                        if pinned {
-                            "Angeheftete Nachricht lösen"
-                        } else {
-                            "Anheften"
-                        },
-                        pin_change,
-                        "Anheften ist derzeit nicht verfügbar.",
-                    ),
-                    Item::new(
-                        Choice::Remind,
-                        if reminded {
-                            "Erinnerung bearbeiten"
-                        } else {
-                            "Später erinnern"
-                        },
-                        feature(MessageFeature::Reminders),
-                        "Erinnerungen sind derzeit nicht verfügbar.",
-                    ),
-                    Item::new(
-                        Choice::Forward,
-                        "Weiterleiten",
-                        forward,
-                        "Weiterleiten ist derzeit nicht verfügbar.",
-                    ),
-                ];
-                if thread {
-                    items.truncate(3);
-                    if feature(MessageFeature::Reminders) {
-                        items.push(Item::new(
-                            Choice::Remind,
-                            if reminded {
-                                "Erinnerung bearbeiten"
-                            } else {
-                                "Später erinnern"
-                            },
-                            true,
-                            "",
-                        ));
-                    }
-                }
+                let mut items = Vec::new();
                 if !thread && self.private_reply_available(message) {
                     items.push(Item::new(
                         Choice::PrivateReply,
@@ -404,28 +342,12 @@ impl Desktop {
                         "",
                     ));
                 }
-                if !thread && self.message_feature_enabled(MessageFeature::MarkUnread) {
+                if !thread {
                     items.push(Item::new(
-                        Choice::MarkUnread,
-                        "Gespräch als ungelesen markieren",
-                        idle,
-                        "",
-                    ));
-                }
-                if !thread && self.message_feature_enabled(MessageFeature::UnreadFrom) {
-                    items.push(Item::new(
-                        Choice::MarkUnreadFrom,
-                        "Ab hier ungelesen",
-                        idle && message.metadata.unread_after.is_some(),
-                        "Die vorherige Nachricht ist noch nicht geladen.",
-                    ));
-                }
-                if reminded {
-                    items.push(Item::new(
-                        Choice::RemoveReminder,
-                        "Erinnerung löschen",
-                        feature(MessageFeature::Reminders),
-                        "Erinnerungen sind derzeit nicht verfügbar.",
+                        Choice::Forward,
+                        "Weiterleiten",
+                        forward,
+                        "Weiterleiten ist derzeit nicht verfügbar.",
                     ));
                 }
                 if self.translation_available(target.context, message) {
@@ -451,17 +373,6 @@ impl Desktop {
                         "Die Übersetzung wird bereits geladen.",
                     ));
                 }
-                if !thread && (message.metadata.thread.is_some() || message.reply_count > 0) {
-                    items.push(Item::new(
-                        Choice::Thread,
-                        "Thread öffnen",
-                        idle && self.can_open_thread(
-                            target.context,
-                            message.metadata.thread.unwrap_or(message.local_id),
-                        ),
-                        "Threads sind derzeit nicht verfügbar.",
-                    ));
-                }
                 if let Some(poll) = menu_poll(message) {
                     items.push(Item::new(
                         Choice::PollDetails,
@@ -484,6 +395,68 @@ impl Desktop {
                         !self.media_offline() && self.download_available().is_enabled(),
                         "Die Verbindung ist derzeit nicht bereit.",
                     ));
+                }
+                let respond = items.len();
+                if !thread {
+                    items.push(Item::new(
+                        if pinned { Choice::Unpin } else { Choice::Pin },
+                        if pinned {
+                            "Angeheftete Nachricht lösen"
+                        } else {
+                            "Anheften"
+                        },
+                        pin_change,
+                        "Anheften ist derzeit nicht verfügbar.",
+                    ));
+                }
+                if !thread || feature(MessageFeature::Reminders) {
+                    items.push(Item::new(
+                        Choice::Remind,
+                        if reminded {
+                            "Erinnerung bearbeiten"
+                        } else {
+                            "Später erinnern"
+                        },
+                        feature(MessageFeature::Reminders),
+                        "Erinnerungen sind derzeit nicht verfügbar.",
+                    ));
+                }
+                // One way to mark unread: from this message when the previous
+                // one is known, otherwise the whole conversation.
+                if !thread && self.message_feature_enabled(MessageFeature::UnreadFrom) {
+                    items.push(Item::new(
+                        Choice::MarkUnreadFrom,
+                        "Ab hier ungelesen",
+                        idle && message.metadata.unread_after.is_some(),
+                        "Die vorherige Nachricht ist noch nicht geladen.",
+                    ));
+                } else if !thread && self.message_feature_enabled(MessageFeature::MarkUnread) {
+                    items.push(Item::new(
+                        Choice::MarkUnread,
+                        "Gespräch als ungelesen markieren",
+                        idle,
+                        "",
+                    ));
+                }
+                let track = items.len();
+                if edit || message.own {
+                    items.push(Item::new(
+                        Choice::Edit,
+                        "Bearbeiten",
+                        edit,
+                        "Diese Nachricht kann nicht bearbeitet werden.",
+                    ));
+                }
+                if delete || message.own {
+                    items.push(Item::new(
+                        Choice::Delete,
+                        "Löschen",
+                        delete,
+                        "Diese Nachricht kann nicht gelöscht werden.",
+                    ));
+                }
+                for (index, item) in items.iter_mut().enumerate() {
+                    item.section = u8::from(index >= respond) + u8::from(index >= track);
                 }
                 items
             }
@@ -653,7 +626,6 @@ impl Desktop {
             return;
         }
         match choice {
-            Choice::React => self.message_ui.menu.session.mode = Mode::Reactions,
             Choice::Reaction(index) => {
                 if let Some(emoji) = reactions::EMOJI
                     .get(usize::from(index))
@@ -691,10 +663,6 @@ impl Desktop {
             Choice::Back => self.message_ui.menu.session.mode = Mode::Actions,
             _ => {
                 let thread_menu = self.message_ui.menu.source.is_thread();
-                let thread = self
-                    .current_menu_message(target)
-                    .and_then(|row| row.metadata.thread)
-                    .unwrap_or(target.message);
                 let poll = self.current_menu_message(target).and_then(menu_poll);
                 let voice = self
                     .current_menu_message(target)
@@ -738,12 +706,6 @@ impl Desktop {
                             cx,
                         );
                     }
-                    Choice::RemoveReminder => {
-                        self.submit_message(MessageAction::Reminder {
-                            message: target.message,
-                            timestamp: None,
-                        });
-                    }
                     Choice::Translate => {
                         self.message_action(Action::Translate(target.message), window, cx)
                     }
@@ -768,9 +730,6 @@ impl Desktop {
                                 cx,
                             );
                         }
-                    }
-                    Choice::Thread => {
-                        self.handle(LocalAction::Thread(target.context, thread), window, cx)
                     }
                     Choice::PrivateReply => {
                         self.message_action(Action::PrivateReply(target.message), window, cx)
@@ -961,7 +920,18 @@ impl Desktop {
                 ));
             }
         } else {
+            let mut previous_section = None;
             for item in items {
+                if previous_section.is_some_and(|section| section != item.section) {
+                    body = body.child(
+                        div()
+                            .h(px(1.))
+                            .mx_2()
+                            .my(px(2.))
+                            .bg(self.theme.border),
+                    );
+                }
+                previous_section = Some(item.section);
                 let label = self.l(&item.label).to_owned();
                 let color = if !item.enabled {
                     self.theme.muted
@@ -1383,20 +1353,17 @@ mod tests {
     fn message_actions_and_emoji_controls_keep_distinct_identity() {
         let choices = [
             Choice::MoreReactions,
-            Choice::React,
             Choice::Edit,
             Choice::Delete,
             Choice::ConfirmDelete,
             Choice::Pin,
             Choice::Unpin,
             Choice::Remind,
-            Choice::RemoveReminder,
             Choice::Translate,
             Choice::Forward,
             Choice::PrivateReply,
             Choice::MarkUnread,
             Choice::MarkUnreadFrom,
-            Choice::Thread,
             Choice::Back,
             Choice::PollDetails,
             Choice::VoiceDownload,

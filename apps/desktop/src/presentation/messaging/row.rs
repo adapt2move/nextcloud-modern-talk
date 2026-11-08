@@ -699,6 +699,30 @@ impl Desktop {
                         }
                     }))
                 })
+                // A secondary click opens the same actions as the "…" button.
+                .when(
+                    has_toolbar && message_actions_allowed(m) && !self.background_inert,
+                    |row| {
+                        let (menu_context, message) = (context, m.local_id);
+                        row.on_mouse_down(
+                            gpui::MouseButton::Right,
+                            cx.listener(move |this, _, window, cx| {
+                                this.handle(
+                                    LocalAction::MessageIn(
+                                        menu_context,
+                                        if thread {
+                                            Action::ThreadMenu(message)
+                                        } else {
+                                            Action::Menu(message)
+                                        },
+                                    ),
+                                    window,
+                                    cx,
+                                );
+                            }),
+                        )
+                    },
+                )
                 .relative()
                 .rounded(px(8.))
                 .px(gutter)

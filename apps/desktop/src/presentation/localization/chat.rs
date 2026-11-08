@@ -250,6 +250,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "You don't have permission for this action.",
         "No tienes permiso para esta acción.",
     ),
+    (
+        "Keine geplanten Nachrichten.",
+        "No scheduled messages.",
+        "No hay mensajes programados.",
+    ),
     ("Kursiv", "Italic", "Cursiva"),
     ("Morgen um 09:00", "Tomorrow at 09:00", "Mañana a las 09:00"),
     (
