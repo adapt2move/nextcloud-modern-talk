@@ -821,7 +821,10 @@ impl NextcloudClient {
                     return Err(self.error(ErrorKind::WrongScope));
                 }
                 return Ok(ProtocolReply::Policy(Box::new(
-                    self.policy_sources(context, call).await?.inputs,
+                    self.policy_sources(context, call)
+                        .await
+                        .map_err(|(error, _)| error)?
+                        .inputs,
                 )));
             }
             ProtocolRequest::Leave(call) => {

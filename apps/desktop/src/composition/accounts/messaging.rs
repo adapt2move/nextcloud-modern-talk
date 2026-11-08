@@ -1219,6 +1219,7 @@ impl Accounts {
                 && (offline && before != Some(true) || !offline && before == Some(true))
             {
                 diagnostics::record(Diagnostic {
+                    gate: None,
                     profile: None,
                     outcome: if offline {
                         DiagnosticOutcome::Offline

@@ -139,7 +139,7 @@ impl Capabilities {
         self.features.iter().any(|s| s == name)
     }
     pub fn supported(&self) -> bool {
-        self.family != ServerFamily::Unknown && self.has("conversation-v4")
+        self.has("conversation-v4")
     }
     pub fn feature(&self, name: &str) -> FeatureSupport {
         if !self.supported() {

@@ -1777,7 +1777,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             stage: match scenario {
                 "incoming" => CallStage::Incoming,
                 "outgoing" => CallStage::Outgoing,
-                "gate" => CallStage::Required(RequiredGate::SecurityPolicy),
+                "gate" => CallStage::Required(RequiredGate::CallPolicy(
+                    talk_core::ui::presentation::CallPolicyReason::RequiredEncryption,
+                )),
                 "gate-mic" => CallStage::Required(RequiredGate::MicrophonePermission),
                 "gate-camera" => CallStage::Required(RequiredGate::CameraPermission),
                 "gate-recording" | "gate-recording-direct" => {

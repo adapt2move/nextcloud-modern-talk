@@ -462,6 +462,7 @@ impl Accounts {
                 ),
             };
             diagnostics::record(Diagnostic {
+                gate: None,
                 profile: None,
                 request,
                 operation,
@@ -629,6 +630,7 @@ impl Accounts {
             }
         };
         diagnostics::record(Diagnostic {
+            gate: None,
             request: 0,
             operation: DiagnosticOperation::Connection,
             outcome,
@@ -1213,6 +1215,7 @@ impl Accounts {
             Purpose::Restore(id) | Purpose::RestoreAutomatic(id) => {
                 let error = result.as_ref().err().copied();
                 diagnostics::record(Diagnostic {
+                    gate: None,
                     profile: None,
                     request: done.request.0,
                     operation: DiagnosticOperation::AccountRestore,
@@ -1354,6 +1357,7 @@ impl Accounts {
                     _ => Completion::Uncertain,
                 };
                 diagnostics::record(Diagnostic {
+                    gate: None,
                     profile: None,
                     request: done.request.0,
                     operation: DiagnosticOperation::Send,
@@ -2548,6 +2552,7 @@ fn login_completion_event(work: LoginWork, done: &ConnectionCompletion) -> Optio
         _ => (DiagnosticOutcome::Failed, Some(ErrorKind::Malformed)),
     };
     Some(Diagnostic {
+        gate: None,
         profile: None,
         request: done.request.0,
         operation,

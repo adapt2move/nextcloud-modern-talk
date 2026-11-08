@@ -1,6 +1,11 @@
 pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     (" (Du)", " (You)", " (Tú)"),
     (
+        "Aktuelle Anrufberechtigungen werden abgerufen. Ohne Bestätigung wird kein Anruf verbunden.",
+        "Retrieving current call permissions. The call will connect after confirmation.",
+        "Se están obteniendo los permisos actuales. La llamada se conectará tras su confirmación.",
+    ),
+    (
         "Alle Teilnehmenden verlassen den Anruf. Das Gespräch und seine Nachrichten bleiben bestehen.",
         "Everyone will leave the call. The conversation and its messages remain.",
         "Todas las personas saldrán de la llamada. La conversación y sus mensajes se conservarán.",
@@ -10,14 +15,34 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "End the call for everyone?",
         "¿Finalizar la llamada para todas las personas?",
     ),
+    (
+        "Anruf in diesem Gespräch nicht erlaubt",
+        "Calls are not allowed in this conversation",
+        "No se permiten llamadas en esta conversación",
+    ),
     ("Anruf läuft", "Call in progress", "Llamada en curso"),
     ("Anruf minimieren", "Minimize call", "Minimizar llamada"),
+    (
+        "Anruf nicht autorisiert",
+        "Call not authorized",
+        "Llamada no autorizada",
+    ),
     (
         "Anruf wird für alle beendet …",
         "Ending the call for everyone…",
         "Finalizando la llamada para todas las personas…",
     ),
     ("Anruf öffnen", "Open call", "Abrir llamada"),
+    (
+        "Anrufmedien nicht verfügbar",
+        "Call media unavailable",
+        "Medios de llamada no disponibles",
+    ),
+    (
+        "Anrufstart deaktiviert",
+        "Starting calls is disabled",
+        "El inicio de llamadas está desactivado",
+    ),
     ("Aufzeichnung", "Recording", "Grabación"),
     (
         "Aufzeichnung fehlgeschlagen",
@@ -65,9 +90,19 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Finalizando grabación…",
     ),
     (
+        "Aufzeichnungsrichtlinie geändert",
+        "Recording policy changed",
+        "La política de grabación ha cambiado",
+    ),
+    (
         "Aufzeichnungsstatus unbekannt",
         "Recording status unknown",
         "Estado de grabación desconocido",
+    ),
+    (
+        "Aufzeichnungsstatus widerspricht vertraulichem Gespräch",
+        "Recording status conflicts with classified conversation",
+        "El estado de grabación contradice la conversación clasificada",
     ),
     (
         "Bestätige zuerst die Zustimmung.",
@@ -95,6 +130,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El micrófono y la cámara permanecen apagados hasta que aceptes. Los dispositivos se activan solo después de conceder permiso.",
     ),
     (
+        "Bitte die Moderation, den Anruf zu starten oder deine Berechtigungen zu ändern.",
+        "Ask a moderator to start the call or change your permissions.",
+        "Pide a una persona moderadora que inicie la llamada o cambie tus permisos.",
+    ),
+    (
+        "Bitte die Moderation, dir die Berechtigung zum Beitritt zu geben.",
+        "Ask a moderator for permission to join.",
+        "Pide permiso para unirte a una persona moderadora.",
+    ),
+    (
         "Dauer {duration}",
         "Duration {duration}",
         "Duración {duration}",
@@ -105,9 +150,19 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Se está compartiendo tu pantalla.",
     ),
     (
+        "Deine Sitzung im Gespräch konnte nicht bestätigt werden. Versuche es erneut.",
+        "Your conversation session could not be confirmed. Try again.",
+        "No se ha podido confirmar tu sesión en la conversación. Inténtalo de nuevo.",
+    ),
+    (
         "Der Anrufstatus ist unklar. Verlasse den Anruf und prüfe, ob er beendet wurde.",
         "The call status is unclear. Leave the call and check whether it ended.",
         "El estado de la llamada no está claro. Sal de la llamada y comprueba si terminó.",
+    ),
+    (
+        "Der Server erlaubt keinen neuen Anruf. Einem laufenden Anruf kannst du beitreten.",
+        "The server does not allow a new call. You can join an active call.",
+        "El servidor no permite iniciar llamadas. Puedes unirte a una llamada activa.",
     ),
     (
         "Der Server kann Audio und Video aufzeichnen. Ohne Zustimmung kein Beitritt.",
@@ -125,6 +180,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El servidor grabará el audio y el vídeo de esta llamada. Se informará a todas las personas participantes.",
     ),
     (
+        "Die Anmeldung oder Anrufzuordnung ist nicht mehr gültig. Öffne das Gespräch erneut.",
+        "The sign-in or call context is no longer valid. Open the conversation again.",
+        "El inicio de sesión o el contexto de llamada ya no es válido. Vuelve a abrir la conversación.",
+    ),
+    (
         "Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei.",
         "The recording change could not be confirmed. Check its status and rejoin if needed.",
         "No se pudo confirmar el cambio de grabación. Comprueba su estado y vuelve a unirte si es necesario.",
@@ -140,6 +200,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Se ha agotado el tiempo para compartir pantalla. Inténtalo de nuevo.",
     ),
     (
+        "Die Gesprächs- oder Serverrichtlinie ist nicht kompatibel. Prüfe die Servereinstellungen und versuche es erneut.",
+        "The conversation or server policy is incompatible. Check the server settings and retry.",
+        "La política de la conversación o del servidor no es compatible. Revisa los ajustes del servidor e inténtalo de nuevo.",
+    ),
+    (
+        "Die Medienverbindung ist nicht verfügbar. Versuche es erneut.",
+        "The media connection is unavailable. Try again.",
+        "La conexión de medios no está disponible. Inténtalo de nuevo.",
+    ),
+    (
         "Die Moderation lässt dich gleich hinein.",
         "A moderator will admit you shortly.",
         "Una persona moderadora te dejará entrar pronto.",
@@ -150,9 +220,29 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Aún no se cumplen los requisitos de seguridad de esta llamada.",
     ),
     (
+        "Die Signalisierung dieses Servers wird noch nicht unterstützt.",
+        "This server's signaling is not yet supported.",
+        "La señalización de este servidor aún no es compatible.",
+    ),
+    (
+        "Die Signalisierungseinstellungen konnten nicht bestätigt werden. Versuche es erneut.",
+        "Signaling settings could not be confirmed. Try again.",
+        "No se han podido confirmar los ajustes de señalización. Inténtalo de nuevo.",
+    ),
+    (
         "Die geteilte Quelle wurde geschlossen. Wähle erneut einen Bildschirm oder ein Fenster.",
         "The shared source closed. Choose a screen or window again.",
         "La fuente compartida se ha cerrado. Elige otra vez una pantalla o ventana.",
+    ),
+    (
+        "Dieser Anruf erfordert Ende-zu-Ende-Verschlüsselung, die dieser Client noch nicht unterstützt.",
+        "This call requires end-to-end encryption, which this client does not yet support.",
+        "Esta llamada requiere cifrado de extremo a extremo, que este cliente aún no admite.",
+    ),
+    (
+        "Dieser Anruf ist nicht mehr aktiv.",
+        "This call is no longer active.",
+        "Esta llamada ya no está activa.",
     ),
     (
         "Ein Gerätewechsel stoppt die aktuelle Übertragung. Aktiviere das Gerät danach erneut.",
@@ -163,6 +253,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Eine Anfrage wird bereits bearbeitet.",
         "A request is already in progress.",
         "Ya hay una solicitud en curso.",
+    ),
+    (
+        "Ende-zu-Ende-Verschlüsselung erforderlich",
+        "End-to-end encryption required",
+        "Se requiere cifrado de extremo a extremo",
     ),
     ("Erneut klingeln", "Ring again", "Volver a llamar"),
     (
@@ -187,6 +282,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Doy mi consentimiento para una grabación.",
     ),
     (
+        "In Kanälen, schreibgeschützten Gesprächen und Notizen an dich selbst sind Anrufe nicht erlaubt.",
+        "Calls are not allowed in channels, read-only conversations or notes to self.",
+        "No se permiten llamadas en canales, conversaciones de solo lectura o notas personales.",
+    ),
+    (
+        "In vertraulichen Gesprächen sind Aufzeichnungen verboten. Bitte die Moderation, den Status zu prüfen.",
+        "Recording is prohibited in classified conversations. Ask a moderator to check the status.",
+        "Se prohíbe grabar conversaciones clasificadas. Pide a una persona moderadora que revise el estado.",
+    ),
+    (
         "Kamera ausschalten (V)",
         "Turn camera off (V)",
         "Apagar cámara (V)",
@@ -196,6 +301,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Kamera einschalten (V)",
         "Turn camera on (V)",
         "Encender cámara (V)",
+    ),
+    (
+        "Keine Berechtigung zum Anrufstart",
+        "No permission to start a call",
+        "Sin permiso para iniciar una llamada",
+    ),
+    (
+        "Keine Berechtigung zum Beitritt",
+        "No permission to join",
+        "Sin permiso para unirse",
     ),
     ("Klingeln angefragt", "Ring requested", "Llamada solicitada"),
     (
@@ -256,6 +371,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ("REC", "REC", "REC"),
     ("Raster", "Gallery", "Galería"),
     ("Reaktion senden", "Send reaction", "Enviar reacción"),
+    (
+        "Serverrichtlinie nicht unterstützt",
+        "Server policy not supported",
+        "Política del servidor no compatible",
+    ),
+    (
+        "Signalisierung nicht unterstützt",
+        "Signaling not supported",
+        "Señalización no compatible",
+    ),
     ("Sprecheransicht", "Speaker view", "Vista de orador"),
     ("Spricht", "Speaking", "Hablando"),
     (
@@ -313,6 +438,17 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Ton oder Bild fehlen?",
         "Missing sound or video?",
         "¿Falta sonido o imagen?",
+    ),
+    (
+        "Tritt erneut bei, um deine Zustimmung zur geänderten Aufzeichnungsrichtlinie zu bestätigen.",
+        "Rejoin to confirm your consent to the changed recording policy.",
+        "Vuelve a unirte para confirmar tu consentimiento a la nueva política de grabación.",
+    ),
+    ("Verbinde …", "Connecting …", "Conectando…"),
+    (
+        "Verbindung zum Gespräch wird erneuert",
+        "Restoring conversation connection",
+        "Restableciendo la conexión a la conversación",
     ),
     (
         "Vollbild umschalten",

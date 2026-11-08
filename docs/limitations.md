@@ -6,6 +6,24 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Servers and calls
 
+- Call protocol selection uses advertised `conversation-v4` and `signaling-v3`,
+  not an allowlist of NextCloud major versions. Lab coverage remains NC34/Talk24
+  and NC35/Talk25; accepting compatible capabilities is not qualification of
+  every newer server. Call E2EE is unsupported: it blocks only when the server
+  advertises `call-end-to-end-encryption` and its configuration does not
+  explicitly disable it, matching the official web client's feature guard.
+  Unknown consent modes require explicit agreement in ordinary rooms;
+  classified conversations never submit recording consent. Missing optional
+  recording/reaction settings disable those controls. Missing room or participant labels
+  do not block calls. Missing grid settings
+  suspend remote video until the limit is known rather than blocking audio calls.
+  Omitted or null ICE server lists mean no configured STUN/TURN servers;
+  malformed supplied settings remain unavailable. Failed policy reads retry without authorizing media. The call card and local
+  diagnostics distinguish missing evidence from an actual prohibition. A changed
+  consent requirement during a live call closes the old media owner and offers
+  explicit rejoin with fresh consent, rather than accepting consent for a closed generation.
+
+
 - Exercised server baselines are NextCloud 34.0.5 / Talk 24.0.6 and NextCloud
   35.0.2 / Talk 25.0.6. HPB checks use Talk 25.0.6, signaling 2.1.1 and Janus 1.3.0.
 - TURN over TCP/TLS is unavailable in the pinned async engine; live TURN

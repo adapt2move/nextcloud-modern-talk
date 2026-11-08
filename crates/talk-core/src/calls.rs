@@ -30,13 +30,97 @@ pub enum Gate {
     PolicyStale,
     CallEnded,
     CallForbidden,
+    CallsDisabled,
+    RoomRestricted,
+    JoinForbidden,
+    StartForbidden,
+    ClassifiedRecording,
+    PolicyUnavailable(PolicyEvidence),
     Lobby,
     RecordingConsent,
+    RecordingConsentRejoin,
     RequiredEncryption,
     SignalingUnsupported,
     MediaUnavailable,
     MembershipLost,
     WrongScope,
+}
+
+/// Allowlisted evidence categories; never server values, identifiers or content.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PolicyEvidence {
+    Account,
+    Capabilities,
+    Room,
+    Participants,
+    SignalingSettings,
+    CallParticipants,
+    Protocol,
+    ConversationApi,
+    SignalingApi,
+    FederatedCall,
+    ClassifiedCapability,
+    ChannelCapability,
+    Attributes,
+    Permissions,
+    RoomType,
+    ReadOnly,
+    Lobby,
+    CanStart,
+    CallExists,
+    CallsEnabled,
+    Freshness,
+}
+impl PolicyEvidence {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Account => "account",
+            Self::Capabilities => "capabilities",
+            Self::Room => "room",
+            Self::Participants => "participants",
+            Self::SignalingSettings => "signaling_settings",
+            Self::CallParticipants => "call_participants",
+            Self::Protocol => "protocol",
+            Self::ConversationApi => "conversation_v4",
+            Self::SignalingApi => "signaling_v3",
+            Self::FederatedCall => "federated_media",
+            Self::ClassifiedCapability => "classified_conversations",
+            Self::ChannelCapability => "announcement_preset",
+            Self::Attributes => "room_attributes",
+            Self::Permissions => "effective_permissions",
+            Self::RoomType => "room_type",
+            Self::ReadOnly => "read_only",
+            Self::Lobby => "lobby",
+            Self::CanStart => "can_start_call",
+            Self::CallExists => "active_call",
+            Self::CallsEnabled => "calls_enabled",
+            Self::Freshness => "source_freshness",
+        }
+    }
+}
+impl Gate {
+    pub fn diagnostic(self) -> &'static str {
+        match self {
+            Self::PolicyUnavailable(evidence) => evidence.name(),
+            Self::PolicyUnknown => "policy_unknown",
+            Self::PolicyStale => "policy_stale",
+            Self::CallEnded => "call_ended",
+            Self::CallForbidden => "call_not_authorized",
+            Self::CallsDisabled => "call_start_disabled",
+            Self::RoomRestricted => "room_restricted",
+            Self::JoinForbidden => "join_permission_denied",
+            Self::StartForbidden => "start_permission_denied",
+            Self::ClassifiedRecording => "classified_recording_not_inactive",
+            Self::Lobby => "lobby_wait",
+            Self::RecordingConsent => "recording_consent_required",
+            Self::RecordingConsentRejoin => "recording_consent_rejoin_required",
+            Self::RequiredEncryption => "required_e2ee_unsupported",
+            Self::SignalingUnsupported => "signaling_unsupported",
+            Self::MediaUnavailable => "media_unavailable",
+            Self::MembershipLost => "own_session_missing",
+            Self::WrongScope => "scope_mismatch",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -302,6 +386,13 @@ impl CallSession {
             }
         }
     }
+    /// Admission retry holds intent but no grant; it cannot authorize capture.
+    pub fn wait_for_policy(&mut self, evidence: PolicyEvidence) {
+        self.grant = None;
+        if self.accepted && self.phase != Phase::Ended {
+            self.phase = Phase::Waiting(Gate::PolicyUnavailable(evidence));
+        }
+    }
     fn resolve(
         &mut self,
         p: &PolicyInputs,
@@ -351,23 +442,30 @@ impl CallSession {
         let connected = known!(p.own_session_connected, Source::ConnectedParticipants);
         let signaling = known!(p.signaling_profile, Source::SignalingSettings);
         let exists = known!(call_exists, Source::Conversation);
-        if !connected {
-            return Err(Gate::MembershipLost);
-        }
-        if !config.calls_enabled
-            || room.channel
-            || room.read_only
-            || room.kind == ConversationKind::NoteToSelf
-            || !room.permissions.join_call
-            || (!exists && !room.permissions.start_call)
-        {
-            return Err(Gate::CallForbidden);
-        }
+        // An observed end retires a join/recovery generation even when start
+        // permission is denied. Later permissive evidence cannot revive it.
         if (self.entry == Entry::IncomingDirect || self.existing_required) && !exists {
             self.grant = None;
             self.wishes = MediaWishes::default();
             self.phase = Phase::Ended;
             return Err(Gate::CallEnded);
+        }
+        if !connected {
+            return Err(Gate::MembershipLost);
+        }
+        if room.channel || room.read_only || room.kind == ConversationKind::NoteToSelf {
+            return Err(Gate::RoomRestricted);
+        }
+        if !room.permissions.join_call {
+            return Err(Gate::JoinForbidden);
+        }
+        // config.call.enabled is derived from the server's start_calls setting.
+        // It does not revoke permission to join an already active call.
+        if !exists && !config.calls_enabled {
+            return Err(Gate::CallsDisabled);
+        }
+        if !exists && !room.permissions.start_call {
+            return Err(Gate::StartForbidden);
         }
         if room.lobby_closed && !room.permissions.bypass_lobby {
             return Err(Gate::Lobby);
@@ -384,7 +482,7 @@ impl CallSession {
         // Classified is only accepted from the adapter's reviewed source mapping.
         // Its no-recording invariant takes precedence over consent configuration.
         if room.classified && room.recording != RecordingState::Inactive {
-            return Err(Gate::CallForbidden);
+            return Err(Gate::ClassifiedRecording);
         }
         let consent_required = !room.classified
             && match config.consent {
@@ -761,6 +859,72 @@ mod tests {
         assert!(c.grant().is_none());
     }
     #[test]
+    fn join_only_recovery_cannot_revive_after_an_observed_end() {
+        let mut p = inputs();
+        if let Observed::Known { value, .. } = &mut p.room {
+            value.permissions.start_call = false;
+        }
+        if let Observed::Known { value, .. } = &mut p.host_configuration {
+            value.calls_enabled = false;
+        }
+        let mut c =
+            CallSession::recover(scope(), Entry::IncomingDirect, MediaWishes::default()).unwrap();
+        assert_eq!(
+            c.advance(
+                &p,
+                known(false, Source::Conversation, 0),
+                support(),
+                devices(),
+                now(100)
+            ),
+            Err(Gate::CallEnded)
+        );
+        assert_eq!(c.phase(), Phase::Ended);
+        assert_eq!(
+            c.advance(&inputs(), exists(), support(), devices(), now(101)),
+            Err(Gate::CallEnded)
+        );
+        assert!(c.grant().is_none());
+    }
+    #[test]
+    fn start_restriction_does_not_forbid_joining_an_active_call() {
+        let mut p = inputs();
+        if let Observed::Known { value, .. } = &mut p.host_configuration {
+            value.calls_enabled = false;
+        }
+        assert!(
+            accepted(Entry::GroupAudio)
+                .advance(&p, exists(), support(), devices(), now(100))
+                .is_ok()
+        );
+        assert_eq!(
+            accepted(Entry::GroupAudio).advance(
+                &p,
+                known(false, Source::Conversation, 0),
+                support(),
+                devices(),
+                now(100)
+            ),
+            Err(Gate::CallsDisabled)
+        );
+    }
+    #[test]
+    fn failed_policy_load_cannot_retain_or_extend_a_grant() {
+        let mut c = accepted(Entry::GroupAudio);
+        c.advance(&inputs(), exists(), support(), devices(), now(100))
+            .unwrap();
+        c.wait_for_policy(PolicyEvidence::SignalingSettings);
+        assert!(c.grant().is_none());
+        assert_eq!(
+            c.phase(),
+            Phase::Waiting(Gate::PolicyUnavailable(PolicyEvidence::SignalingSettings))
+        );
+        assert!(
+            c.advance(&inputs(), exists(), support(), devices(), now(13000))
+                .is_err()
+        );
+    }
+    #[test]
     fn channel_and_readonly_never_grant_even_with_all_permissions() {
         for channel in [false, true] {
             let mut p = inputs();
@@ -777,7 +941,7 @@ mod tests {
                     devices(),
                     now(100)
                 ),
-                Err(Gate::CallForbidden)
+                Err(Gate::RoomRestricted)
             );
         }
     }
@@ -813,7 +977,7 @@ mod tests {
         }
         assert_eq!(
             classified.advance(&p, exists(), support(), devices(), now(100)),
-            Err(Gate::CallForbidden)
+            Err(Gate::ClassifiedRecording)
         );
     }
     #[test]
