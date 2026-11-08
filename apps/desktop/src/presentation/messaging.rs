@@ -18,7 +18,7 @@ mod translation;
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
     collection::CollectionState,
-    controls::{Availability, Skeleton, scoped_id},
+    controls::{Availability, BannerRole, Skeleton, scoped_id},
     input::TextInput,
 };
 use gpui::{
@@ -2306,7 +2306,12 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Option<Div> {
         use talk_core::ui::{UnavailableReason, conversation::RemoteState};
-        let reason = match self.snapshot.message_panel.as_ref()?.history {
+        let panel = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| p.context == context)?;
+        let reason = match panel.history {
             RemoteState::Failed(_, reason) => reason,
             _ => return None,
         };
