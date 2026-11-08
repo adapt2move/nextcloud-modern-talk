@@ -603,12 +603,24 @@ impl Desktop {
                 cx.notify();
             }
         });
+        let pointer_exit = cx.listener(|this, _: &gpui::MouseExitEvent, _, cx| {
+            // GPUI retains its last in-window pointer position on exit. Retire
+            // our pointer-owned reveals without disturbing keyboard focus.
+            this.toolbar_hover.clear();
+            this.hover_hints.cancel();
+            cx.notify();
+        });
         gpui::canvas(
             |_, _, _| {},
             move |_, _, window, _| {
                 window.on_mouse_event(move |event: &gpui::MouseDownEvent, phase, window, cx| {
                     if phase == gpui::DispatchPhase::Capture {
                         pointer_down(event, window, cx);
+                    }
+                });
+                window.on_mouse_event(move |event: &gpui::MouseExitEvent, phase, window, cx| {
+                    if phase == gpui::DispatchPhase::Capture {
+                        pointer_exit(event, window, cx);
                     }
                 });
             },

@@ -855,6 +855,13 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('Hovering an earlier own message did not reveal its receipt')
         checks.append({'check': 'receipts: newest own at rest, earlier on hover only', 'result': 'pass',
                        'image': hover.name, 'sha256': sha(hover)})
+        run(['xdotool', 'mousemove', '--sync', '1590', '1190'], env)
+        time.sleep(.6)
+        gone, _, _ = observe()
+        if ink(gone, (486, 370, 22, 20), env) > .005:
+            raise AssertionError('An earlier receipt stayed visible after leaving the window')
+        checks.append({'check': 'earlier receipts leave with the toolbar on window exit',
+                       'result': 'pass', 'image': gone.name, 'sha256': sha(gone)})
     elif scenario == 'thread-message-hover':
         rest, _, _ = observe()
         run(['xdotool', 'mousemove', '--window', xid, '1050', '320'], env)

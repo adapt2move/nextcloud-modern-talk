@@ -164,6 +164,30 @@ impl Desktop {
                     .iter()
                     .any(|reminder| reminder.message == m.local_id)
         });
+        let has_toolbar =
+            !m.metadata.deleted && upload.is_none() && self.media_span(m.local_id).is_none();
+        let toolbar_id = row_id("message-toolbar-reveal", 0);
+        let (actions_source, reactions_source) = if thread {
+            (menu::Source::ThreadActions, menu::Source::ThreadReactions)
+        } else {
+            (menu::Source::Actions, menu::Source::Reactions)
+        };
+        // Open state belongs to the surface that opened the menu: the thread root
+        // is also a timeline row, and only the row that owns the anchor reacts.
+        let actions_open = self
+            .message_ui
+            .menu
+            .anchored_to(context, m.local_id, actions_source);
+        let palette_open = self
+            .message_ui
+            .menu
+            .anchored_to(context, m.local_id, reactions_source);
+        let keyboard_here = self.toolbar_focus.borrow().as_ref() == Some(&toolbar_id);
+        let surface_active = self.toolbar_hover.visible(&toolbar_id)
+            || actions_open
+            || palette_open
+            || keyboard_here;
+        let shown = has_toolbar && surface_active;
         let last_own = delivery.is_some() && self.is_last_own_message(context, m, thread);
         // Receipts are ambient: the newest own message carries its state at rest and
         // earlier ones reveal it on hover. States that need an explanation (sending,
@@ -217,8 +241,9 @@ impl Desktop {
                                     row_id("message-delivery", 0),
                                     cx,
                                 )
-                                .opacity(if last_own { 1. } else { 0. })
-                                .group_hover(action_group.clone(), |s| s.opacity(1.)),
+                                // Share the toolbar owner: GPUI group-hover styles
+                                // can retain the last in-window position on exit.
+                                .opacity(if last_own || surface_active { 1. } else { 0. }),
                             )
                         })
                         .when(m.metadata.edited, |d| {
@@ -650,30 +675,6 @@ impl Desktop {
                 self.l("Lange Nachricht gekürzt angezeigt. Bearbeiten ist hier nicht verfügbar."),
             ));
         }
-        let has_toolbar =
-            !m.metadata.deleted && upload.is_none() && self.media_span(m.local_id).is_none();
-        let toolbar_id = row_id("message-toolbar-reveal", 0);
-        let (actions_source, reactions_source) = if thread {
-            (menu::Source::ThreadActions, menu::Source::ThreadReactions)
-        } else {
-            (menu::Source::Actions, menu::Source::Reactions)
-        };
-        // Open state belongs to the surface that opened the menu: the thread root
-        // is also a timeline row, and only the row that owns the anchor reacts.
-        let actions_open = self
-            .message_ui
-            .menu
-            .anchored_to(context, m.local_id, actions_source);
-        let palette_open = self
-            .message_ui
-            .menu
-            .anchored_to(context, m.local_id, reactions_source);
-        let keyboard_here = self.toolbar_focus.borrow().as_ref() == Some(&toolbar_id);
-        let shown = has_toolbar
-            && (self.toolbar_hover.visible(&toolbar_id)
-                || actions_open
-                || palette_open
-                || keyboard_here);
         let toolbar_admission = self
             .toolbar_hover
             .admission(&toolbar_id, std::time::Instant::now());
@@ -692,7 +693,7 @@ impl Desktop {
             div()
                 .id(row_id("message", 0))
                 .group(action_group.clone())
-                .when(has_toolbar && !self.background_inert, |row| {
+                .when((has_toolbar || resting.is_some()) && !self.background_inert, |row| {
                     row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                         if this.toolbar_hover.update(&hovered_id, *hovered, this.reduced_motion, std::time::Instant::now()) {
                             cx.notify();
@@ -758,7 +759,7 @@ impl Desktop {
                                     .h(self.sp(20.))
                                     .flex()
                                     .items_center()
-                                    .group_hover(action_group.clone(), |s| s.opacity(0.))
+                                    .opacity(if surface_active { 0. } else { 1. })
                                     .child(self.delivery_indicator(
                                         indicator,
                                         row_id("message-delivery", 0),

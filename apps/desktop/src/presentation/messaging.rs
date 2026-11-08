@@ -2315,7 +2315,13 @@ impl Desktop {
             RemoteState::Failed(_, reason) => reason,
             _ => return None,
         };
-        let mut body = self.banner_frame(BannerRole::Warning).flex_wrap().gap_y_2();
+        let mut body = self
+            .banner_frame(BannerRole::Warning)
+            .w_full()
+            .max_w(px(720.))
+            .flex_wrap()
+            .gap_y_2()
+            .child(self.scaled_icon("lock", 16., BannerRole::Warning.foreground(self.theme)));
         match reason {
             UnavailableReason::PasswordRequired => {
                 body = body
