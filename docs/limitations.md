@@ -229,8 +229,14 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   observations remain unknown. Room notification edits are optimistic and
   reconciled with the server. An uncertain write requires a fresh room read.
 - Open-conversation browsing requires `listable-rooms`. The Talk v4 listing
-  does not expose a reliable member count before joining; protected or unknown
-  password states cannot yet be joined through the directory.
+  does not expose a reliable member count before joining. Signed-in users can
+  enter public rooms from navigation, discovery, or a same-server `/call/<token>`
+  link pasted into the open-conversation search. Entry establishes a chat session
+  before reading history, prompts for a server-required password, and distinguishes
+  lobby waiting from revoked access. Unknown policy stays closed. Anonymous guest
+  login and operating-system deep-link registration remain unavailable. Links
+  must use the active account's exact server and installation path; passwords are
+  entered separately and are not saved.
 - Account-wide message search requires the server's Talk message provider and
   supported filters. It shows at most two pages and only results for rooms in
   the currently admitted room list; offline suggestions use the selected cached

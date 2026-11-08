@@ -25,6 +25,7 @@ mod reaction_authors;
 mod recovery;
 mod reference;
 mod resources;
+mod room_access;
 mod search_navigation;
 mod sidebar_notifications;
 mod threads;
@@ -63,6 +64,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         threads::MESSAGES,
         unread::MESSAGES,
         recovery::MESSAGES,
+        room_access::MESSAGES,
         updates::MESSAGES,
         onboarding::MESSAGES,
         own_status::MESSAGES,
@@ -287,6 +289,7 @@ mod tests {
             threads::MESSAGES,
             unread::MESSAGES,
             recovery::MESSAGES,
+            room_access::MESSAGES,
             conversation::MESSAGES,
             call::MESSAGES,
             creation::MESSAGES,

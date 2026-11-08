@@ -40,6 +40,8 @@ pub enum ErrorKind {
     Deadline,
     Busy,
     PermissionDenied,
+    PasswordRequired,
+    Lobby,
     ServerAccessDenied,
     ReauthenticationRequired,
     Malformed,
@@ -178,6 +180,11 @@ pub enum ProtocolRequest {
         query: Text<256>,
     },
     JoinOpenConversation(ConversationId),
+    /// Explicit chat entry. This never joins a call or grants media authority.
+    OpenConversation {
+        conversation: ConversationId,
+        password: Option<Text<512>>,
+    },
     Participants(ConversationId),
     History {
         conversation: ConversationId,

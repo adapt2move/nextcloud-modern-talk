@@ -654,7 +654,7 @@ impl Desktop {
         let room_ui = conversation_dialog::RoomUi::new(theme, cx);
         let account_search_ui = account_search::AccountSearchUi::new(theme, cx);
         let discovery_search =
-            cx.new(|cx| TextInput::new("Freigegebene Gespräche suchen …", 256, theme, cx));
+            cx.new(|cx| TextInput::new("Gespräche suchen oder Link einfügen …", 256, theme, cx));
         let message_ui = messaging::MessageUi::new(cx);
         let content_ui =
             content::ContentUi::new(theme, snapshot.active_account, snapshot.selected, cx);
@@ -1482,6 +1482,11 @@ impl Desktop {
         self.refresh_creation(cx);
         self.refresh_account_search_jump();
         self.refresh_discovery();
+        if previous != self.snapshot.selected {
+            self.room_ui
+                .join_password
+                .update(cx, |input, _| input.reset());
+        }
         self.refresh_room_dialog(cx);
         self.refresh_message_ui_after_rebind(
             selected_rebind && self.message_ui.editing.is_some(),
@@ -3736,7 +3741,7 @@ impl Render for Desktop {
             input.theme = t;
             input.text_scale = f32::from(self.scale) / 100.;
             input.interactive = self.overlay == Some(Overlay::Discover) && !incoming;
-            input.set_placeholder(self.l("Freigegebene Gespräche suchen …"));
+            input.set_placeholder(self.l("Gespräche suchen oder Link einfügen …"));
         });
         for input in self.room_ui.inputs() {
             input.update(cx, |i, _| {
@@ -3750,6 +3755,22 @@ impl Render for Desktop {
                     );
             });
         }
+        self.room_ui.join_password.update(cx, |input, _| {
+            input.set_placeholder(self.l("Passwort des Gesprächs"));
+            input.clipboard_export_allowed = false;
+            input.interactive = self.overlay.is_none()
+                && !incoming
+                && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                    matches!(
+                        panel.history,
+                        talk_core::ui::conversation::RemoteState::Failed(
+                            _,
+                            talk_core::ui::UnavailableReason::PasswordRequired
+                        )
+                    )
+                });
+        });
+
         self.configure_member_inputs(incoming, cx);
         if self.overlay == Some(Overlay::Create) {
             self.room_ui

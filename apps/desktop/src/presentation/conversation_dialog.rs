@@ -112,6 +112,7 @@ pub(super) struct RoomUi {
     pub csv: Entity<TextInput>,
     pub avatar: Entity<TextInput>,
     pub password: Entity<TextInput>,
+    pub join_password: Entity<TextInput>,
     pub lobby_time: Entity<TextInput>,
     lobby_time_error: Option<talk_core::preferences::time::LocalTimeError>,
     breakouts: breakouts::State,
@@ -133,6 +134,11 @@ impl RoomUi {
         });
         let avatar = cx.new(|cx| TextInput::new("Emoji", 64, theme, cx));
         let password = cx.new(|cx| TextInput::new("Neues Passwort", 512, theme, cx));
+        let join_password = cx.new(|cx| {
+            let mut input = TextInput::new("Passwort des Gesprächs", 512, theme, cx);
+            input.concealed = true;
+            input
+        });
         let lobby_time = cx.new(|cx| TextInput::new("JJJJ-MM-TT HH:MM", 32, theme, cx));
         let breakout_broadcast =
             cx.new(|cx| TextInput::new("Nachricht an alle Gruppenräume", 4096, theme, cx));
@@ -161,13 +167,14 @@ impl RoomUi {
             csv,
             avatar,
             password,
+            join_password,
             lobby_time,
             lobby_time_error: None,
             breakouts: breakouts::State::default(),
             breakout_broadcast,
         }
     }
-    pub fn inputs(&self) -> [Entity<TextInput>; 8] {
+    pub fn inputs(&self) -> [Entity<TextInput>; 9] {
         [
             self.name.clone(),
             self.description.clone(),
@@ -175,6 +182,7 @@ impl RoomUi {
             self.csv.clone(),
             self.avatar.clone(),
             self.password.clone(),
+            self.join_password.clone(),
             self.lobby_time.clone(),
             self.breakout_broadcast.clone(),
         ]

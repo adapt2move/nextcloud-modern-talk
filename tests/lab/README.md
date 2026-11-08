@@ -81,3 +81,21 @@ completion samples per mode to each profile's `latency.json`. Failed requests
 remain samples; these numbers are not native UI feedback or frame timings.
 `python3 tests/lab/test_resilience.py` checks the relay without Docker; the full
 check includes it. Only the released-server lab establishes the backend result.
+
+## Signed-in public-room entry
+
+Run `python3 tests/lab/public_room.py --profile r35 --output /absolute/new/results`
+(and separately with `r34`) on the disposable VM. It creates public, password,
+lobby and listed rooms as one synthetic user, checks that another user has only
+pre-join guest-like metadata and cannot read history, then runs the typed adapter
+through admission, history, sending and membership leave. Incorrect/missing
+passwords and lobby waiting have distinct results; entry grants no call handle.
+The public room is unlisted, so its password is not bypassed by directory eligibility.
+
+For a Linux native interaction check, first build the desktop with `dev-probes`,
+then add `--native-binary /absolute/path/to/talk-desktop`. The optional Xvfb/Mesa
+check uses real mouse/key input to paste a same-server link into discovery, join
+with a password, read history and send a message. It requires xdotool, ImageMagick,
+Tesseract, Xvfb and D-Bus. Screenshots contain only the disposable fixture. This
+is Linux native interaction evidence, not macOS/Windows, accessibility or media
+qualification. The lab removes its private profile and server data on completion.

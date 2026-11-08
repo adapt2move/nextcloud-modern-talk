@@ -1178,7 +1178,7 @@
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/participants/active",
       "status": "implemented",
-      "api": "Request::ActivateRoom",
+      "api": "Request::ActivateRoom / Request::JoinChat",
       "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
     },
     {
@@ -1186,7 +1186,7 @@
       "method": "DELETE",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/participants/active",
       "status": "implemented",
-      "api": "Request::DeactivateRoom",
+      "api": "Request::DeactivateRoom / Request::LeaveChat",
       "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
     },
     {

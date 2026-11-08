@@ -34,6 +34,8 @@ pub enum UnavailableReason {
     Unconfigured,
     Unsupported,
     PermissionDenied,
+    PasswordRequired,
+    Lobby,
     PolicyUnknown,
     PolicyStale,
     ReauthenticationRequired,

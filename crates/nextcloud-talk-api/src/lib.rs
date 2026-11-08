@@ -153,6 +153,12 @@ pub enum Request {
         user: String,
     },
     LeaveRoom(RoomToken),
+    /// Chat membership only; cannot create a call/session publication handle.
+    JoinChat {
+        room: RoomToken,
+        password: String,
+    },
+    LeaveChat(RoomToken),
     ActivateRoom(RoomToken),
     DeactivateRoom(RoomToken),
     SetArchived {
@@ -260,6 +266,12 @@ struct SendAttempt {
 }
 
 impl Client {
+    /// Parse only conversation links belonging to this exact server/base path.
+    /// The supplied URL is never fetched and cannot widen credential scope.
+    pub fn conversation_link_token(&self, link: &str) -> Result<RoomToken, Error> {
+        self.transport.conversation_link_token(link)
+    }
+
     pub fn new(
         credential: AppCredential,
         runtime: NetworkRuntime,
@@ -329,6 +341,8 @@ impl Client {
             || matches!(
                 error.kind,
                 ErrorKind::PermissionDenied
+                    | ErrorKind::PasswordRequired
+                    | ErrorKind::Lobby
                     | ErrorKind::ServerAccessDenied
                     | ErrorKind::NotFound
                     | ErrorKind::Conflict
@@ -379,7 +393,11 @@ impl Client {
         if self.transport.meeting_active()
             && matches!(
                 request,
-                Request::ActivateRoom(_) | Request::DeactivateRoom(_) | Request::LeaveRoom(_)
+                Request::ActivateRoom(_)
+                    | Request::DeactivateRoom(_)
+                    | Request::LeaveRoom(_)
+                    | Request::JoinChat { .. }
+                    | Request::LeaveChat(_)
             )
         {
             return Err(self.error(ErrorKind::Busy));
@@ -472,6 +490,11 @@ impl Client {
                 return Err(self.error(ErrorKind::Uncertain));
             }
             self.tag_creation_uncertain = true;
+        }
+        if let Request::JoinChat { room, .. } | Request::LeaveChat(room) = &request
+            && self.active_room.as_ref() == Some(room)
+        {
+            return Err(self.error(ErrorKind::Busy));
         }
         if let Request::JoinCall { room, .. }
         | Request::UpdateCallFlags { room, .. }
@@ -627,7 +650,10 @@ impl Client {
             {
                 return Err(self.error(ErrorKind::WrongScope));
             }
-            (Request::Room(expected), Reply::Room(room)) if room.token != expected.as_str() => {
+            (
+                Request::Room(expected) | Request::JoinChat { room: expected, .. },
+                Reply::Room(room),
+            ) if room.token != expected.as_str() => {
                 return Err(self.error(ErrorKind::WrongScope));
             }
             (Request::UploadRoomAvatar { room: expected, .. }, Reply::Room(room))
@@ -838,6 +864,7 @@ enum Kind {
     Message,
     OptionalMessage,
     Session,
+    ChatRoom,
     Tags,
     Tag,
     CallParticipants,
@@ -1155,6 +1182,25 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             vec![],
             Kind::Ack,
         ),
+        Request::JoinChat { room: t, password } => {
+            if password.len() > 512 {
+                return Err(ErrorKind::TooLarge);
+            }
+            (
+                Method::POST,
+                room("v4/room", t, "/participants/active"),
+                vec![],
+                vec![("force", "false".into()), ("password", password.clone())],
+                Kind::ChatRoom,
+            )
+        }
+        Request::LeaveChat(t) => (
+            Method::DELETE,
+            room("v4/room", t, "/participants/active"),
+            vec![],
+            vec![],
+            Kind::Ack,
+        ),
         Request::ActivateRoom(t) => (
             Method::POST,
             room("v4/room", t, "/participants/active"),
@@ -1373,6 +1419,14 @@ fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
                 return Err(ErrorKind::Malformed);
             }
             Reply::Rooms(list(v, 21, Room::decode)?)
+        }
+        Kind::ChatRoom => {
+            let _session = v
+                .get("sessionId")
+                .and_then(serde_json::Value::as_str)
+                .filter(|s| !s.is_empty() && *s != "0" && s.len() <= 512)
+                .ok_or(ErrorKind::Malformed)?;
+            Reply::Room(Box::new(Room::decode(v)?))
         }
         Kind::Room => {
             let mut room = Room::decode(v)?;

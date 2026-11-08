@@ -71,6 +71,17 @@ impl Desktop {
                 RemoteState::Failed(..) | RemoteState::Uncertain(..)
             )
         {
+            if matches!(
+                panel.state,
+                RemoteState::Failed(
+                    _,
+                    talk_core::ui::UnavailableReason::PasswordRequired
+                        | talk_core::ui::UnavailableReason::Lobby
+                )
+            ) {
+                self.discovery_join = None;
+                return;
+            }
             self.feedback = Some(if panel.uncertain {
                 super::feedback::Feedback::warning("Der Beitritt wird überprüft.")
             } else {
@@ -89,7 +100,12 @@ impl Desktop {
             .filter(|p| Some(p.account) == self.snapshot.active_account);
         let busy = panel.is_some_and(|p| p.state.pending() || p.uncertain);
         let unsupported = panel.is_some_and(|p| p.support == FeatureSupport::Unsupported);
-        let query = self.discovery_search.read(cx).content.trim().to_lowercase();
+        let raw_query = self.discovery_search.read(cx).content.trim();
+        let query = if raw_query.contains("://") {
+            String::new()
+        } else {
+            raw_query.to_lowercase()
+        };
         let mut body = div().flex().flex_col().gap_4().child(
             div()
                 .flex()
@@ -158,7 +174,11 @@ impl Desktop {
                 div()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_ellipsis()
-                    .child(room.name.as_str().to_owned()),
+                    .child(if room.name.as_str().trim().is_empty() {
+                        self.l("Gespräch über Link").to_owned()
+                    } else {
+                        room.name.as_str().to_owned()
+                    }),
             );
             if let Some(description) = room
                 .description
