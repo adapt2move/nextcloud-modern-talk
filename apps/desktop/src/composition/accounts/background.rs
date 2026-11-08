@@ -940,6 +940,7 @@ impl Accounts {
                 None => (DiagnosticOutcome::Stopped, None),
             };
             diagnostics::record(Diagnostic {
+                gate: None,
                 profile: None,
                 request: 0,
                 operation: DiagnosticOperation::LiveConnection,

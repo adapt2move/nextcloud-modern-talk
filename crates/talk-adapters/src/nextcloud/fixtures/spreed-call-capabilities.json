@@ -1,0 +1,29 @@
+{
+  "version": {"major": 35},
+  "capabilities": {
+    "spreed": {
+      "features": ["audio", "video", "conversation-v4", "signaling-v3", "conversation-permissions", "recording-consent", "recording-v1", "classified-conversations", "announcement-preset"],
+      "config": {
+        "call": {
+          "enabled": true,
+          "breakout-rooms": true,
+          "recording": false,
+          "recording-consent": 0,
+          "supported-reactions": ["❤️", "🎉", "👏", "👋", "👍", "👎", "🔥", "😂", "🤩", "🤔", "😲", "😥"],
+          "can-upload-background": false,
+          "sip-enabled": false,
+          "sip-dialout-enabled": false,
+          "can-enable-sip": false,
+          "start-without-media": false,
+          "max-duration": 0,
+          "blur-virtual-background": true,
+          "end-to-end-encryption": false,
+          "live-transcription": false,
+          "live-translation": false,
+          "grid-limit": 49,
+          "grid-limit-enforced": false
+        }
+      }
+    }
+  }
+}

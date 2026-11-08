@@ -84,7 +84,8 @@ Acceptance: cancel/denial publishes nothing. Closing the shared window, losing p
 | Ordinary room; instance delegates to room policy | Require consent when the room requires it. |
 | Ordinary room; instance disables the consent requirement | Do not invent required consent from the room default alone; keep actual recording status visible. |
 | Verified classified room under the reviewed compatible contract | Recording is prohibited. The pinned Talk25 controller skips recording-consent validation **even when instance-wide consent is required**; do not show a misleading permission-to-record prompt or submit fabricated consent. This exception never authorizes recording and is not inferred solely from a name/version. |
-| Missing, conflicting or stale policy evidence | Resolve it before join; do not guess either required consent or the classified exception. |
+| Fresh response with missing or unknown consent mode | For ordinary rooms, require explicit consent conservatively. This does not imply agreement or permit recording in classified rooms. |
+| Conflicting classified/recording state, failed fetch or stale policy evidence | Resolve it before join; do not infer the classified exception from missing evidence. Retry failed fetches without granting media authority. |
 
 The [pinned consent implementation](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Controller/CallController.php#L305-L320) establishes the exception, distinct from the [classified restrictions](conversations.md#conv-004). If an actual endpoint requires consent contrary to the expected exception, stop and reconcile/report the discrepancy; do not automatically assent or bypass refusal. Other required OS/security gates remain applicable. For ordinary required consent, declining keeps the user out. A direct call uses a specific consent dialog in its accept flow, never device-prejoin. Joining or disabling a camera is not consent.
 

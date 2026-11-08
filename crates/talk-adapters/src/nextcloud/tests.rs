@@ -1,6 +1,8 @@
 use super::*;
 #[path = "alpha_tests.rs"]
 mod alpha_tests;
+#[path = "call_policy_tests.rs"]
+mod call_policy_tests;
 #[path = "content_tests.rs"]
 mod content_tests;
 #[path = "creation_tests.rs"]
@@ -546,7 +548,7 @@ async fn autonomous_account_probe_reports_only_authoritative_rejection() {
         .await;
         assert!(matches!(
             wrong_scope_result,
-            Err(nextcloud_talk_api::ErrorKind::WrongScope)
+            Err(error) if error.kind == nextcloud_talk_api::ErrorKind::WrongScope
         ));
         assert!(
             !cancel.is_cancelled(),
@@ -561,7 +563,7 @@ async fn autonomous_account_probe_reports_only_authoritative_rejection() {
         let result =
             super::meeting_runtime::refresh(&mut writer, call, &runtime, &cancel, Some(&handler))
                 .await;
-        assert!(matches!(result, Err(kind) if kind == expected));
+        assert!(matches!(result, Err(error) if error.kind == expected));
         assert_eq!(cancel.is_cancelled(), rejected);
         assert_eq!(
             *reports.lock().unwrap(),

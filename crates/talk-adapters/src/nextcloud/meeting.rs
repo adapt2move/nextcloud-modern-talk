@@ -43,6 +43,22 @@ pub(super) struct Restart {
     entry: Entry,
     continuity: bool,
 }
+impl Restart {
+    /// Used by both live and retired owners; disposal timing cannot change the
+    /// authority of an explicit consent rejoin or transfer old capture intent.
+    fn explicit(snapshot: &Snapshot) -> Self {
+        let consent_rejoin = snapshot.phase == Phase::Waiting(Gate::RecordingConsentRejoin);
+        Self {
+            wishes: MediaWishes::default(),
+            entry: if consent_rejoin {
+                snapshot.entry
+            } else {
+                Entry::PreparedConference
+            },
+            continuity: consent_rejoin,
+        }
+    }
+}
 fn media_recovery_restart(snapshot: &Snapshot) -> Option<Restart> {
     if snapshot.phase != Phase::Active {
         return None;
@@ -186,10 +202,7 @@ impl NextcloudClient {
         data: &serde_json::Value,
         caps: &super::wire::Capabilities,
     ) -> Result<(), PortError> {
-        use talk_core::{
-            policy::Decision,
-            protocol::{RoomKind, ServerFamily},
-        };
+        use talk_core::{policy::Decision, protocol::RoomKind};
         room.call_scope = self.call_scope_for(room.id)?;
         if room.call_scope.is_none() {
             return Ok(());
@@ -202,18 +215,14 @@ impl NextcloudClient {
                 RoomKind::NoteToSelf | RoomKind::Changelog | RoomKind::FormerDirect
             )
             || readonly == Some(1)
-            || caps.call_enabled == Decision::Denied
             || permissions.is_some_and(|p| p & 4 == 0)
         {
             Decision::Denied
         } else if room.unknown_restrictions
             || readonly.is_none()
             || permissions.is_none()
-            || !matches!(
-                caps.family,
-                ServerFamily::Nextcloud34 | ServerFamily::Nextcloud35
-            )
-            || caps.call_enabled != Decision::Allowed
+            || !caps.has("conversation-v4")
+            || !caps.has("signaling-v3")
         {
             Decision::Unknown
         } else if room.call_active == Some(true)
@@ -221,7 +230,8 @@ impl NextcloudClient {
                 .get("canStartCall")
                 .and_then(serde_json::Value::as_bool)
                 == Some(true)
-                && permissions.is_some_and(|p| p & 2 != 0))
+                && permissions.is_some_and(|p| p & 2 != 0)
+                && caps.call_enabled == Decision::Allowed)
         {
             Decision::Allowed
         } else {
@@ -268,10 +278,21 @@ impl NextcloudClient {
         &mut self,
         context: &OperationContext,
         call: CallScope,
-    ) -> Result<Bundle, PortError> {
-        let room = RoomToken::parse(self.check_room(call.conversation)?)
-            .map_err(|k| self.error(transport::kind(k)))?;
-        let own = self.transport.own_session(context, &room)?;
+    ) -> Result<Bundle, (PortError, talk_core::calls::PolicyEvidence)> {
+        let room = RoomToken::parse(
+            self.check_room(call.conversation)
+                .map_err(|e| (e, talk_core::calls::PolicyEvidence::Room))?,
+        )
+        .map_err(|k| {
+            (
+                self.error(transport::kind(k)),
+                talk_core::calls::PolicyEvidence::Room,
+            )
+        })?;
+        let own = self
+            .transport
+            .own_session(context, &room)
+            .map_err(|e| (e, talk_core::calls::PolicyEvidence::Participants))?;
         let mut sources = Sources::new(call, own);
         for (observation, request) in [
             (Observation::Account, api::Request::Account),
@@ -291,7 +312,11 @@ impl NextcloudClient {
             ),
         ] {
             let started = self.transport.api_now();
-            let reply = self.transport.api_request(context, request).await?;
+            let reply = self
+                .transport
+                .api_request(context, request)
+                .await
+                .map_err(|e| (e, super::call_policy::evidence(observation)))?;
             sources.add(
                 observation,
                 ObservedReply {
@@ -303,7 +328,7 @@ impl NextcloudClient {
         }
         sources
             .finish(false)
-            .map_err(|k| self.error(transport::kind(k)))
+            .map_err(|evidence| (self.error(ErrorKind::Unsupported), evidence))
     }
     async fn prepare_meeting(
         &mut self,
@@ -326,10 +351,32 @@ impl NextcloudClient {
                     .await?;
                 self.active = None;
             }
-            let reply = self
+            let reply = match self
                 .transport
                 .api_request(context, api::Request::ActivateRoom(room.clone()))
-                .await?;
+                .await
+            {
+                Ok(reply) => reply,
+                Err(error)
+                    if matches!(
+                        error.kind,
+                        ErrorKind::Transport
+                            | ErrorKind::Deadline
+                            | ErrorKind::ServerUnavailable
+                            | ErrorKind::RateLimited
+                            | ErrorKind::Busy
+                    ) =>
+                {
+                    // force=false activation is idempotent and has not joined a
+                    // call. Retry the room session without capture authority.
+                    call.wait_for_policy(talk_core::calls::PolicyEvidence::Participants);
+                    return Ok(CallOwner::Pending {
+                        call,
+                        last: Instant::now(),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
             let api::Reply::RoomSession(session) = reply else {
                 return Err(self.error(ErrorKind::Malformed));
             };
@@ -341,10 +388,32 @@ impl NextcloudClient {
             // HPB session retirement also retires its backend room session.
             // ActivateRoom(force=false) refreshes a selected room's session
             // before a new explicit call; it never starts media or a call.
-            let reply = self
+            let reply = match self
                 .transport
                 .api_request(context, api::Request::ActivateRoom(room.clone()))
-                .await?;
+                .await
+            {
+                Ok(reply) => reply,
+                Err(error)
+                    if matches!(
+                        error.kind,
+                        ErrorKind::Transport
+                            | ErrorKind::Deadline
+                            | ErrorKind::ServerUnavailable
+                            | ErrorKind::RateLimited
+                            | ErrorKind::Busy
+                    ) =>
+                {
+                    // force=false activation is idempotent and has not joined a
+                    // call. Retry the room session without capture authority.
+                    call.wait_for_policy(talk_core::calls::PolicyEvidence::Participants);
+                    return Ok(CallOwner::Pending {
+                        call,
+                        last: Instant::now(),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
             let api::Reply::RoomSession(session) = reply else {
                 return Err(self.error(ErrorKind::Malformed));
             };
@@ -353,7 +422,27 @@ impl NextcloudClient {
                 session: session.into_secret(),
             });
         }
-        let bundle = self.policy_sources(context, scope).await?;
+        let bundle = match self.policy_sources(context, scope).await {
+            Ok(bundle) => bundle,
+            Err((error, evidence))
+                if !matches!(
+                    error.kind,
+                    ErrorKind::ReauthenticationRequired
+                        | ErrorKind::Cancelled
+                        | ErrorKind::WrongScope
+                ) =>
+            {
+                // No join has been dispatched. Keep this generation and explicit
+                // intent pending; the existing two-second observation lane retries.
+                // No lease/grant is issued by a failed or partial observation.
+                call.wait_for_policy(evidence);
+                return Ok(CallOwner::Pending {
+                    call,
+                    last: Instant::now(),
+                });
+            }
+            Err((error, _)) => return Err(error),
+        };
         if let Err(gate) = call.advance(
             &bundle.inputs,
             bundle.exists,
@@ -623,6 +712,7 @@ impl NextcloudClient {
                             self.meeting_owner = Some(CallOwner::Pending { call, last });
                             return Err(self.error(ErrorKind::PermissionDenied));
                         }
+                        Command::Reconnect(_) if call.accepted() => prepare = true,
                         Command::Observe(_)
                             if call.accepted() && last.elapsed() >= Duration::from_secs(2) =>
                         {
@@ -678,11 +768,7 @@ impl NextcloudClient {
                         live.close();
                         drop(live);
                         let restart = match command {
-                            Command::Reconnect(_) => Some(Restart {
-                                wishes: MediaWishes::default(),
-                                entry: Entry::PreparedConference,
-                                continuity: false,
-                            }),
+                            Command::Reconnect(_) => Some(Restart::explicit(&snapshot)),
                             Command::RecoverMedia(_) => media_recovery_restart(&snapshot),
                             _ => None,
                         };
@@ -731,11 +817,7 @@ impl NextcloudClient {
                         return Err(self.error(ErrorKind::NotFound));
                     }
                     if matches!(command, Command::Reconnect(_)) {
-                        restart = Some(Restart {
-                            wishes: MediaWishes::default(),
-                            entry: Entry::PreparedConference,
-                            continuity: false,
-                        });
+                        restart = Some(Restart::explicit(&snapshot));
                         snapshot.phase = Phase::Reconnecting;
                     }
                     if matches!(command, Command::Stop(_)) {
@@ -846,7 +928,7 @@ mod recovery_tests {
         AccountId, AccountScope, CallGeneration, ConversationId, HostId, RuntimeGeneration,
     };
     #[test]
-    fn explicit_media_rejoin_preserves_camera_and_mute_but_retires_screen() {
+    fn explicit_media_and_consent_rejoins_preserve_only_eligible_intent() {
         let account = AccountId::from_local(1);
         let scope = CallScope {
             account: AccountScope {
@@ -880,5 +962,14 @@ mod recovery_tests {
         let recovered = CallSession::recover(scope, restart.entry, restart.wishes).unwrap();
         assert!(!recovered.recording_consent());
         assert_eq!(recovered.wishes(), restart.wishes);
+        snapshot.phase = Phase::Waiting(Gate::RecordingConsentRejoin);
+        snapshot.entry = Entry::IncomingDirect;
+        let consent_rejoin = Restart::explicit(&snapshot);
+        assert!(consent_rejoin.continuity);
+        assert_eq!(consent_rejoin.entry, Entry::IncomingDirect);
+        assert_eq!(consent_rejoin.wishes, MediaWishes::default());
+        let recovered =
+            CallSession::recover(scope, consent_rejoin.entry, consent_rejoin.wishes).unwrap();
+        assert!(!recovered.recording_consent());
     }
 }

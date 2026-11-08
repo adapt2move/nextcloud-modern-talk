@@ -22,6 +22,7 @@ impl Drop for Temp {
 fn row(request: u64, outcome: Outcome) -> Event {
     Event {
         profile: None,
+        gate: None,
         request,
         operation: Operation::Send,
         outcome,
@@ -254,5 +255,27 @@ fn profile_diagnostics_are_allowlisted_without_directory_identifiers() {
         let line = test_line(event);
         assert!(line.contains(&format!("\"profile_failure\":\"{label}\"")));
         assert!(!line.contains("/Users/") && !line.contains("unix:") && !line.contains("macos:"));
+    }
+}
+
+#[test]
+fn call_gate_records_only_allowlisted_reason_and_evidence() {
+    use talk_core::calls::{Gate, PolicyEvidence};
+    for gate in [
+        Gate::RequiredEncryption,
+        Gate::PolicyUnavailable(PolicyEvidence::SignalingSettings),
+        Gate::StartForbidden,
+    ] {
+        let mut event = Event::new(Operation::CallGate, Outcome::Rejected);
+        event.gate = Some(gate);
+        let encoded = encode(1, Record { at: 2, event });
+        assert!(encoded.contains("\"operation\":\"call_gate\""));
+        if let Gate::PolicyUnavailable(evidence) = gate {
+            assert!(encoded.contains("\"call_gate\":\"policy_unavailable\""));
+            assert!(encoded.contains(&format!("\"policy_evidence\":\"{}\"", evidence.name())));
+        } else {
+            assert!(encoded.contains(&format!("\"call_gate\":\"{}\"", gate.diagnostic())));
+        }
+        assert!(!encoded.contains("canary-password"));
     }
 }

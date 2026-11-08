@@ -9,7 +9,7 @@ use talk_core::preferences::notifications::{
 };
 use talk_core::ui::MediaIntent;
 use talk_core::ui::presentation::{
-    CallStage, CallTileKind, CallView, MediaState, ParticipantView, RequiredGate,
+    CallPolicyReason, CallStage, CallTileKind, CallView, MediaState, ParticipantView, RequiredGate,
     ScreenShareFailure, ScreenShareState,
 };
 
@@ -155,6 +155,7 @@ pub(super) struct CallUi {
     wishes: MediaWishes,
     replacement_generation: bool,
     explicit_restart: bool,
+    last_gate: Option<Gate>,
 }
 impl Accounts {
     pub(super) fn leave_for_breakout(
@@ -450,6 +451,7 @@ impl Accounts {
                 wishes: MediaWishes::default(),
                 replacement_generation: false,
                 explicit_restart: false,
+                last_gate: None,
             });
             self.snapshot.conversations =
                 page(self.snapshot.conversations.as_slice().iter().map(|row| {
@@ -931,6 +933,7 @@ impl Accounts {
             wishes,
             replacement_generation: false,
             explicit_restart: false,
+            last_gate: None,
         });
         self.snapshot.call = Some(CallView {
             scope,
@@ -1047,6 +1050,7 @@ impl Accounts {
                     && value.call.conversation == requested.conversation =>
             {
                 if value.call != requested {
+                    ui.last_gate = None;
                     let prior_was_live = self.snapshot.call.as_ref().is_some_and(|call| {
                         call.scope == requested
                             && matches!(call.stage, CallStage::Active | CallStage::Reconnecting)
@@ -1064,6 +1068,21 @@ impl Accounts {
                     .find(|account| account.scope == value.call.account);
                 let mut view = project(&value, &ui.title, ui.direct, account);
                 view.replacement_generation = ui.replacement_generation;
+                let next_gate = match value.phase {
+                    Phase::Waiting(gate) => Some(gate),
+                    _ => None,
+                };
+                if ui.last_gate != next_gate
+                    && let Some(gate) = next_gate
+                {
+                    let mut event = crate::diagnostics::Event::new(
+                        crate::diagnostics::Operation::CallGate,
+                        crate::diagnostics::Outcome::Rejected,
+                    );
+                    event.gate = Some(gate);
+                    crate::diagnostics::record(event);
+                }
+                ui.last_gate = next_gate;
                 self.snapshot.call = Some(view);
                 self.snapshot.conversations =
                     page(self.snapshot.conversations.as_slice().iter().map(|row| {
@@ -1130,11 +1149,40 @@ fn project(
         Phase::Waiting(gate) => match gate {
             Gate::Lobby => CallStage::Required(RequiredGate::Lobby),
             Gate::RecordingConsent => CallStage::Required(RequiredGate::RecordingConsent),
-            Gate::RequiredEncryption | Gate::CallForbidden => {
-                CallStage::Required(RequiredGate::SecurityPolicy)
+            Gate::CallEnded => CallStage::Ended,
+            gate => {
+                use talk_core::calls::PolicyEvidence;
+                let reason = match gate {
+                    Gate::RequiredEncryption => CallPolicyReason::RequiredEncryption,
+                    Gate::RecordingConsentRejoin => CallPolicyReason::RecordingConsentRejoin,
+                    Gate::CallsDisabled => CallPolicyReason::CallsDisabled,
+                    Gate::RoomRestricted => CallPolicyReason::RoomRestricted,
+                    Gate::JoinForbidden => CallPolicyReason::JoinForbidden,
+                    Gate::StartForbidden => CallPolicyReason::StartForbidden,
+                    Gate::ClassifiedRecording => CallPolicyReason::ClassifiedRecording,
+                    Gate::PolicyUnavailable(PolicyEvidence::SignalingSettings) => {
+                        CallPolicyReason::PendingSignaling
+                    }
+                    Gate::PolicyUnavailable(
+                        PolicyEvidence::Attributes
+                        | PolicyEvidence::Protocol
+                        | PolicyEvidence::RoomType
+                        | PolicyEvidence::ConversationApi
+                        | PolicyEvidence::SignalingApi
+                        | PolicyEvidence::FederatedCall
+                        | PolicyEvidence::ClassifiedCapability
+                        | PolicyEvidence::ChannelCapability,
+                    ) => CallPolicyReason::IncompatiblePolicy,
+                    Gate::PolicyUnavailable(_) | Gate::PolicyUnknown | Gate::PolicyStale => {
+                        CallPolicyReason::PendingPolicy
+                    }
+                    Gate::MembershipLost => CallPolicyReason::MembershipLost,
+                    Gate::SignalingUnsupported => CallPolicyReason::SignalingUnsupported,
+                    Gate::MediaUnavailable => CallPolicyReason::MediaUnavailable,
+                    _ => CallPolicyReason::NotAuthorized,
+                };
+                CallStage::Required(RequiredGate::CallPolicy(reason))
             }
-            Gate::PolicyStale | Gate::MembershipLost => CallStage::Reconnecting,
-            _ => CallStage::Failed,
         },
     };
     CallView {
@@ -1561,6 +1609,7 @@ mod action_tests {
             wishes: MediaWishes::default(),
             replacement_generation: false,
             explicit_restart: false,
+            last_gate: None,
         });
         model.snapshot.call = Some(project(
             invitation(scope).call.as_ref().unwrap(),

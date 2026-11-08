@@ -372,14 +372,22 @@ async fn read_loop(
     }
     session.close();
 }
+pub(super) struct PolicyLoadFailure {
+    pub(super) kind: api::ErrorKind,
+    evidence: calls::PolicyEvidence,
+}
 pub(super) async fn refresh(
     writer: &mut MeetingWriter,
     scope: CallScope,
     network: &NetworkRuntime,
     cancel: &Cancellation,
     account_rejection: Option<&super::AccountRejection>,
-) -> Result<Bundle, api::ErrorKind> {
-    let mut sources = Sources::new(scope, writer.own_session()?);
+) -> Result<Bundle, PolicyLoadFailure> {
+    let own = writer.own_session().map_err(|kind| PolicyLoadFailure {
+        kind,
+        evidence: calls::PolicyEvidence::Participants,
+    })?;
+    let mut sources = Sources::new(scope, own);
     for observation in OBSERVATIONS {
         let value = writer
             .observe(&context(scope, network, cancel, 3000), observation)
@@ -411,11 +419,17 @@ pub(super) async fn refresh(
                     };
                     eprintln!("normal observation stopped: {source} {kind:?}");
                 }
-                kind
+                PolicyLoadFailure {
+                    kind,
+                    evidence: super::call_policy::evidence(observation),
+                }
             })?;
         sources.add(observation, value);
     }
-    sources.finish(true)
+    sources.finish(true).map_err(|evidence| PolicyLoadFailure {
+        kind: api::ErrorKind::Unsupported,
+        evidence,
+    })
 }
 async fn write_loop(
     mut writer: MeetingWriter,
@@ -522,10 +536,18 @@ async fn write_loop(
                 }
                 Err(error) => {
                     #[cfg(feature = "backend-test")]
-                    eprintln!("normal policy refresh stopped: {error:?}");
+                    eprintln!(
+                        "normal policy refresh stopped: {:?} {}",
+                        error.kind,
+                        error.evidence.name()
+                    );
                     session.set_control_degraded(true);
+                    if let Ok(mut snapshot) = session.snapshot.lock() {
+                        snapshot.phase =
+                            Phase::Waiting(calls::Gate::PolicyUnavailable(error.evidence));
+                    }
                     if matches!(
-                        error,
+                        error.kind,
                         api::ErrorKind::Transport
                             | api::ErrorKind::Deadline
                             | api::ErrorKind::ServerUnavailable
@@ -1502,7 +1524,9 @@ async fn media_loop(
                 if snapshot.sharing == calls::SharingState::Idle {
                     snapshot.screen = if SUPPORT.screen && matches!(bundle.inputs.room, Observed::Known { value, .. } if value.permissions.publish_screen) { DeviceState::Off } else { DeviceState::Unavailable };
                 }
-                snapshot.phase = if recovering || !transport_ready || session.control_degraded() { Phase::Reconnecting } else { call.phase() };
+                snapshot.phase = if session.control_degraded() && matches!(snapshot.phase, Phase::Waiting(calls::Gate::PolicyUnavailable(_))) {
+                    snapshot.phase
+                } else if recovering || !transport_ready || session.control_degraded() { Phase::Reconnecting } else { call.phase() };
                 snapshot.wishes = call.wishes();
                 snapshot.microphone = if mic_failed { DeviceState::Unavailable } else if mic { DeviceState::Active } else if wishes.microphone { DeviceState::Requested } else { DeviceState::Off };
                 snapshot.local_speaking = policy_ready && mic && local_speaking.active(Instant::now());
@@ -1536,6 +1560,14 @@ async fn media_loop(
     if result.is_err() {
         eprintln!("normal actor stopped: {stage}");
     }
+    // Publish a policy rejection before closing the latch. Composition may
+    // retire this owner as soon as it observes closed(); peer disposal below
+    // can await native work and must not hide the reason from that observer.
+    if let Phase::Waiting(_) = call.phase()
+        && let Ok(mut snapshot) = session.snapshot.lock()
+    {
+        snapshot.phase = closed_phase(call.phase(), snapshot.phase, result.is_ok());
+    }
     session.close();
     for mut peer in peers {
         #[cfg(feature = "backend-test")]
@@ -1552,16 +1584,67 @@ async fn media_loop(
     }
     stop.close();
     if let Ok(mut snapshot) = session.snapshot.lock() {
-        snapshot.phase = if result.is_ok() {
-            Phase::Ended
-        } else if call.phase() == Phase::Reconnecting {
-            Phase::Reconnecting
-        } else {
-            Phase::Waiting(calls::Gate::PolicyStale)
-        };
+        // The policy writer can close the session while the media loop exits
+        // normally. Preserve its concrete failure instead of reporting "ended"
+        // or replacing a required encryption/consent gate with generic staleness.
+        snapshot.phase = closed_phase(call.phase(), snapshot.phase, result.is_ok());
         snapshot.microphone = DeviceState::Off;
         snapshot.camera = DeviceState::Off;
         snapshot.screen = DeviceState::Off;
         snapshot.revision = snapshot.revision.saturating_add(1);
+    }
+}
+
+fn closed_phase(owner: Phase, observed: Phase, completed: bool) -> Phase {
+    match owner {
+        // The live owner has closed. Consent cannot be transferred into its
+        // replacement; explicit rejoin creates a fresh, unchecked consent gate.
+        Phase::Waiting(calls::Gate::RecordingConsent) => {
+            Phase::Waiting(calls::Gate::RecordingConsentRejoin)
+        }
+        Phase::Waiting(gate)
+            if !matches!(gate, calls::Gate::PolicyStale | calls::Gate::PolicyUnknown) =>
+        {
+            owner
+        }
+        _ if matches!(observed, Phase::Waiting(calls::Gate::PolicyUnavailable(_))) => observed,
+        Phase::Waiting(_) => owner,
+        _ if completed => Phase::Ended,
+        Phase::Reconnecting => Phase::Reconnecting,
+        _ => Phase::Waiting(calls::Gate::PolicyStale),
+    }
+}
+#[cfg(test)]
+mod policy_gate_tests {
+    use super::*;
+    #[test]
+    fn shutdown_preserves_policy_evidence_and_new_restrictive_decisions() {
+        let missing = Phase::Waiting(calls::Gate::PolicyUnavailable(
+            calls::PolicyEvidence::SignalingSettings,
+        ));
+        assert_eq!(closed_phase(Phase::Active, missing, true), missing);
+        assert_eq!(
+            closed_phase(Phase::Waiting(calls::Gate::PolicyStale), missing, false),
+            missing
+        );
+        for gate in [
+            calls::Gate::RequiredEncryption,
+            calls::Gate::ClassifiedRecording,
+        ] {
+            let denied = Phase::Waiting(gate);
+            assert_eq!(closed_phase(denied, missing, false), denied);
+        }
+        assert_eq!(
+            closed_phase(
+                Phase::Waiting(calls::Gate::RecordingConsent),
+                missing,
+                false
+            ),
+            Phase::Waiting(calls::Gate::RecordingConsentRejoin)
+        );
+        assert_eq!(
+            closed_phase(Phase::Active, Phase::Active, true),
+            Phase::Ended
+        );
     }
 }

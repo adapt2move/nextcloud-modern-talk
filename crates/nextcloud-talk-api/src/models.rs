@@ -169,7 +169,8 @@ impl Room {
             custom_avatar: v.get("isCustomAvatar").and_then(Value::as_bool),
             token: string(v.get("token"), 30)?.ok_or(ErrorKind::Malformed)?,
             server_id: v.get("id").and_then(Value::as_u64).filter(|n| *n > 0),
-            name: string(v.get("displayName"), 256)?.ok_or(ErrorKind::Malformed)?,
+            // Routing and permissions carry authority; an absent display label does not.
+            name: string(v.get("displayName"), 256)?.unwrap_or_default(),
             kind: integer(v.get("type")),
             participant_type: integer(v.get("participantType")),
             attributes: integer(v.get("attributes")),
@@ -480,9 +481,9 @@ pub struct Capabilities {
     pub encryption_required: Option<bool>,
 }
 impl Capabilities {
-    /// Tested server families with the required conversation API; no policy grant.
+    /// Capability-based protocol selection; server versions grant no policy authority.
     pub fn supported_protocol(&self) -> bool {
-        matches!(self.server_major, Some(34 | 35)) && self.supports("conversation-v4")
+        self.supports("conversation-v4")
     }
     pub fn supports(&self, feature: &str) -> bool {
         self.features.iter().any(|f| f == feature)
@@ -581,10 +582,13 @@ impl SignalingSettings {
         };
         let mut ice_servers = Vec::new();
         for name in ["stunservers", "turnservers"] {
-            let entries = v
-                .get(name)
-                .and_then(Value::as_array)
-                .ok_or(ErrorKind::Malformed)?;
+            // Unconfigured ICE is valid: host candidates can still connect.
+            // Absence/null is not a call-security requirement. Supplied arrays
+            // still retain the same entry, URL and credential bounds.
+            let entries = match v.get(name) {
+                None | Some(Value::Null) => &[][..],
+                Some(value) => value.as_array().ok_or(ErrorKind::Malformed)?.as_slice(),
+            };
             for entry in entries {
                 if ice_servers.len() >= 8 {
                     return Err(ErrorKind::TooLarge);

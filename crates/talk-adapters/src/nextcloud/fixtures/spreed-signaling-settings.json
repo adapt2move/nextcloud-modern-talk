@@ -1,0 +1,10 @@
+{
+  "signalingMode": "internal",
+  "userId": "fixture_user",
+  "hideWarning": false,
+  "server": "",
+  "federation": {},
+  "stunservers": [],
+  "turnservers": [],
+  "sipDialinInfo": ""
+}

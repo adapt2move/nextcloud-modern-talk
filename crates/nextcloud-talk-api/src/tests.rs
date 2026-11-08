@@ -1189,3 +1189,21 @@ async fn conversation_links_are_bound_to_the_accounts_origin_and_installation_pa
         "link parsing never contacts the supplied destination"
     );
 }
+
+#[test]
+fn absent_ice_configuration_is_not_a_security_gate() {
+    for value in [
+        json!({"signalingMode":"internal"}),
+        json!({"signalingMode":"internal","stunservers":null,"turnservers":null,"future-setting":true}),
+        json!({"signalingMode":"internal","stunservers":[],"turnservers":[]}),
+    ] {
+        let settings = models::SignalingSettings::decode(&value).unwrap();
+        assert_eq!(settings.mode, models::SignalingMode::Internal);
+        assert!(settings.ice_servers.is_empty());
+    }
+    assert!(models::SignalingSettings::decode(&json!({"signalingMode":"external"})).is_err());
+    assert!(
+        models::SignalingSettings::decode(&json!({"signalingMode":"internal","turnservers":{}}))
+            .is_err()
+    );
+}
