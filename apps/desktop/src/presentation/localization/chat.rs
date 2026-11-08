@@ -147,6 +147,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Quitar tu reacción",
     ),
     ("Emoji auswählen", "Choose an emoji", "Elegir un emoji"),
+    (
+        "Emoji hier einfügen",
+        "Paste an emoji here",
+        "Pega un emoji aquí",
+    ),
+    (
+        "Emoji-Auswahl öffnen",
+        "Open emoji picker",
+        "Abrir selector de emojis",
+    ),
     ("Erinnern", "Remind me", "Recordarme"),
     ("Erinnerung", "Reminder", "Recordatorio"),
     (
@@ -303,6 +313,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Queued to send",
         "En cola para enviar",
     ),
+    ("Weitere Emoji", "More emoji", "Más emojis"),
     (
         "Weiterleiten ist derzeit nicht verfügbar.",
         "Forwarding is currently unavailable.",

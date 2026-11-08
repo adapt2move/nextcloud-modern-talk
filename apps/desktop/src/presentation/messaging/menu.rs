@@ -13,6 +13,7 @@ pub(crate) struct Target {
 pub(crate) enum Choice {
     React,
     Reaction(u8),
+    MoreReactions,
     Edit,
     Delete,
     ConfirmDelete,
@@ -180,6 +181,7 @@ impl Choice {
         match self {
             Self::React => "smile",
             Self::Reaction(_) => "smile", // The emoji grid does not render this icon.
+            Self::MoreReactions => "plus",
             Self::Edit => "file",
             Self::Delete | Self::ConfirmDelete => "trash-2",
             Self::Pin | Self::Unpin => "pin",
@@ -200,6 +202,7 @@ impl Choice {
         match self {
             Self::React => 0,
             Self::Reaction(index) => 32 + u128::from(index),
+            Self::MoreReactions => 7,
             Self::Edit => 1,
             Self::Delete => 2,
             Self::ConfirmDelete => 3,
@@ -495,6 +498,12 @@ impl Desktop {
                         "Reaktionen sind derzeit nicht verfügbar.",
                     )
                 })
+                .chain(std::iter::once(Item::new(
+                    Choice::MoreReactions,
+                    "Weitere Emoji",
+                    self.reaction_available(target.message).is_enabled(),
+                    "Reaktionen sind derzeit nicht verfügbar.",
+                )))
                 .collect(),
             Mode::Delete => vec![
                 Item::new(
@@ -655,6 +664,12 @@ impl Desktop {
                 }
                 return;
             }
+            Choice::MoreReactions => {
+                let thread = self.message_ui.menu.source.is_thread();
+                self.dismiss_message_menu(false, window, cx);
+                self.open_reaction_capture(target.context, target.message, thread, window, cx);
+                return;
+            }
             Choice::Delete => self.message_ui.menu.session.mode = Mode::Delete,
             Choice::Forward => {
                 let return_control = scoped_id(
@@ -810,6 +825,7 @@ impl Desktop {
     }
 
     pub(crate) fn prepare_message_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.poll_reaction_capture(window, cx);
         self.revalidate_forward_session();
         self.prepare_forward_dialog(window, cx);
         if let Some(target) = self.message_ui.menu.target() {
@@ -923,11 +939,18 @@ impl Desktop {
                         } else {
                             gpui::transparent_black()
                         })
-                        .child(item.label.clone())
+                        .when(item.choice == Choice::MoreReactions, |d| {
+                            d.child(self.scaled_icon("plus", 16., self.theme.muted))
+                        })
+                        .when(item.choice != Choice::MoreReactions, |d| {
+                            d.child(item.label.clone())
+                        })
                         .child(self.reason_tip(
                             item.id(target),
                             available,
-                            Some(if own {
+                            Some(if item.choice == Choice::MoreReactions {
+                                "Weitere Emoji"
+                            } else if own {
                                 "Eigene Reaktion entfernen"
                             } else {
                                 "Reaktion hinzufügen"
@@ -1359,6 +1382,7 @@ mod tests {
     #[test]
     fn message_actions_and_emoji_controls_keep_distinct_identity() {
         let choices = [
+            Choice::MoreReactions,
             Choice::React,
             Choice::Edit,
             Choice::Delete,

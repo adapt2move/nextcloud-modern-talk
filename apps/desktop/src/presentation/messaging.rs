@@ -8,6 +8,7 @@ mod history;
 mod menu;
 mod pins;
 mod private_reply;
+mod reaction_capture;
 mod reactions;
 mod recovery;
 pub(super) mod row;
@@ -71,6 +72,8 @@ pub(crate) enum Action {
     EditScheduled(u128),
     ToggleScheduled,
     CancelTime,
+    CancelReactionCapture,
+    OpenReactionPicker,
     Remind { message: u128, thread: Option<u128> },
     SubmitTime,
     SubmitRepeatedTime(talk_core::preferences::time::RepeatedTime),
@@ -126,6 +129,9 @@ pub(super) struct MessageUi {
     show_scheduled: bool,
     fixture_menu_pending: bool,
     pub scheduled_input: Entity<TextInput>,
+    reaction_capture: Option<(ConversationRef, u128, bool)>,
+    reaction_error: Option<&'static str>,
+    pub reaction_input: Entity<TextInput>,
     time_error: Option<talk_core::preferences::time::LocalTimeError>,
     pub search: Entity<TextInput>,
     show_search: bool,
@@ -346,6 +352,9 @@ impl MessageUi {
             show_scheduled: false,
             fixture_menu_pending: false,
             scheduled_input: cx.new(|cx| TextInput::new("Nachricht bearbeiten", 4096, theme, cx)),
+            reaction_capture: None,
+            reaction_error: None,
+            reaction_input: cx.new(|cx| TextInput::new("Emoji hier einfügen", 64, theme, cx)),
             time_error: None,
             search: cx.new(|cx| TextInput::new("Im Gespräch suchen …", 256, theme, cx)),
             show_search: false,
@@ -1921,6 +1930,8 @@ impl Desktop {
                     self.submit_message(MessageAction::Scheduled);
                 }
             }
+            Action::CancelReactionCapture => self.close_reaction_capture(window, cx),
+            Action::OpenReactionPicker => self.show_reaction_picker(window, cx),
             Action::CancelTime => {
                 let thread = self.message_ui.time_thread;
                 self.message_ui.time_target = None;
@@ -3212,6 +3223,7 @@ impl Desktop {
             }
         }
         rows.extend(self.message_deadline_card_on(false, cx));
+        rows.extend(self.reaction_capture_card_on(false, cx));
         rows
     }
     fn quote_marker(&self) -> Div {

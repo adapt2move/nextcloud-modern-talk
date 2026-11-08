@@ -681,6 +681,7 @@ impl Desktop {
                 thread_composer.clone(),
                 thread_title.clone(),
                 message_ui.scheduled_input.clone(),
+                message_ui.reaction_input.clone(),
             ])
             .chain(content_ui.inputs().cloned())
         {
@@ -3518,6 +3519,7 @@ impl Desktop {
             &self.message_ui.search,
             &self.discovery_search,
             &self.message_ui.scheduled_input,
+            &self.message_ui.reaction_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -3543,6 +3545,7 @@ impl Desktop {
             &self.message_ui.search,
             &self.discovery_search,
             &self.message_ui.scheduled_input,
+            &self.message_ui.reaction_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -3566,6 +3569,7 @@ impl Desktop {
             &self.message_ui.search,
             &self.discovery_search,
             &self.message_ui.scheduled_input,
+            &self.message_ui.reaction_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -3840,7 +3844,11 @@ impl Render for Desktop {
                     });
             });
         }
-        for input in [&self.message_ui.search, &self.message_ui.scheduled_input] {
+        for input in [
+            &self.message_ui.search,
+            &self.message_ui.scheduled_input,
+            &self.message_ui.reaction_input,
+        ] {
             input.update(cx, |i, _| {
                 i.theme = t;
                 i.text_scale = f32::from(self.scale) / 100.;
@@ -3861,6 +3869,7 @@ impl Render for Desktop {
             (&self.room_ui.password, "Neues Passwort"),
             (&self.message_ui.search, "Im Gespräch suchen …"),
             (&self.message_ui.scheduled_input, "Nachricht bearbeiten"),
+            (&self.message_ui.reaction_input, "Emoji hier einfügen"),
         ] {
             input.update(cx, |i, _| i.set_placeholder(self.l(key)));
         }
@@ -3996,6 +4005,7 @@ impl Render for Desktop {
             &self.message_ui.search,
             &self.discovery_search,
             &self.message_ui.scheduled_input,
+            &self.message_ui.reaction_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
