@@ -46,11 +46,15 @@ def capture(args, before_runtime_cleanup=None):
         "source_files": source_manifest(source_root), "captures": []}
     manifest["source_manifest_sha256"] = hashlib.sha256(json.dumps(manifest["source_files"], sort_keys=True).encode()).hexdigest()
     env = os.environ.copy()
+    # Keep OCR bounded on small VMs; OpenMP oversubscription can outlive the
+    # command deadline even for a static screenshot. This does not relax checks.
+    env.setdefault("OMP_THREAD_LIMIT", "1")
     env.pop("WAYLAND_DISPLAY", None)
     icds = sorted(Path("/usr/share/vulkan/icd.d").glob("lvp_icd*.json"))
     if not icds:
         raise RuntimeError("Mesa lavapipe Vulkan ICD missing; run prepare-linux.sh in the VM")
     env["VK_ICD_FILENAMES"] = str(icds[0])
+    env.setdefault("LP_NUM_THREADS", "1")
     with tempfile.TemporaryDirectory(prefix="talk-native-ui-") as runtime:
         env["XDG_RUNTIME_DIR"] = runtime
         read_fd, write_fd = os.pipe()

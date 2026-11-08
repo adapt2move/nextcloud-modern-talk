@@ -175,22 +175,6 @@ def exercise(scenario, env, xid, out, label, large=False):
                 run(image_args + ['-auto-level', '-threshold', '75%', str(field_path)], env)
                 text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
             field_path.unlink(missing_ok=True)
-        if scenario in ('chat', 'busy') and 'NO MATCH' in required and (width, height) == (1280, 800):
-            # Whole-window OCR can treat the focused switcher input as a graphic.
-            # Read its actual contents relative to the visible dialog heading.
-            headings = [word for word in words if normalized(word['text']) == 'suchen'
-                        and int(word['left']) >= 260 and int(word['top']) >= 200]
-            if headings:
-                heading = min(headings, key=lambda word: int(word['top']))
-                x, y = int(heading['left']) + 13, int(heading['top']) + 60
-                field_path = out / f'{label}-ocr-switcher-field.png'
-                image_args = ['convert', str(path), '-crop', f'640x42+{x}+{y}', '+repage',
-                              '-resize', '400%', '-colorspace', 'gray']
-                if '-dark-' in label:
-                    image_args.append('-negate')
-                run(image_args + ['-auto-level', str(field_path)], env)
-                text += ' ' + normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
-                field_path.unlink()
         if 'Antwortoption' in required and poll_option_hits(path, words):
             text += ' antwortoption'
         for term in required:
@@ -344,8 +328,10 @@ def exercise(scenario, env, xid, out, label, large=False):
         if scenario in ('chat','prejoin','settings'):
             run(['xdotool','mousemove','--window',xid,'600','430','click','--repeat','35','--delay','35','5'],env)
             if scenario=='chat':
-                expect('200% composer reachable by native scrolling',['Senden','Nachricht an Produktteam'])
-                click('schreiben');type_text('LARGEDRAFT');key('Return')
+                # The send control is an arrow icon; reachability is proved by native
+                # typing and submission below, rather than OCR of its tooltip.
+                expect('200% composer reachable by native scrolling',['Nachricht an Produktteam'])
+                click('Nachricht', xmin=30, ymin=500);type_text('LARGEDRAFT');key('Return')
                 expect('200% failed submission retains draft',['LARGEDRAFT','Nicht gesendet'])
             elif scenario=='prejoin':
                 expect('200% explicit conference join remains reachable',['Jetzt', 'teil'])
@@ -663,18 +649,34 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('ctrl+k')
         expect_settled('quick switcher input is mounted', ['Mit Pfeiltasten'])
         type_text('NO MATCH UI')
-        expect_settled('local search filter reports no matching rows', ['NO MATCH UI', 'Keine passenden Gespräche oder Personen'])
+        # Verify native input exactly through its clipboard selection. OCR can
+        # confuse the final I with l even while the filter and editor are correct.
+        key('ctrl+a'); key('ctrl+c')
+        deadline = time.monotonic() + 3
+        while True:
+            copied = subprocess.run(['xclip', '-selection', 'clipboard', '-o'],
+                                    env=env, text=True, capture_output=True, timeout=3)
+            if copied.returncode == 0 and copied.stdout == 'NO MATCH UI':
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError('The quick switcher did not retain the native search query')
+            time.sleep(.1)
+        expect_settled('local search filter reports no matching rows', ['Keine passenden Gespräche oder Personen'])
         key('ctrl+a'); key('BackSpace')
         key('Escape')
+        expect_settled('quick switcher closes before composer interaction',
+                       ['Nachricht an Produktteam'], ['Mit Pfeiltasten'])
         click('Nachricht', xmin=200, ymin=600)
-        type_text('DRAFTALPHA'); time.sleep(.4); key('Return')
+        type_text('DRAFTALPHA')
+        expect_settled('composer receives the native draft', ['DRAFTALPHA'])
+        key('Return')
         expect('draft retained after busy rejection' if scenario == 'busy' else 'draft retained after asynchronous failure',
                ['DRAFTALPHA'] if scenario == 'busy' else ['DRAFTALPHA', 'Nicht gesendet'])
         if scenario == 'busy' and (out / f'{label}.log').read_text().count(
                 'UI_BUSY send_rejected=true no_backend=true') != 1:
             raise AssertionError('The fictional busy port did not reject the explicit send exactly once')
         key('ctrl+comma')
-        expect('settings shortcut opens modal', ['Einstellungen'])
+        expect_settled('settings shortcut opens modal', ['Einstellungen'])
         click('Darstellung'); click('Salbei'); click('Dunkel')
         expect('theme selection stays available after appearance change', ['Einstellungen','Salbei'])
         path,_,_=observe()
