@@ -105,12 +105,12 @@ impl Desktop {
                 "Prüfe deine Verbindung und versuche es erneut.",
                 Some("Erneut versuchen"),
             ),
-            ContentState::Unconfigured => (
-                "info",
-                "Hier noch nicht verfügbar",
-                "Diese Funktion ist in diesem Client noch nicht verfügbar.",
-                None,
-            ),
+            ContentState::Unconfigured => {
+                // Center the shared availability explanation without turning
+                // missing policy evidence into a claim of missing implementation.
+                let (symbol, title, detail) = state.copy()?;
+                (symbol, title, detail, Some("Erneut laden"))
+            }
             _ => return None,
         };
         Some(
