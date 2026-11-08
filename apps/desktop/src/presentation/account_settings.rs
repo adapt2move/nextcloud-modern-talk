@@ -174,13 +174,20 @@ impl Desktop {
         let mut page = self
             .dialog_page()
             .child(self.dialog_page_header(tab.key(), None));
-        if tab == SettingsTab::Privacy {
-            page = page.child(self.dialog_section(Some("Bildschirmfreigabe")).child(
-                self.permission_panel(
-                    talk_core::preferences::permissions::PermissionKind::ScreenSharing,
-                    cx,
-                ),
-            ));
+        // Working access needs no section; only a missing permission warns.
+        if tab == SettingsTab::Privacy
+            && let Some(warning) = self.permission_warning(
+                talk_core::preferences::permissions::PermissionKind::ScreenSharing,
+                cx,
+            )
+        {
+            page = page.child(
+                self.dialog_section(Some("Bildschirmfreigabe"))
+                    .child(self.hint(self.l(
+                        "Bildschirmaufnahme wird benötigt, um deinen Bildschirm zu teilen.",
+                    )))
+                    .child(warning),
+            );
         }
         // Account-owned values are grouped under the account they belong to.
         let mut section = self.dialog_section(Some("Kontoeinstellungen")).child(

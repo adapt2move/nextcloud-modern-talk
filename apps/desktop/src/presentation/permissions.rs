@@ -134,8 +134,12 @@ fn index(kind: PermissionKind) -> usize {
 struct PermissionHelp {
     status: &'static str,
     explanation: Option<&'static str>,
+    // Platform instructions are kept for the localized guidance contract and its
+    // tests; the compact warning links to System Settings instead of listing them.
+    #[cfg_attr(not(test), allow(dead_code))]
     steps: &'static [&'static str],
     request_label: Option<&'static str>,
+    #[cfg_attr(not(test), allow(dead_code))]
     note: Option<&'static str>,
 }
 
@@ -497,9 +501,7 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Option<Div> {
         let observation = self.observation(kind);
-        let help = permission_help(observation, PermissionPlatform::current());
-        let feedback = self.permission_ui.feedback(kind);
-        let failed = feedback.is_some();
+        let failed = self.permission_ui.feedback(kind).is_some();
         let attention = capture_denied
             || failed
             || matches!(
@@ -512,6 +514,33 @@ impl Desktop {
         if observation.allows_device_preview() && !attention {
             return None;
         }
+        Some(self.permission_notice(kind, capture_denied, attention, cx))
+    }
+
+    /// Settings warning: a working permission shows nothing at all. Any other
+    /// state is a warning with the actions that can repair it.
+    pub(super) fn permission_warning(&self, kind: PermissionKind, cx: &Context<Self>) -> Option<Div> {
+        let healthy = matches!(
+            self.observation(kind).status,
+            PermissionStatus::Granted | PermissionStatus::NotRequired | PermissionStatus::PerSession
+        );
+        if healthy && self.permission_ui.feedback(kind).is_none() {
+            return None;
+        }
+        Some(self.permission_notice(kind, false, true, cx))
+    }
+
+    fn permission_notice(
+        &self,
+        kind: PermissionKind,
+        capture_denied: bool,
+        attention: bool,
+        cx: &Context<Self>,
+    ) -> Div {
+        let observation = self.observation(kind);
+        let help = permission_help(observation, PermissionPlatform::current());
+        let feedback = self.permission_ui.feedback(kind);
+        let failed = feedback.is_some();
         let availability = self.permission_ui.availability();
         let status = if capture_denied {
             "Zugriff verweigert."
@@ -563,146 +592,8 @@ impl Desktop {
                 PermissionAction::Check,
             ));
         }
-        Some(notice)
+        notice
     }
-    pub(super) fn permission_panel(&self, kind: PermissionKind, cx: &Context<Self>) -> Div {
-        let observation = self.observation(kind);
-        let help = permission_help(observation, PermissionPlatform::current());
-        let (_, purpose) = permission_identity(kind);
-        let feedback = self.permission_ui.feedback(kind);
-        let availability = self.permission_ui.availability();
-        // One borderless text column keeps purpose, status, instructions and
-        // actions aligned; paragraphs determine their height at large text sizes.
-        let mut panel = div()
-            .w_full()
-            .min_w_0()
-            .flex_shrink_0()
-            .whitespace_normal()
-            .text_color(self.theme.text)
-            .text_size(self.sp(12.))
-            .line_height(self.sp(18.))
-            .child(self.hint(self.l(purpose)).w_full().whitespace_normal())
-            .child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .mt_3()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(self.l(help.status)),
-            );
-        if let Some(explanation) = help.explanation {
-            panel = panel.child(
-                self.hint(self.l(explanation))
-                    .w_full()
-                    .whitespace_normal()
-                    .mt_2(),
-            );
-        }
-        for (step, key) in help.steps.iter().enumerate() {
-            panel = panel.child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .mt_2()
-                    .text_size(self.sp(12.))
-                    .line_height(self.sp(18.))
-                    .child(format!("{}. {}", step + 1, self.l(key))),
-            );
-        }
-        panel = panel.child(
-            div()
-                .w_full()
-                .min_w_0()
-                .mt_3()
-                .when_some(help.request_label, |d, label| {
-                    d.child(
-                        self.button(
-                            ("permission-request", index(kind)),
-                            "",
-                            ButtonStyle::Primary,
-                            availability,
-                            LocalAction::Permission(kind, PermissionAction::Request),
-                            cx,
-                        )
-                        .w_full()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .text_center()
-                        .gap_0()
-                        .child(
-                            div()
-                                .w_full()
-                                .min_w_0()
-                                .whitespace_normal()
-                                .child(self.l(label)),
-                        )
-                        .mb_2(),
-                    )
-                })
-                .when(observation.can_open_settings, |d| {
-                    d.child(
-                        self.button(
-                            ("permission-settings", index(kind)),
-                            "",
-                            ButtonStyle::Secondary,
-                            availability,
-                            LocalAction::Permission(kind, PermissionAction::OpenSystemSettings),
-                            cx,
-                        )
-                        .w_full()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .text_center()
-                        .gap_0()
-                        .child(
-                            div()
-                                .w_full()
-                                .min_w_0()
-                                .whitespace_normal()
-                                .child(self.l("Systemeinstellungen öffnen")),
-                        )
-                        .mb_2(),
-                    )
-                })
-                .child(
-                    self.button(
-                        ("permission-check", index(kind)),
-                        "",
-                        ButtonStyle::Quiet,
-                        availability,
-                        LocalAction::Permission(kind, PermissionAction::Check),
-                        cx,
-                    )
-                    .w_full()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .text_center()
-                    .gap_0()
-                    .child(
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .whitespace_normal()
-                            .child(self.l("Erneut prüfen")),
-                    ),
-                ),
-        );
-        if let Some(note) = help.note {
-            panel = panel.child(self.hint(self.l(note)).w_full().whitespace_normal().mt_2());
-        }
-        if let Some(feedback) = feedback {
-            panel = panel.child(
-                self.hint(self.l(feedback))
-                    .w_full()
-                    .whitespace_normal()
-                    .mt_2(),
-            );
-        }
-        panel
-    }
-
     pub(super) fn onboarding_permission_status(&self, kind: PermissionKind) -> &'static str {
         permission_help(self.observation(kind), PermissionPlatform::current()).status
     }
