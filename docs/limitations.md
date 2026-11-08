@@ -325,6 +325,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   revalidates current server authority before dispatch. Read-only uncertainty
   checks have finite windows, including the latest 200 messages for send/forward
   correlation. An unresolved effect stays retained and is never blindly replayed.
+  Only pending, queued and uncertain sends are message-list rows. A failed send, edit
+  or schedule leaves the list and appears as one row above the main composer with
+  retry, edit-as-draft and delete or discard; it is not placed at its former position in
+  the timeline, and the thread composer does not show failed records.
   Scheduled creation has no operation correlation and may remain uncertain.
 - Reminders are server-owned; there is no standalone local OS reminder fallback.
   The account-wide list is a bounded session cache and does not survive a restart.

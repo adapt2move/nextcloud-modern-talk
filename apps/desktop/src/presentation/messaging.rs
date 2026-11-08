@@ -3132,7 +3132,6 @@ impl Desktop {
             }
         }
         rows.extend(self.message_deadline_card_on(false, cx));
-        rows.extend(self.failed_draft_card(cx));
         rows
     }
     fn quote_marker(&self) -> Div {

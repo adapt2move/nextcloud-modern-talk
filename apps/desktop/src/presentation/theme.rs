@@ -315,6 +315,39 @@ mod tests {
         }
     }
     #[test]
+    fn message_state_text_meets_contrast_on_the_row_and_its_hover_tint() {
+        // A quieter in-flight send is body text at 72% over the surface.
+        let blend = |top: Hsla, over: Hsla, alpha: f32| {
+            let (a, b) = (gpui::Rgba::from(top), gpui::Rgba::from(over));
+            gpui::Rgba {
+                r: b.r + alpha * (a.r - b.r),
+                g: b.g + alpha * (a.g - b.g),
+                b: b.b + alpha * (a.b - b.b),
+                a: 1.,
+            }
+            .into()
+        };
+        for palette in [Palette::Blue, Palette::Sage] {
+            for appearance in [Appearance::Light, Appearance::Dark] {
+                let t = Theme::resolve(palette, appearance, WindowAppearance::Light);
+                for background in [t.surface, t.subtle] {
+                    for (name, fg) in [
+                        ("status", t.muted),
+                        ("failed", t.danger),
+                        ("unclear", t.warning),
+                        ("action link", t.focus),
+                        ("in flight", blend(t.text, background, 0.72)),
+                    ] {
+                        assert!(
+                            contrast(fg, background) >= 4.5,
+                            "{name} on {background:?} for {palette:?}/{appearance:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    #[test]
     fn semantic_text_and_control_roles_meet_design_contrast_in_all_four_themes() {
         for palette in [Palette::Blue, Palette::Sage] {
             for appearance in [Appearance::Light, Appearance::Dark] {

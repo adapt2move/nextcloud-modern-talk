@@ -785,6 +785,8 @@ impl Desktop {
             .gap_2()
             .when(!thread, |d| d.child(self.typing_slot(row.context)))
             .children(if thread==(self.overlay==Some(Overlay::Thread)) {self.action_hint_view(cx)} else {None})
+            // A failed send is a quiet row above the field, not content inside it.
+            .children(if thread { None } else { self.failed_draft_card(cx) })
             .child(
                 self.composer_frame()
                     .child(self.field_ring(input.focus_handle(cx), 12.))
