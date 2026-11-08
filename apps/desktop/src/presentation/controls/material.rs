@@ -1,8 +1,8 @@
 //! Retained, bounded texture layers for the native material surfaces.
 use crate::presentation::{Desktop, MaterialImages};
 use gpui::{
-    AnyView, Bounds, Context, ContentMask, Corners, Entity, Hsla, ImageSource, Pixels, Render, Styled, Window,
-    canvas, div, point, prelude::*, px, size,
+    AnyView, Bounds, ContentMask, Context, Corners, Entity, Hsla, ImageSource, Pixels, Render,
+    Styled, Window, canvas, div, point, prelude::*, px, size,
 };
 
 const TILE: f32 = 128.;

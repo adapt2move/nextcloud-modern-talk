@@ -240,11 +240,13 @@ impl Desktop {
                                 )
                                 // Share the toolbar owner: GPUI group-hover styles
                                 // can retain the last in-window position on exit.
-                                .opacity(if last_own || surface_active || unsettled {
-                                    1.
-                                } else {
-                                    0.
-                                }),
+                                .opacity(
+                                    if last_own || surface_active || unsettled {
+                                        1.
+                                    } else {
+                                        0.
+                                    },
+                                ),
                             )
                         })
                         .when(m.metadata.edited, |d| {
@@ -293,21 +295,17 @@ impl Desktop {
         } else if !self.bare_attachment_body(m) && (upload.is_none() || !m.body.as_str().is_empty())
         {
             content = content.child(
-                div()
-                    .flex()
-                    .items_start()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(self.message_text(m, thread, cx))
-                            .when(continuation && m.metadata.edited, |d| {
-                                d.child(self.hint(self.l("Bearbeitet")))
-                            }),
-                    ),
+                div().flex().items_start().gap_2().child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(self.message_text(m, thread, cx))
+                        .when(continuation && m.metadata.edited, |d| {
+                            d.child(self.hint(self.l("Bearbeitet")))
+                        }),
+                ),
             );
         }
         if let Some(indicator) = attention {
@@ -1527,10 +1525,7 @@ mod tests {
             assert!(indicator.is_unsettled(), "{indicator:?}");
             assert!(!indicator.label().is_empty());
         }
-        for indicator in [
-            DeliveryIndicator::Failed,
-            DeliveryIndicator::Uncertain,
-        ] {
+        for indicator in [DeliveryIndicator::Failed, DeliveryIndicator::Uncertain] {
             assert!(indicator.needs_attention(), "{indicator:?}");
             assert!(!indicator.label().is_empty());
         }

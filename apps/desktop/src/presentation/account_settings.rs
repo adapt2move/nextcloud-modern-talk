@@ -183,9 +183,9 @@ impl Desktop {
         {
             page = page.child(
                 self.dialog_section(Some("Bildschirmfreigabe"))
-                    .child(self.hint(self.l(
-                        "Bildschirmaufnahme wird benötigt, um deinen Bildschirm zu teilen.",
-                    )))
+                    .child(self.hint(
+                        self.l("Bildschirmaufnahme wird benötigt, um deinen Bildschirm zu teilen."),
+                    ))
                     .child(warning),
             );
         }

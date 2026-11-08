@@ -36,7 +36,10 @@ impl Desktop {
             input.reset();
             cx.notify();
         });
-        self.message_ui.reaction_input.focus_handle(cx).focus(window);
+        self.message_ui
+            .reaction_input
+            .focus_handle(cx)
+            .focus(window);
         self.show_reaction_picker(window, cx);
         cx.notify();
     }
@@ -47,7 +50,9 @@ impl Desktop {
         };
         self.message_ui.reaction_error = None;
         self.retire_emoji_picker();
-        let root = thread.then(|| self.thread_parent.map(|(_, root)| root)).flatten();
+        let root = thread
+            .then(|| self.thread_parent.map(|(_, root)| root))
+            .flatten();
         self.restore_deadline_focus(root, window, cx);
         cx.notify();
     }
@@ -63,7 +68,10 @@ impl Desktop {
                 Some("Die native Emoji-Auswahl ist auf diesem System nicht verfügbar.");
             return;
         }
-        self.message_ui.reaction_input.focus_handle(cx).focus(window);
+        self.message_ui
+            .reaction_input
+            .focus_handle(cx)
+            .focus(window);
         let view = cx.weak_entity();
         window.on_next_frame(move |window, cx| {
             let _ = view.update(cx, |this, cx| {

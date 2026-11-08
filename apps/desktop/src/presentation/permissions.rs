@@ -519,10 +519,16 @@ impl Desktop {
 
     /// Settings warning: a working permission shows nothing at all. Any other
     /// state is a warning with the actions that can repair it.
-    pub(super) fn permission_warning(&self, kind: PermissionKind, cx: &Context<Self>) -> Option<Div> {
+    pub(super) fn permission_warning(
+        &self,
+        kind: PermissionKind,
+        cx: &Context<Self>,
+    ) -> Option<Div> {
         let healthy = matches!(
             self.observation(kind).status,
-            PermissionStatus::Granted | PermissionStatus::NotRequired | PermissionStatus::PerSession
+            PermissionStatus::Granted
+                | PermissionStatus::NotRequired
+                | PermissionStatus::PerSession
         );
         if healthy && self.permission_ui.feedback(kind).is_none() {
             return None;

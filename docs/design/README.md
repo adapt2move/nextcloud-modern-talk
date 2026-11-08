@@ -36,10 +36,11 @@ cover the native toolkit and assets.
 - The toolbar straddles the row's top edge at the content's right edge, identically in the
   timeline and the thread pane. The hovered row is tinted with `surface.subtle`, so the
   controls visibly belong to it. It fades in over 140 ms; Reduce Motion shows it at once.
-- States that need words say so under the message in 12 pt text: "Wird gesendet …",
-  "Wartet auf Versand", the unclear-status explanation (warning) and "Nicht gesendet"
-  (error) with plain-text actions. Only the newest own message keeps its sent or read
-  receipt at rest. A pinned message carries "Angeheftet" under its text.
+- A send feels instant: the editor empties on admission and the message looks sent.
+  Sending and waiting show only the small clock where the receipt ticks go. Only the
+  unclear-status explanation (warning) and "Nicht gesendet" (error) say so in words under
+  the message in 12 pt text, with plain-text actions on a neutral hover. Only the newest
+  own message keeps its sent or read receipt at rest. A pinned message carries "Angeheftet" under its text.
 - A menu belongs to the surface that opened it: its open state, anchor and visibility are
   judged against that surface's own scroll region.
 

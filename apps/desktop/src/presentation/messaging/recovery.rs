@@ -225,7 +225,7 @@ impl Desktop {
                     .line_height(self.sp(18.))
                     .text_color(color)
             };
-                let separator = || div().text_color(t.muted).child("·");
+        let separator = || div().text_color(t.muted).child("·");
         let role = if draft.retrying {
             crate::presentation::controls::BannerRole::Info
         } else {

@@ -923,13 +923,7 @@ impl Desktop {
             let mut previous_section = None;
             for item in items {
                 if previous_section.is_some_and(|section| section != item.section) {
-                    body = body.child(
-                        div()
-                            .h(px(1.))
-                            .mx_2()
-                            .my(px(2.))
-                            .bg(self.theme.border),
-                    );
+                    body = body.child(div().h(px(1.)).mx_2().my(px(2.)).bg(self.theme.border));
                 }
                 previous_section = Some(item.section);
                 let label = self.l(&item.label).to_owned();
