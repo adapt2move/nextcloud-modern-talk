@@ -139,7 +139,10 @@ impl Capabilities {
         self.features.iter().any(|s| s == name)
     }
     pub fn supported(&self) -> bool {
-        self.family != ServerFamily::Unknown && self.has("conversation-v4")
+        // ServerFamily records exercised baselines, not protocol authority.
+        // Backports and newer releases advertise the same documented routes;
+        // every operation still checks its flags and current room restrictions.
+        self.has("conversation-v4")
     }
     pub fn feature(&self, name: &str) -> FeatureSupport {
         if !self.supported() {

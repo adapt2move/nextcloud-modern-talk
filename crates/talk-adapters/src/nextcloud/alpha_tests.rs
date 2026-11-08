@@ -22,6 +22,61 @@ fn message(id: u64) -> Value {
 }
 
 #[tokio::test]
+async fn thread_history_uses_documented_flags_on_unrecognized_server_versions() {
+    for major in [34, 35, 36, 99] {
+        let mut capabilities = features(&[
+            "threads",
+            "chat-replies",
+            "edit-messages",
+            "react-permission",
+        ]);
+        capabilities["version"]["major"] = json!(major);
+        let mut reply = message(43);
+        reply["threadId"] = json!(42);
+        reply["isThread"] = json!(true);
+        reply["threadReplies"] = json!(2);
+        let server = Server::start(vec![
+            Reply::data(capabilities),
+            Reply::data(room()),
+            Reply::data(json!([reply])),
+        ])
+        .await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let reply = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Messaging {
+                    conversation,
+                    operation: OperationId::from_local(1),
+                    command: M::History {
+                        before: None,
+                        thread: Some(MessageId {
+                            conversation,
+                            sequence: 42,
+                        }),
+                    },
+                },
+            )
+            .await
+            .unwrap_or_else(|error| {
+                panic!("thread history on NextCloud {major}: {:?}", error.kind)
+            });
+        let ProtocolReply::Messaging {
+            result: R::Messages { messages, .. },
+            ..
+        } = reply
+        else {
+            panic!("thread history")
+        };
+        assert_eq!(messages.as_slice()[0].thread.unwrap().sequence, 42);
+        assert_eq!(messages.as_slice()[0].thread_replies, None);
+        assert_eq!(server.count(), 3);
+    }
+}
+
+#[tokio::test]
 async fn subscribed_threads_require_capability_and_known_account_room() {
     for (enabled, token) in [(false, "testroom"), (true, "testroom"), (true, "otherroom")] {
         let mut replies = vec![Reply::data(features(if enabled {
@@ -61,6 +116,84 @@ async fn subscribed_threads_require_capability_and_known_account_room() {
                 assert_eq!(threads.as_slice()[0].root.sequence, 42);
                 assert_eq!(threads.as_slice()[0].replies, 2);
             }
+        }
+    }
+}
+
+#[tokio::test]
+async fn newer_servers_keep_pane_actions_capability_and_permission_gated() {
+    for (threads, permissions) in [(true, 511), (false, 511), (true, 127)] {
+        let mut caps = features(&["chat-replies", "edit-messages", "react-permission"]);
+        caps["version"]["major"] = json!(36);
+        // Thread support has no required configuration key in upstream's
+        // capabilities contract. Missing unrelated config must not veto it.
+        caps["capabilities"]["spreed"]
+            .as_object_mut()
+            .unwrap()
+            .remove("config");
+        if threads {
+            caps["capabilities"]["spreed"]["features"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("threads"));
+        }
+        let mut data = room();
+        data["permissions"] = json!(permissions);
+        let server = Server::start(vec![Reply::data(caps), Reply::data(data)]).await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let ProtocolReply::Messaging {
+            result: R::Capabilities(caps),
+            ..
+        } = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Messaging {
+                    conversation,
+                    operation: OperationId::from_local(1),
+                    command: M::Capabilities,
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("capabilities")
+        };
+        let action = |feature| {
+            caps.actions
+                .as_slice()
+                .iter()
+                .find(|(f, _)| *f == feature)
+                .unwrap()
+                .1
+        };
+        assert_eq!(
+            action(MessagingFeature::Threads).server,
+            if threads {
+                FeatureSupport::Supported
+            } else {
+                FeatureSupport::Unsupported
+            }
+        );
+        for feature in [
+            MessagingFeature::Read,
+            MessagingFeature::Send,
+            MessagingFeature::Reply,
+            MessagingFeature::Edit,
+            MessagingFeature::React,
+        ] {
+            let availability = action(feature);
+            assert!(availability.implemented);
+            assert_eq!(availability.server, FeatureSupport::Supported);
+            assert_eq!(
+                availability.allowed,
+                if feature == MessagingFeature::Read || permissions == 511 {
+                    Decision::Allowed
+                } else {
+                    Decision::Denied
+                }
+            );
         }
     }
 }
@@ -558,9 +691,15 @@ async fn message_actor_keys_distinguish_equal_names_and_actor_types() {
     first["actorId"] = json!("one");
     first["threadId"] = json!(7);
     first["threadReplies"] = json!(3);
+    first["isThread"] = json!(true);
     let mut second = message(8);
     second["actorId"] = json!("two");
+    // Actual Talk wire shape: an ordinary message has its own threadId,
+    // while an ordinary quote can carry the topmost parent's ID.
+    second["threadId"] = json!(8);
     let mut guest = message(9);
+    guest["threadId"] = json!(8);
+    guest["isThread"] = json!(false);
     guest["actorId"] = json!("one");
     guest["actorType"] = json!("guests");
     let mut unknown = message(10);
@@ -597,6 +736,9 @@ async fn message_actor_keys_distinguish_equal_names_and_actor_types() {
     };
     let rows = messages.as_slice();
     assert_eq!(rows[0].thread_replies, Some(3));
+    assert_eq!(rows[0].thread.unwrap().sequence, 7);
+    assert!(rows[1].thread.is_none());
+    assert!(rows[2].thread.is_none());
     assert_eq!(rows[1].thread_replies, None);
     assert!(rows[0].author_key.is_some());
     assert_ne!(rows[0].author_key, rows[1].author_key);

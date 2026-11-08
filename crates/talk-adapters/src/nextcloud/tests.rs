@@ -958,8 +958,10 @@ async fn unknown_and_restrictive_policies_never_send() {
 }
 
 #[tokio::test]
-async fn future_family_missing_capabilities_and_account_capacity_are_bounded() {
-    let server = Server::start(vec![Reply::data(caps(36))]).await;
+async fn missing_route_capability_and_account_capacity_are_bounded() {
+    let mut missing_route = caps(36);
+    missing_route["capabilities"]["spreed"]["features"] = json!(["threads", "chat-v2"]);
+    let server = Server::start(vec![Reply::data(missing_route)]).await;
     let runtime = runtime();
     let mut client = client(&server.origin, runtime.clone());
     assert_eq!(
