@@ -1079,6 +1079,7 @@ impl Desktop {
     }
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         // Use the existing owner tick even when no new snapshot is published.
+        self.settle_collapse_overrides();
         self.refresh_offline_notice(cx);
         self.refresh_action_toast(cx);
         if self

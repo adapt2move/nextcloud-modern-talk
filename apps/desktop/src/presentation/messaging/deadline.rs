@@ -109,6 +109,8 @@ impl Desktop {
         self.message_ui.time_target = Some(target);
         self.message_ui.time_thread = thread;
         self.message_ui.time_error = None;
+        // Editing a plan starts on its exact time; otherwise the quick choices come first.
+        self.message_ui.custom_time = self.message_ui.scheduled_edit.is_some();
         let value = target
             .and_then(|message| {
                 self.snapshot
@@ -271,6 +273,7 @@ impl Desktop {
             return None;
         }
         let reminder = target.is_some();
+        let custom = self.message_ui.custom_time;
         let editing = !reminder && self.message_ui.scheduled_edit.is_some();
         let available = self.message_available(if reminder {
             MessageFeature::Reminders
@@ -338,49 +341,88 @@ impl Desktop {
                     )
                 })
                 .child(
-                    div().flex().flex_wrap().items_start().gap_4()
-                    .child(self.date_picker(context, cx))
-                    .child(div().flex_1().min_w(px(230.)).flex().flex_col().items_start().gap_1().children(
-                        [
-                            ("In 20 Minuten", DeadlineChoice::InTwentyMinutes),
-                            ("In einer Stunde", DeadlineChoice::InOneHour),
-                            ("In 3 Stunden", DeadlineChoice::InThreeHours),
-                            ("Morgen um 09:00", DeadlineChoice::TomorrowMorning),
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_2()
+                        .children(
+                            [
+                                ("In 20 Minuten", DeadlineChoice::InTwentyMinutes),
+                                ("In einer Stunde", DeadlineChoice::InOneHour),
+                                ("In 3 Stunden", DeadlineChoice::InThreeHours),
+                                ("Morgen um 09:00", DeadlineChoice::TomorrowMorning),
+                                ("Montag um 09:00", DeadlineChoice::NextMondayMorning),
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            .filter(|(index, _)| reminder || *index >= 3)
+                            .map(|(index, (label, choice))| {
+                                self.button(
+                                    ("message-time-preset", index),
+                                    label,
+                                    ButtonStyle::Quiet,
+                                    available,
+                                    LocalAction::MessageIn(context, Action::ChooseTime(choice)),
+                                    cx,
+                                )
+                                .rounded_full()
+                                .bg(self.theme.subtle)
+                            }),
+                        )
+                        .child(self.button_with_icon(
+                            "message-time-custom",
                             (
-                                "Nächsten Montag um 09:00",
-                                DeadlineChoice::NextMondayMorning,
+                                "Eigene Zeit …",
+                                if custom { "chevron-up" } else { "chevron-down" },
                             ),
-                        ]
-                        .into_iter()
-                        .enumerate()
-                        .filter(|(index, _)| reminder || *index >= 3)
-                        .map(|(index, (label, choice))| {
-                            self.button(
-                                ("message-time-preset", index),
-                                label,
-                                ButtonStyle::Quiet,
-                                available,
-                                LocalAction::MessageIn(context, Action::ChooseTime(choice)),
-                                cx,
-                            )
-                            .w_full()
-                            .justify_start()
-                        }),
-                    ).child(div().w_full().flex().justify_end().pt_2().child(self.button(
-                            "submit-message-time",
-                            if reminder {
-                                "Erinnern"
-                            } else if editing {
-                                "Änderungen speichern"
-                            } else {
-                                "Planen"
-                            },
-                            ButtonStyle::Primary,
-                            if self.message_ui.picker.is_some() { available } else { Availability::when(false, "Die Systemzeitzone ist gerade nicht verfügbar. Bitte gleich erneut versuchen.") },
-                            LocalAction::MessageIn(context, Action::SubmitTime),
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::MessageIn(context, Action::ToggleCustomTime),
                             cx,
-                        )))),
+                        )),
                 )
+                .when(custom, |d| {
+                    d.child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_start()
+                            .gap_4()
+                            .child(self.date_picker(context, cx))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(160.))
+                                    .flex()
+                                    .flex_col()
+                                    .items_end()
+                                    .justify_end()
+                                    .h_full()
+                                    .child(self.button(
+                                        "submit-message-time",
+                                        if reminder {
+                                            "Erinnern"
+                                        } else if editing {
+                                            "Änderungen speichern"
+                                        } else {
+                                            "Planen"
+                                        },
+                                        ButtonStyle::Primary,
+                                        if self.message_ui.picker.is_some() {
+                                            available
+                                        } else {
+                                            Availability::when(
+                                                false,
+                                                "Die Systemzeitzone ist gerade nicht verfügbar. Bitte gleich erneut versuchen.",
+                                            )
+                                        },
+                                        LocalAction::MessageIn(context, Action::SubmitTime),
+                                        cx,
+                                    )),
+                            ),
+                    )
+                })
                 .when_some(self.message_ui.time_error, |d, error| {
                     d.child(
                         self.banner(BannerRole::Error, self.l(error_label(error))),

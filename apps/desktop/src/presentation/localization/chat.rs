@@ -146,6 +146,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Remove your reaction",
         "Quitar tu reacción",
     ),
+    ("Eigene Zeit …", "Custom time …", "Hora personalizada …"),
     ("Emoji auswählen", "Choose an emoji", "Elegir un emoji"),
     (
         "Emoji hier einfügen",
@@ -256,6 +257,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No hay mensajes programados.",
     ),
     ("Kursiv", "Italic", "Cursiva"),
+    ("Montag um 09:00", "Monday at 09:00", "El lunes a las 09:00"),
     ("Morgen um 09:00", "Tomorrow at 09:00", "Mañana a las 09:00"),
     (
         "Nachricht geplant.",

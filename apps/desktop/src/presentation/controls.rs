@@ -668,6 +668,23 @@ impl Desktop {
             | "call" | "room-info" | "room-members"))
         {
             super::shell::chat_header::theme(self.theme, self.palette)
+        } else if self.overlay.is_some()
+            || matches!(id, ElementId::Name(name) if name.starts_with("message-time-"))
+            || matches!(id, ElementId::NamedInteger(name, _) if name.starts_with("message-time-") || name.starts_with("deadline-time-"))
+        {
+            // Dialogs work in grays. The palette's green hover reads as a stain on
+            // white and on the gray header, so hovering darkens the surface itself.
+            super::Theme {
+                hover: gpui::Hsla {
+                    a: 0.06,
+                    ..self.theme.text
+                },
+                row_hover: gpui::Hsla {
+                    a: 0.05,
+                    ..self.theme.text
+                },
+                ..self.theme
+            }
         } else {
             self.theme
         }

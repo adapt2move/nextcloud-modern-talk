@@ -6,7 +6,6 @@ use gpui::{
     Context, Focusable, Hsla, IntoElement, Render, SharedString, Stateful, Window, div, prelude::*,
     px,
 };
-use std::time::{Duration, Instant};
 use talk_core::preferences::navigation::{
     NavigationEdit, NavigationGroupId, RemoteNavigationSupport,
 };
@@ -15,9 +14,9 @@ use talk_core::ui::{
     presentation::{ConversationRef, ConversationView, FeatureSupport, TagEdit, TagKind, TagRef},
 };
 
-/// A collapse request shows its result at once; the owner confirms it later.
-const COLLAPSE_GRACE: Duration = Duration::from_secs(4);
-const MAX_COLLAPSE_OVERRIDES: usize = 32;
+/// A collapse request shows its result at once and keeps showing it, also offline:
+/// the override only ends when the owner's state agrees or the user toggles again.
+const MAX_COLLAPSE_OVERRIDES: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CollapseKey {
@@ -63,26 +62,50 @@ impl Render for DragGhost {
 }
 
 #[derive(Default)]
-pub(super) struct CollapseOverrides(Vec<(CollapseKey, bool, Instant)>);
+pub(super) struct CollapseOverrides(Vec<(CollapseKey, bool)>);
 impl CollapseOverrides {
     pub fn get(&self, key: CollapseKey) -> Option<bool> {
         self.0
             .iter()
-            .find(|(candidate, _, at)| *candidate == key && at.elapsed() < COLLAPSE_GRACE)
-            .map(|(_, value, _)| *value)
+            .find(|(candidate, _)| *candidate == key)
+            .map(|(_, value)| *value)
     }
     fn set(&mut self, key: CollapseKey, value: bool) {
-        self.0
-            .retain(|(candidate, _, at)| *candidate != key && at.elapsed() < COLLAPSE_GRACE);
+        self.0.retain(|(candidate, _)| *candidate != key);
         if self.0.len() < MAX_COLLAPSE_OVERRIDES {
-            self.0.push((key, value, Instant::now()));
+            self.0.push((key, value));
         }
+    }
+    /// Drop what the owner now confirms; what it still disagrees with stays.
+    pub fn settle(&mut self, confirmed: impl Fn(CollapseKey) -> Option<bool>) {
+        self.0
+            .retain(|(key, value)| confirmed(*key) != Some(*value));
     }
 }
 
 impl Desktop {
     pub(super) fn effective_collapsed(&self, key: CollapseKey, actual: bool) -> bool {
         self.collapse_overrides.get(key).unwrap_or(actual)
+    }
+
+    /// Called after each projection: an override that the owner has caught up with ends.
+    pub(super) fn settle_collapse_overrides(&mut self) {
+        let mut overrides = std::mem::take(&mut self.collapse_overrides);
+        overrides.settle(|key| match key {
+            CollapseKey::Tag(tag) => self
+                .snapshot
+                .tags
+                .as_slice()
+                .iter()
+                .find(|t| t.id == tag)
+                .map(|t| t.collapsed),
+            CollapseKey::Group(id) => self
+                .account_layout()
+                .and_then(|l| l.groups().iter().find(|g| g.id == id))
+                .map(|g| g.collapsed),
+            CollapseKey::Section(section) => Some(self.section_collapsed(section)),
+        });
+        self.collapse_overrides = overrides;
     }
 
     pub(super) fn toggle_collapse(&mut self, key: CollapseKey, cx: &mut Context<Self>) {

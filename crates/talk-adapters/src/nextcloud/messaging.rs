@@ -1271,13 +1271,21 @@ impl NextcloudClient {
             let api::Reply::Chat(WireResponse::AttachmentFolder(folder)) = folder else {
                 return Err(self.error(ErrorKind::Malformed));
             };
-            // The probe returns a user-root-relative Draft folder. Upload under an
-            // unpredictable temporary name; final naming happens only on explicit share.
-            let path = format!(
-                "/{}/nmt-{:032x}",
-                folder.folder.trim_matches('/'),
-                self.opaque()?
-            );
+            // The probe returns a user-root-relative Draft folder and, with
+            // `allowUpdate=false`, the collision-free name for each requested file.
+            // Upload under that real name: the server detects the media type from
+            // the extension, and a voice message is only recognised as audio when
+            // the stored file still carries one.
+            let stored_name = folder
+                .renames
+                .iter()
+                .find(|(requested, _)| requested == name.as_str())
+                .map_or(name.as_str(), |(_, unique)| unique.as_str())
+                .to_owned();
+            if stored_name.contains(['/', '\\']) || matches!(stored_name.as_str(), "." | "..") {
+                return Err(self.error(ErrorKind::Malformed));
+            }
+            let path = format!("/{}/{}", folder.folder.trim_matches('/'), stored_name);
             let remote =
                 api::files::FilePath::parse(&path).map_err(|k| self.error(transport::kind(k)))?;
             let length = size as u32;
@@ -1291,7 +1299,7 @@ impl NextcloudClient {
             self.uploads.push(UploadName {
                 conversation: id,
                 path: path.clone(),
-                name: name.as_str().into(),
+                name: stored_name,
                 voice_message,
                 share: None,
             });

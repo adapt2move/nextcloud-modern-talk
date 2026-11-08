@@ -72,6 +72,7 @@ pub(crate) enum Action {
     EditScheduled(u128),
     ToggleScheduled,
     CancelTime,
+    ToggleCustomTime,
     CancelReactionCapture,
     OpenReactionPicker,
     Remind { message: u128, thread: Option<u128> },
@@ -133,6 +134,7 @@ pub(super) struct MessageUi {
     reaction_error: Option<&'static str>,
     pub reaction_input: Entity<TextInput>,
     time_error: Option<talk_core::preferences::time::LocalTimeError>,
+    custom_time: bool,
     pub search: Entity<TextInput>,
     show_search: bool,
     search_return_focus: Option<FocusHandle>,
@@ -356,6 +358,7 @@ impl MessageUi {
             reaction_error: None,
             reaction_input: cx.new(|cx| TextInput::new("Emoji hier einfügen", 64, theme, cx)),
             time_error: None,
+            custom_time: false,
             search: cx.new(|cx| TextInput::new("Im Gespräch suchen …", 256, theme, cx)),
             show_search: false,
             search_return_focus: None,
@@ -1932,7 +1935,14 @@ impl Desktop {
             }
             Action::CancelReactionCapture => self.close_reaction_capture(window, cx),
             Action::OpenReactionPicker => self.show_reaction_picker(window, cx),
+            Action::ToggleCustomTime => {
+                self.message_ui.custom_time = !self.message_ui.custom_time;
+                if self.message_ui.custom_time {
+                    self.focus_date_picker(window, cx);
+                }
+            }
             Action::CancelTime => {
+                self.message_ui.custom_time = false;
                 let thread = self.message_ui.time_thread;
                 self.message_ui.time_target = None;
                 self.message_ui.time_thread = None;

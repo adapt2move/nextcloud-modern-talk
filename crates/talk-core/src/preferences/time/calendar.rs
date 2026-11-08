@@ -157,6 +157,16 @@ impl Calendar {
         true
     }
 
+    /// Set the clock time within the selected day.
+    pub fn set_time(&mut self, hour: u8, minute: u8) -> bool {
+        if hour > 23 || minute > 59 {
+            return false;
+        }
+        self.hour = hour;
+        self.minute = minute;
+        true
+    }
+
     pub fn shift_minutes(&mut self, delta: i16) -> bool {
         if !(-60..=60).contains(&delta) {
             return false;

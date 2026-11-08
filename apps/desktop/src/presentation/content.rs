@@ -28,6 +28,37 @@ const MAX_IMAGES: usize = 128;
 const MAX_POLL_OPTIONS: usize = 100;
 const MAX_VOICE_LEVELS: usize = 32;
 const INITIAL_VOICE_BUCKET_MS: u64 = 250;
+/// Live recording view: one fixed-width bar per slice, newest at the right edge.
+const VOICE_TAIL_SLICE_MS: u64 = 100;
+const MAX_VOICE_TAIL: usize = 480;
+
+/// Append the current level to the live tail. Silent slices are kept, so the
+/// trace scrolls at a constant speed; only the oldest slices are dropped.
+fn record_voice_tail(
+    tail: &mut Vec<u16>,
+    last_slice: &mut Option<u64>,
+    elapsed_ms: u64,
+    level: u16,
+) {
+    let slice = elapsed_ms / VOICE_TAIL_SLICE_MS;
+    let level = level.min(1000);
+    match *last_slice {
+        Some(last) if slice <= last => {
+            if let Some(newest) = tail.last_mut() {
+                *newest = (*newest).max(level);
+            }
+        }
+        previous => {
+            let missing = previous.map_or(0, |last| (slice - last - 1).min(MAX_VOICE_TAIL as u64));
+            tail.extend(std::iter::repeat_n(0, missing as usize));
+            tail.push(level);
+            *last_slice = Some(slice);
+            if tail.len() > MAX_VOICE_TAIL {
+                tail.drain(..tail.len() - MAX_VOICE_TAIL);
+            }
+        }
+    }
+}
 
 // Preserve peaks across the whole recording, coarsening time buckets instead of
 // discarding older samples. This keeps both memory and review rendering bounded.
@@ -173,6 +204,8 @@ pub(super) struct ContentUi {
     pub(super) voice: Option<talk_core::ui::content::VoiceSnapshot>,
     pub(super) voice_levels: Vec<u16>,
     voice_level_bucket_ms: u64,
+    voice_tail: Vec<u16>,
+    voice_tail_slice: Option<u64>,
     voice_epoch: u64,
     pub(super) voice_error: Option<&'static str>,
     voice_auto_send: Option<ConversationRef>,
@@ -241,6 +274,8 @@ impl ContentUi {
             voice: None,
             voice_levels: Vec::new(),
             voice_level_bucket_ms: INITIAL_VOICE_BUCKET_MS,
+            voice_tail: Vec::new(),
+            voice_tail_slice: None,
             voice_epoch: 0,
             voice_error: None,
             voice_auto_send: None,
@@ -277,6 +312,9 @@ impl Desktop {
                     90, 200, 360, 580, 370, 170, 220, 460, 710, 490, 240, 120, 280, 540, 680, 390,
                     180, 130, 310, 620, 450, 200, 90, 150,
                 ];
+                self.content_ui.voice_tail = (0..MAX_VOICE_TAIL)
+                    .map(|i| 80 + ((i * 97 + (i / 5) * 211) % 600) as u16)
+                    .collect();
             }
             _ => {}
         }
@@ -490,6 +528,8 @@ impl Desktop {
                 })
             {
                 self.content_ui.voice_levels.clear();
+                self.content_ui.voice_tail.clear();
+                self.content_ui.voice_tail_slice = None;
                 self.content_ui.voice_level_bucket_ms = INITIAL_VOICE_BUCKET_MS;
                 self.content_ui.voice_epoch = self.content_ui.voice_epoch.saturating_add(1);
             }
@@ -502,9 +542,17 @@ impl Desktop {
                     voice.elapsed_ms,
                     voice.level,
                 );
+                record_voice_tail(
+                    &mut self.content_ui.voice_tail,
+                    &mut self.content_ui.voice_tail_slice,
+                    voice.elapsed_ms,
+                    voice.level,
+                );
             }
             if voice.is_none() {
                 self.content_ui.voice_levels.clear();
+                self.content_ui.voice_tail.clear();
+                self.content_ui.voice_tail_slice = None;
             }
             self.content_ui.voice = voice;
             cx.notify();
@@ -1192,7 +1240,10 @@ impl Desktop {
             .h(px(32.))
             .flex()
             .items_center()
-            .justify_between()
+            .when(review, |d| d.justify_between())
+            // While recording the trace has a fixed bar width and scrolls in from
+            // the right; reviewing fits the whole recording to the track.
+            .when(!review, |d| d.justify_end().overflow_hidden())
             .gap(px(2.))
             .when_some(focus, |d, focus| {
                 d.track_focus(&focus.clone().tab_stop(enabled))
@@ -1201,7 +1252,21 @@ impl Desktop {
             .when(review && self.content_ui.voice_levels.is_empty(), |d| {
                 d.child(self.hint(self.l("Aufnahme bereit zum Senden")))
             })
-            .children((0..bars).map(|index| {
+            .when(!review, |d| {
+                d.children(self.content_ui.voice_tail.iter().map(|level| {
+                    div()
+                        .flex_none()
+                        .w(px(3.))
+                        .h(px(3. + f32::from(*level) / 1000. * 25.))
+                        .rounded(px(2.))
+                        .bg(if self.theme.dark {
+                            gpui::rgb(0x6fa0e8).into()
+                        } else {
+                            self.theme.accent
+                        })
+                }))
+            })
+            .children((0..if review { bars } else { 0 }).map(|index| {
                 let level = self.content_ui.voice_levels[index / 3];
                 let played = duration > 0
                     && (index as f32 / bars.max(1) as f32) <= position as f32 / duration as f32;
@@ -2034,6 +2099,8 @@ impl Desktop {
                     match self.settings_port.start_voice(context) {
                         Ok(()) => {
                             self.content_ui.voice_levels.clear();
+                            self.content_ui.voice_tail.clear();
+                            self.content_ui.voice_tail_slice = None;
                             self.content_ui.voice_level_bucket_ms = INITIAL_VOICE_BUCKET_MS;
                             self.content_ui.voice_epoch =
                                 self.content_ui.voice_epoch.saturating_add(1);

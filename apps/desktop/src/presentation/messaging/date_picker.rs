@@ -8,6 +8,8 @@ pub(crate) enum PickerAction {
     Select(u8),
     Move(i8),
     Minutes(i16),
+    /// Minutes after midnight.
+    Time(u16),
 }
 
 fn day_id(context: ConversationRef, day: u8) -> gpui::ElementId {
@@ -51,6 +53,9 @@ impl Desktop {
             PickerAction::Select(day) => picker.select(day),
             PickerAction::Move(delta) => picker.shift_days(delta),
             PickerAction::Minutes(delta) => picker.shift_minutes(delta),
+            PickerAction::Time(minutes) => {
+                picker.set_time((minutes / 60).min(23) as u8, (minutes % 60) as u8)
+            }
         };
         if changed {
             self.message_ui.time_error = None;
@@ -206,7 +211,35 @@ impl Desktop {
         };
         let mut tabular_digits = gpui::font("Google Sans");
         tabular_digits.features = gpui::FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)]));
-        grid.child(
+        // Common clock times are one click; the stepper below handles the rest.
+        let chips = div()
+            .flex()
+            .flex_wrap()
+            .justify_center()
+            .gap_1()
+            .pt_2()
+            .children([8_u16, 9, 12, 15, 18, 20].map(|hour| {
+                let selected = picker.hour() == hour as u8 && picker.minute() == 0;
+                self.button(
+                    ("deadline-time-chip", usize::from(hour)),
+                    format!("{hour:02}:00"),
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::MessageIn(
+                        context,
+                        Action::DatePicker(PickerAction::Time(hour * 60)),
+                    ),
+                    cx,
+                )
+                .min_h(px(28.))
+                .py(px(2.))
+                .px_2()
+                .when(selected, |d| {
+                    d.bg(self.theme.selected)
+                        .text_color(self.theme.selected_text)
+                })
+            }));
+        grid.child(chips).child(
             div()
                 .flex()
                 .items_center()
