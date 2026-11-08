@@ -65,6 +65,8 @@ pub struct RtcConfiguration {
     pub ice_servers: Vec<IceServer>,
     pub ice_policy: IcePolicy,
     pub role: Role,
+    /// Call end-to-end encryption; absent for calls that are not protected this way.
+    pub(crate) e2ee: Option<crate::media::e2ee::Keys>,
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Role {
@@ -239,6 +241,10 @@ impl Outgoing {
         &self,
         max: usize,
         guard: Option<&(dyn Fn() -> bool + Send + Sync)>,
+        protect: Option<(
+            &std::sync::Mutex<crate::media::e2ee::frame::Encryptor>,
+            bool,
+        )>,
     ) -> Result<u64, Error> {
         if !self.enabled {
             return Ok(0);
@@ -267,6 +273,32 @@ impl Outgoing {
                 .first()
                 .ok_or(Error::Engine)?
                 .payload_type;
+            // With end-to-end encryption a frame that cannot be protected is
+            // dropped; it is never sent in the clear.
+            let data = match protect {
+                Some((encryptor, video)) => {
+                    use crate::media::e2ee::frame::FrameKind;
+                    let kind = if !video {
+                        FrameKind::Audio
+                    } else if data.first().is_some_and(|byte| byte & 1 == 0) {
+                        FrameKind::VideoKey
+                    } else {
+                        FrameKind::VideoDelta
+                    };
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |elapsed| elapsed.as_micros() as u32);
+                    let sealed = encryptor
+                        .lock()
+                        .map_err(|_| Error::Engine)?
+                        .encrypt(self.ssrc, timestamp, kind, &data);
+                    match sealed {
+                        Ok(sealed) => sealed,
+                        Err(_) => continue,
+                    }
+                }
+                None => data,
+            };
             let sample = Sample {
                 data: data.into(),
                 duration,
@@ -339,7 +371,11 @@ fn vp8_geometry(payload: &[u8]) -> Result<Option<(u32, u32)>, Error> {
     Ok(Some((width, height)))
 }
 impl Incoming {
-    async fn pump(&mut self, enabled: bool) -> Result<(), Error> {
+    async fn pump(
+        &mut self,
+        enabled: bool,
+        decrypt: Option<std::sync::Arc<std::sync::Mutex<crate::media::e2ee::frame::Decryptor>>>,
+    ) -> Result<(), Error> {
         if !enabled {
             self.decoder = None;
         }
@@ -372,6 +408,7 @@ impl Incoming {
                             self.video,
                             packet.header.payload_type,
                             self.screen,
+                            decrypt.clone(),
                         )?);
                     }
                     let bytes = packet.marshal().map_err(|_| Error::Malformed)?;
@@ -430,6 +467,7 @@ pub struct NativePeer {
     remote_candidates: u16,
     local_candidates: u16,
     role: Role,
+    e2ee: Option<crate::media::e2ee::Keys>,
     ice_support: IceSupport,
     ice_evidence: IceEvidence,
 }
@@ -613,6 +651,7 @@ impl NativePeer {
             remote_candidates: 0,
             local_candidates: 0,
             role,
+            e2ee: config.e2ee,
             ice_support,
             ice_evidence: IceEvidence::default(),
         };
@@ -828,21 +867,33 @@ impl NativePeer {
     }
     async fn poll(&mut self) -> Result<Option<Event>, Error> {
         self.check()?;
+        let send = self.e2ee.as_ref().map(|keys| keys.send.clone());
+        let receive = self.e2ee.as_ref().map(|keys| keys.receive.clone());
         if let Some(audio) = &self.audio {
-            audio.flush(4096, self.audio_guard.as_deref()).await?;
+            audio
+                .flush(
+                    4096,
+                    self.audio_guard.as_deref(),
+                    send.as_deref().map(|send| (send, false)),
+                )
+                .await?;
         }
         if let Some(video) = &self.video {
             self.counters.video_transmitted = self.counters.video_transmitted.saturating_add(
                 video
-                    .flush(1_048_576, self.publish_guard.as_deref())
+                    .flush(
+                        1_048_576,
+                        self.publish_guard.as_deref(),
+                        send.as_deref().map(|send| (send, true)),
+                    )
                     .await?,
             );
         }
         if let Some(audio) = &mut self.remote_audio {
-            audio.pump(true).await?;
+            audio.pump(true, receive.clone()).await?;
         }
         if let Some(video) = &mut self.remote_video {
-            video.pump(self.receive_video).await?;
+            video.pump(self.receive_video, receive).await?;
         }
         for channel in &self.channels {
             for _ in 0..16 {
@@ -1212,6 +1263,175 @@ mod tests {
         assert_eq!(sender.counters().video_sent, 1);
         sender.close();
         receiver.close();
+    }
+
+    /// Connect two peers and let each send audio and video for a while; report
+    /// what each decoded. Local ICE on a busy workstation (VPN and bridge
+    /// interfaces) sometimes does not connect within the window, so connecting is
+    /// retried with fresh peers; media that never flows is reported as failure.
+    async fn converse(
+        configs: impl Fn() -> (RtcConfiguration, RtcConfiguration),
+        for_how_long: Duration,
+    ) -> [(u64, u64); 2] {
+        'attempt: for _ in 0..6 {
+            let (left, right) = configs();
+            let mut a = NativePeer::new(left).await.unwrap();
+            let mut b = NativePeer::new(right).await.unwrap();
+            let offer = a.offer().await.unwrap();
+            let answer = b.remote(&offer).await.unwrap().unwrap();
+            a.remote(&answer).await.unwrap();
+            a.publish(true, true).unwrap();
+            b.publish(true, true).unwrap();
+            let start = Instant::now();
+            let mut connected = [false; 2];
+            let mut connected_at = None;
+            let mut tick = tokio::time::interval(Duration::from_millis(10));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut frame = 0usize;
+            loop {
+                tick.tick().await;
+                while let Some(e) = a.event().await.unwrap() {
+                    match e {
+                        Event::Candidate(c) => b.candidate(&c).await.unwrap(),
+                        Event::Connection(s) => connected[0] = s == PeerConnectionState::Connected,
+                    }
+                }
+                while let Some(e) = b.event().await.unwrap() {
+                    match e {
+                        Event::Candidate(c) => a.candidate(&c).await.unwrap(),
+                        Event::Connection(s) => connected[1] = s == PeerConnectionState::Connected,
+                    }
+                }
+                if connected.iter().all(|c| *c) {
+                    let since = *connected_at.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= for_how_long {
+                        break;
+                    }
+                    for peer in [&mut a, &mut b] {
+                        let mut pcm = [0; 480];
+                        for (n, p) in pcm.iter_mut().enumerate() {
+                            *p = (((frame * 480 + n) as f64 * 0.06).sin() * 4000.0) as i16;
+                        }
+                        peer.audio(&pcm).await.unwrap();
+                        if frame.is_multiple_of(3) {
+                            peer.video(
+                                image((frame % 200) as u8),
+                                start.elapsed().as_micros() as i64,
+                            )
+                            .unwrap();
+                        }
+                        while peer.take_audio().is_some() {}
+                        while peer.take_video().is_some() {}
+                    }
+                } else if start.elapsed() > Duration::from_secs(4) {
+                    a.close();
+                    b.close();
+                    continue 'attempt;
+                }
+                frame += 1;
+            }
+            let result = [&a, &b].map(|p| (p.counters.audio_nonzero, p.counters.video_received));
+            a.close();
+            b.close();
+            return result;
+        }
+        panic!("the two local peers never connected");
+    }
+
+    fn keyed(
+        own: Option<[u8; crate::media::e2ee::frame::KEY_LEN]>,
+        remote: Option<[u8; crate::media::e2ee::frame::KEY_LEN]>,
+    ) -> RtcConfiguration {
+        let keys = crate::media::e2ee::Keys::new();
+        if let Some(key) = own {
+            keys.send.lock().unwrap().set_key(&key, 3).unwrap();
+        }
+        if let Some(key) = remote {
+            keys.receive.lock().unwrap().set_key(&key, 3).unwrap();
+        }
+        RtcConfiguration {
+            e2ee: Some(keys),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn end_to_end_encrypted_audio_and_video_reach_a_peer_that_holds_the_key() {
+        let (key_a, key_b) = ([1_u8; 32], [2_u8; 32]);
+        let [a, b] = converse(
+            || {
+                (
+                    keyed(Some(key_a), Some(key_b)),
+                    keyed(Some(key_b), Some(key_a)),
+                )
+            },
+            Duration::from_secs(5),
+        )
+        .await;
+        for (name, (audio, video)) in [("a", a), ("b", b)] {
+            assert!(
+                audio > 100 && video > 10,
+                "{name} decodes audio and video: {a:?} {b:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn media_is_not_shown_without_the_senders_key_or_from_a_sender_without_encryption() {
+        let key = [7_u8; 32];
+        // Each side holds a different key for the other.
+        let [a, b] = converse(
+            || {
+                (
+                    keyed(Some(key), Some([9; 32])),
+                    keyed(Some([8; 32]), Some([6; 32])),
+                )
+            },
+            Duration::from_secs(4),
+        )
+        .await;
+        assert_eq!((a, b), ((0, 0), (0, 0)), "a wrong key shows nothing");
+        // One side does not encrypt at all.
+        let [plain, strict] = converse(
+            || (RtcConfiguration::default(), keyed(Some(key), Some(key))),
+            Duration::from_secs(4),
+        )
+        .await;
+        assert_eq!(strict, (0, 0), "unencrypted media is dropped, not shown");
+        assert_eq!(
+            plain,
+            (0, 0),
+            "an encrypted sender is unreadable without E2EE"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sender_without_a_key_sends_nothing_rather_than_plain_frames() {
+        let [_, b] = converse(
+            || (keyed(None, Some([4; 32])), RtcConfiguration::default()),
+            Duration::from_secs(4),
+        )
+        .await;
+        assert_eq!(
+            b,
+            (0, 0),
+            "no key, no media (not even to a peer without E2EE)"
+        );
+    }
+
+    /// The control: the same harness shows media when nothing is encrypted, so
+    /// the zero results above mean protection, not a broken harness.
+    #[tokio::test]
+    async fn the_harness_shows_unprotected_media() {
+        let [a, b] = converse(
+            || (RtcConfiguration::default(), RtcConfiguration::default()),
+            Duration::from_secs(4),
+        )
+        .await;
+        assert!(
+            a.0 > 100 && a.1 > 10 && b.0 > 100 && b.1 > 10,
+            "{a:?} {b:?}"
+        );
     }
 
     #[tokio::test]

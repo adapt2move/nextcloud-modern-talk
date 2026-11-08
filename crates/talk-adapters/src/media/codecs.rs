@@ -69,27 +69,32 @@ impl Codec {
         result.dimensions = Some((width, height));
         Ok(result)
     }
-    pub(super) fn decoder(video: bool, payload: u8, screen: bool) -> Result<Self, Error> {
+    pub(super) fn decoder(
+        video: bool,
+        payload: u8,
+        screen: bool,
+        decrypt: Option<std::sync::Arc<std::sync::Mutex<crate::media::e2ee::frame::Decryptor>>>,
+    ) -> Result<Self, Error> {
         let (media, name, clock, tail) = if video && screen {
             (
                 "video",
                 "VP8",
                 90_000,
-                "rtpvp8depay ! vp8dec threads=2 ! videoconvert ! videoscale ! video/x-raw,format=RGBA,width=[2,1920],height=[2,1080],pixel-aspect-ratio=1/1",
+                "rtpvp8depay name=depay ! vp8dec threads=2 ! videoconvert ! videoscale ! video/x-raw,format=RGBA,width=[2,1920],height=[2,1080],pixel-aspect-ratio=1/1",
             )
         } else if video {
             (
                 "video",
                 "VP8",
                 90_000,
-                "rtpvp8depay ! vp8dec threads=2 ! videoconvert ! videoscale ! video/x-raw,format=RGBA,width=[2,640],height=[2,360],pixel-aspect-ratio=1/1",
+                "rtpvp8depay name=depay ! vp8dec threads=2 ! videoconvert ! videoscale ! video/x-raw,format=RGBA,width=[2,640],height=[2,360],pixel-aspect-ratio=1/1",
             )
         } else {
             (
                 "audio",
                 "OPUS",
                 48_000,
-                "rtpopusdepay ! opusdec plc=true ! audioconvert ! audioresample ! audio/x-raw,format=S16LE,layout=interleaved,rate=48000,channels=1",
+                "rtpopusdepay name=depay ! opusdec plc=true ! audioconvert ! audioresample ! audio/x-raw,format=S16LE,layout=interleaved,rate=48000,channels=1",
             )
         };
         let latency = if video && screen { 100 } else { 30 };
@@ -115,6 +120,9 @@ impl Codec {
                 20_480
             },
         )?;
+        if let Some(decryptor) = decrypt {
+            result.protect_incoming(video, decryptor)?;
+        }
         if screen {
             // Janus can deliver an entire screen keyframe in a burst. Keep one
             // admitted compressed frame, not just the camera's small RTP batch;
@@ -124,6 +132,63 @@ impl Codec {
                 .set_max_time(gst::ClockTime::from_mseconds(100));
         }
         Ok(result)
+    }
+    /// Open every reassembled frame between the depayloader and the decoder.
+    /// A frame that cannot be opened is dropped here and never reaches the
+    /// decoder: media without a key (or from a participant that does not encrypt)
+    /// is not shown.
+    fn protect_incoming(
+        &self,
+        video: bool,
+        decryptor: std::sync::Arc<std::sync::Mutex<crate::media::e2ee::frame::Decryptor>>,
+    ) -> Result<(), Error> {
+        use crate::media::e2ee::frame::FrameKind;
+        let pad = self
+            .pipeline
+            .by_name("depay")
+            .and_then(|element| element.static_pad("src"))
+            .ok_or(Error::Engine)?;
+        pad.add_probe(gst::PadProbeType::BUFFER, move |_, info| {
+            let Some(gst::PadProbeData::Buffer(buffer)) = &info.data else {
+                return gst::PadProbeReturn::Drop;
+            };
+            let opened = {
+                let Ok(map) = buffer.map_readable() else {
+                    return gst::PadProbeReturn::Drop;
+                };
+                let data = map.as_slice();
+                let kind = if !video {
+                    FrameKind::Audio
+                } else if data.first().is_some_and(|byte| byte & 1 == 0) {
+                    FrameKind::VideoKey
+                } else {
+                    FrameKind::VideoDelta
+                };
+                decryptor
+                    .lock()
+                    .ok()
+                    .and_then(|mut decryptor| decryptor.decrypt(kind, data).ok())
+            };
+            let Some(plain) = opened else {
+                return gst::PadProbeReturn::Drop;
+            };
+            let mut replacement = gst::Buffer::from_mut_slice(plain);
+            if let Some(target) = replacement.get_mut()
+                && buffer
+                    .copy_into(
+                        target,
+                        gst::BufferCopyFlags::FLAGS | gst::BufferCopyFlags::TIMESTAMPS,
+                        ..,
+                    )
+                    .is_err()
+            {
+                return gst::PadProbeReturn::Drop;
+            }
+            info.data = Some(gst::PadProbeData::Buffer(replacement));
+            gst::PadProbeReturn::Ok
+        })
+        .ok_or(Error::Engine)?;
+        Ok(())
     }
     pub(super) fn push(
         &self,
