@@ -1273,6 +1273,10 @@ mod tests {
         configs: impl Fn() -> (RtcConfiguration, RtcConfiguration),
         for_how_long: Duration,
     ) -> [(u64, u64); 2] {
+        // Local ICE across many interfaces is unreliable when several of these
+        // run at once, so they take turns.
+        static TURN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let _turn = TURN.lock().await;
         'attempt: for _ in 0..6 {
             let (left, right) = configs();
             let mut a = NativePeer::new(left).await.unwrap();
