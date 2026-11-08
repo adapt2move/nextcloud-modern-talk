@@ -777,6 +777,7 @@ fn execute(
 fn linux_category(kind: NotificationKind) -> &'static str {
     match kind {
         NotificationKind::Message { .. }
+        | NotificationKind::ServerTest { .. }
         | NotificationKind::Test {
             category: NotificationCategory::Messages,
             ..

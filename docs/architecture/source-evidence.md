@@ -92,6 +92,26 @@ Spreed's structured notification identities are defined in the
 [Talk 24 notifier](https://github.com/nextcloud/spreed/blob/0d736588dcfb42becf0e5688e0847e35d5b5efa2/lib/Notification/Notifier.php)
 and [Talk 25 notifier](https://github.com/nextcloud/spreed/blob/eed360d176edcb6888dad60965cb694e6bf62ae3/lib/Notification/Notifier.php).
 
+The pinned [TestPush command](https://github.com/nextcloud/notifications/blob/f106a3fedaaca27c54a5b701ad54f8b688e628ec/lib/Command/TestPush.php)
+uses `IManager::notify` for `admin_notification_talk` / `admin_notifications`.
+[App::notify](https://github.com/nextcloud/notifications/blob/f106a3fedaaca27c54a5b701ad54f8b688e628ec/lib/App.php)
+inserts the object through Handler before attempting device push; it is not a
+push-proxy-only probe. The
+[admin notifier](https://github.com/nextcloud/notifications/blob/f106a3fedaaca27c54a5b701ad54f8b688e628ec/lib/Notifier/AdminNotifications.php)
+prepares it for API listing. The endpoint's `shouldNotify` distinguishes Talk
+Desktop user agents from web clients, so do not spoof another client's identity.
+[Official Talk Desktop](https://github.com/nextcloud/talk-desktop/blob/774561b6c4ef088583584d4c5d61e90d10c59740/src/talk/renderer/notifications/notifications.store.js)
+handles diagnostic apps explicitly before its normal Spreed eligibility filter.
+The [web notifications owner](https://github.com/nextcloud/notifications/blob/f106a3fedaaca27c54a5b701ad54f8b688e628ec/src/NotificationsApp.vue)
+fetches the same API; its web notification service honors `shouldNotify`,
+while API items remain visible in the notification list. Both official clients use optional `notify_notification`
+hints from `notify_push` and retain fallback polling. The
+[Client Push protocol](https://github.com/nextcloud/notify_push/blob/main/DEVELOPING.md)
+requires a discovered websocket and authentication; hints are best effort and
+confer no eligibility. This client retains bounded polling: adding another
+credential-bearing socket, origin validation and cancellation owner is unnecessary
+for the diagnostic filter correction and remains unsupported.
+
 Apple's [notification permission guide](https://developer.apple.com/documentation/usernotifications/asking-permission-to-use-notifications)
 defines read-only settings inspection and an explicit authorization request.
 The [desktop contract](../product/desktop-and-accessibility.md#desk-002) keeps this

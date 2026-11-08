@@ -81,3 +81,26 @@ completion samples per mode to each profile's `latency.json`. Failed requests
 remain samples; these numbers are not native UI feedback or frame timings.
 `python3 tests/lab/test_resilience.py` checks the relay without Docker; the full
 check includes it. Only the released-server lab establishes the backend result.
+
+## Notification delivery
+
+The profile explicitly enables the Notifications app bundled in the digest-pinned
+server image and records its installed version and integrity. Optional
+`notify_push` is not provisioned: this client uses bounded polling, and the
+notification probe establishes no websocket or mobile push-proxy claim.
+
+On a running owned development profile:
+
+```sh
+CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 python3 tests/lab/notifications.py \
+  --state /run/nmtlab-PRINTED-IDENTITY/state.json --output /tmp/new-notification-evidence
+```
+
+The probe creates a synthetic direct room and private fixtures, runs the production
+account adapter, and triggers `occ notification:test-push --talk` after its silent
+baseline. It asserts that a new diagnostic object exists in API v2, reaches the
+adapter without mobile registration and does not replay. The existing background
+sequence also verifies nonselected DM discovery, a direct mention, a due reminder
+created by the actual server background job, unread preservation and incoming
+direct-call discovery/decline. Native macOS authorization, helper delivery, Focus
+and window-close/reopen behavior still require a native Mac run.
