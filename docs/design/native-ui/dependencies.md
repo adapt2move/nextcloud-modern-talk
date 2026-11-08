@@ -15,7 +15,6 @@ pinned in `rust-toolchain.toml`.
 | Native input adaptation | `examples/input.rs` in that exact archive; selection/edit/IME/render API inspected against archive source | Apache-2.0, attribution and modifications in desktop NOTICE/source |
 | Unicode segmentation | [official 1.13.3 documentation](https://docs.rs/unicode-segmentation/1.13.3/unicode_segmentation/) and canonical registry checksum | MIT OR Apache-2.0 |
 | Runtime Google Sans | [v14.000 release](https://github.com/googlefonts/googlesans/releases/tag/v14.000); unchanged static Regular, Medium and Bold; [exact archive/file hashes](../../../apps/desktop/assets/fonts/googlesans-provenance.json) | OFL-1.1, with upstream license and trademark guidance bundled |
-| Manrope in historical design assets | [Google Fonts commit b31870aff700ab7a1d74fa0c6887d95beb9e0037](https://github.com/google/fonts/tree/b31870aff700ab7a1d74fa0c6887d95beb9e0037/ofl/manrope), SHA-256 `3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6` | OFL-1.1; unchanged original notice SHA-256 `58172e0c0fac2cda8a37b348164bb55e44b0e69051e557e92b1d3f6910141f7b` |
 
 GPUI's archive VCS metadata names `69e2130295c2649963eb639fc70b4f2ee8ea1624`
 with **dirty=true**. Therefore the published archive/checksum is the implementation

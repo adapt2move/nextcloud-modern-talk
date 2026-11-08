@@ -289,7 +289,7 @@ def exercise(scenario, env, xid, out, label, large=False):
                 for field in ('left','top','width','height'):r[field]=str(int(r[field])//3)
             words+=inverted
             choices=[r for r in inverted if normalized(r['text'])==normalized(word) and int(r['left'])>=xmin and int(r['top'])>=ymin]
-        # Tesseract occasionally confuses Manrope h/n and the fl ligature.
+        # Tesseract occasionally confuses h/n and the fl ligature.
         # Fixed aliases only; the subsequent native state transition is asserted.
         aliases={'teilnehmen':('teilnenmen','telinenmen'),'Auflegen':('auriegen','autlegen','auilegen'),
                  'Entwürfe':('entwirfe',)}

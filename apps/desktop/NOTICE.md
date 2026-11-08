@@ -22,7 +22,6 @@ Preserve [the OFL notice](assets/fonts/GoogleSans-LICENSE.txt),
 [trademark guidance](assets/fonts/GoogleSans-TRADEMARKS.txt) and
 [exact release provenance](assets/fonts/googlesans-provenance.json). These fonts
 are not relicensed under EUPL. No development-machine font installation is needed.
-Historical design mockups retain their separately attributed Manrope fonts.
 
 Onboarding step numerals use the unmodified Google Sans Code v7.001 Roman
 variable font at Regular (400), with its fixed-width `MONO` axis at the default

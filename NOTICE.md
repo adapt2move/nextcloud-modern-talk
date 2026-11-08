@@ -35,18 +35,6 @@ main-process macOS permission callbacks. Its
 source. Binary notice collection keeps this attribution separate from EUPL
 project code.
 
-## Manrope
-
-Historical design assets retain Manrope; the runtime now uses Google Sans.
-
-The bundled [Manrope variable font](docs/design/assets/fonts/Manrope-Variable.ttf), is separately licensed under **SIL Open Font License 1.1**, SPDX identifier `OFL-1.1`.
-
-Copyright 2018 The Manrope Project Authors (https://github.com/googlefonts/manrope).
-
-The full, unchanged copyright and license notice is in [Manrope-LICENSE.txt](docs/design/assets/fonts/Manrope-LICENSE.txt). The font is not relicensed under EUPL. Preserve its notice when redistributing or extracting the font.
-
-The font and its notice were verified byte for byte against [Google Fonts' Manrope distribution](https://github.com/google/fonts/tree/b31870aff700ab7a1d74fa0c6887d95beb9e0037/ofl/manrope) on 2026-10-18. The upstream filename is `Manrope[wght].ttf`; only the local filename was changed. Font SHA-256: `3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6`.
-
 ## Markdown parser
 
 Native chat formatting uses [pulldown-cmark 0.13.5](https://github.com/pulldown-cmark/pulldown-cmark/releases/tag/v0.13.5)
