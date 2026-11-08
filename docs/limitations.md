@@ -76,6 +76,12 @@ of complete parity with the official clients.
   main composer with recovery actions, rather than in their former timeline
   position; the thread composer does not show failed records. Schedule creation
   can remain uncertain because it has no operation correlation.
+- Conversations can be dragged onto group headings and other conversations in the
+  sidebar. Server tags store membership only, so a drop assigns the target as the
+  conversation's single custom group and cannot order rows inside it; local groups
+  and sections keep an order. Dragging has no keyboard equivalent yet: the
+  conversation's organize dialog remains the accessible route. Drag-and-drop was
+  built and unit-tested but not exercised with a pointer in an automated check.
 - Threads require the server's `threads` capability and actual `isThread` flag.
   Account-wide discovery lists server-returned subscriptions in known rooms and
   is session-only. Unread is inferred from room read markers. Reply pages hold

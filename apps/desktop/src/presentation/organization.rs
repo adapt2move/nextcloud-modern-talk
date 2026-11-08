@@ -13,7 +13,7 @@ use talk_core::ui::{
 };
 
 impl Desktop {
-    fn local_groups_available(&self) -> bool {
+    pub(super) fn local_groups_available(&self) -> bool {
         self.snapshot.conversations.as_slice().iter().any(|r| {
             r.organization.tags == FeatureSupport::Unsupported && r.navigation_key.is_some()
         }) && self
@@ -35,8 +35,11 @@ impl Desktop {
     }
     pub(super) fn create_group(&mut self, cx: &mut Context<Self>) {
         if self
-            .selected()
-            .is_some_and(|r| r.organization.tags == FeatureSupport::Supported)
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .any(|r| r.organization.tags == FeatureSupport::Supported)
         {
             if let Ok(name) = Text::new(self.group_name.read(cx).content.trim()) {
                 self.edit_tag(TagEdit::Create(name));

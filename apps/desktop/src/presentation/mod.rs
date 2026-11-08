@@ -37,6 +37,7 @@ mod settings;
 mod settings_pages;
 mod shell;
 pub(super) mod sidebar;
+mod sidebar_groups;
 mod state;
 mod switcher;
 pub mod theme;
@@ -161,7 +162,6 @@ pub enum LocalAction {
     Destination(SidebarDestination),
     ActivityFilter(sidebar::Activity),
     ToggleSidebarMenu(sidebar::Menu),
-    CollapseSection(sidebar::Section),
     SidebarFilter(talk_core::preferences::navigation::SidebarFilter),
     SidebarRoomNotifications(ConversationRef),
     Favorite(ConversationRef, bool),
@@ -244,6 +244,9 @@ pub enum LocalAction {
     ToggleReference(ConversationRef, u128, u16),
     OpenReference(ConversationRef, u128, u16),
     CreateGroup,
+    NewGroup,
+    CancelNewGroup,
+    ToggleCollapse(sidebar_groups::CollapseKey),
     RenameLocalGroup(talk_core::preferences::navigation::NavigationGroupId),
     MoveLocalGroup(talk_core::preferences::navigation::NavigationGroupId, bool),
     EditTag(talk_core::ui::presentation::TagEdit),
@@ -407,6 +410,8 @@ pub struct Desktop {
     activity: sidebar::Activity,
     sidebar_menu: Option<sidebar::Menu>,
     collapsed_sections: [bool; 5],
+    collapse_overrides: sidebar_groups::CollapseOverrides,
+    new_group_open: bool,
     room_menu: Option<(ConversationRef, &'static str)>,
     archive_request: u64,
     pub navigation_open: bool,
@@ -814,6 +819,8 @@ impl Desktop {
             activity: sidebar_fixture.activity(),
             sidebar_menu: sidebar_fixture.menu(),
             collapsed_sections: [false; 5],
+            collapse_overrides: Default::default(),
+            new_group_open: false,
             room_menu: fixture_sidebar_menu.or(initial_room_menu),
             archive_request: 0,
             navigation_open: false,
@@ -1518,6 +1525,8 @@ impl Desktop {
             self.destination = SidebarDestination::Conversations;
             self.sidebar_menu = None;
             self.collapsed_sections = [false; 5];
+            self.collapse_overrides = Default::default();
+            self.close_new_group(cx);
             self.stop_device_preview(cx);
             self.feedback = None;
             self.highlighted_message = None;
@@ -2138,7 +2147,16 @@ impl Desktop {
             LocalAction::OpenReference(context, message, ordinal) => {
                 self.open_reference(context, message, ordinal)
             }
-            LocalAction::CreateGroup => self.create_group(cx),
+            LocalAction::CreateGroup => {
+                if self.new_group_open {
+                    self.submit_new_group(cx);
+                } else {
+                    self.create_group(cx);
+                }
+            }
+            LocalAction::NewGroup => self.open_new_group(window, cx),
+            LocalAction::CancelNewGroup => self.close_new_group(cx),
+            LocalAction::ToggleCollapse(key) => self.toggle_collapse(key, cx),
             LocalAction::RenameLocalGroup(id) => self.rename_local_group(id, cx),
             LocalAction::MoveLocalGroup(id, up) => self.move_local_group(id, up, cx),
             LocalAction::EditTag(edit) => self.edit_tag(edit),
@@ -2672,7 +2690,6 @@ impl Desktop {
                     );
                 }
             }
-            LocalAction::CollapseSection(section) => self.collapse_sidebar_section(section, cx),
             LocalAction::SidebarFilter(filter) => {
                 self.sidebar_menu = None;
                 self.edit_navigation(
@@ -3389,6 +3406,11 @@ impl Desktop {
                 cx.stop_propagation();
                 return;
             }
+            if self.new_group_open && self.overlay.is_none() {
+                self.close_new_group(cx);
+                cx.stop_propagation();
+                return;
+            }
             if self.overlay.is_none() && self.room_menu.take().is_some() {
                 cx.notify();
                 cx.stop_propagation();
@@ -3420,6 +3442,14 @@ impl Desktop {
             cx.stop_propagation();
         } else if !self.incoming_visible() && action == Some(ActionId::OpenSettings) {
             self.handle(LocalAction::Open(Overlay::Settings), window, cx);
+            cx.stop_propagation();
+        } else if key == "enter"
+            && self.new_group_open
+            && self.overlay.is_none()
+            && self.group_name.focus_handle(cx).is_focused(window)
+            && !self.group_name.read(cx).composing()
+        {
+            self.submit_new_group(cx);
             cx.stop_propagation();
         } else if key == "enter"
             && self.overlay == Some(Overlay::Discover)
@@ -3925,7 +3955,9 @@ impl Render for Desktop {
             i.clipboard_export_allowed = true;
         });
         self.group_name.update(cx, |i, _| {
-            i.interactive = !incoming && self.overlay == Some(Overlay::Organize);
+            i.interactive = !incoming
+                && (self.overlay == Some(Overlay::Organize)
+                    || self.new_group_open && self.overlay.is_none());
         });
         self.conversation_name.update(cx, |i, _| {
             i.interactive = !incoming && self.overlay == Some(Overlay::Create);

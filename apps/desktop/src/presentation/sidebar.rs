@@ -1,6 +1,7 @@
 //! Compact navigation over bounded, typed conversation projections.
 use super::collection::CollectionState;
 use super::controls::{Availability, BannerRole, scoped_id};
+use super::sidebar_groups::{CollapseKey, DropTarget};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SidebarDestination};
 use gpui::{Context, Div, FontWeight, MouseButton, div, prelude::*, px};
 use talk_core::preferences::navigation::{
@@ -10,7 +11,7 @@ use talk_core::ui::Decision;
 use talk_core::ui::presentation::UiIntent;
 use talk_core::ui::presentation::{
     ContentState, ConversationCategory, ConversationKind, ConversationRef, ConversationView,
-    FeatureSupport, TagEdit, TagKind,
+    FeatureSupport, TagKind,
 };
 
 const SECTION_ICON_SIZE: f32 = 14.;
@@ -113,7 +114,7 @@ impl Section {
             Self::Other => "Weitere Gespräche",
         }
     }
-    fn for_room(row: &ConversationView) -> Self {
+    pub(super) fn for_room(row: &ConversationView) -> Self {
         Self::classify(row.kind, row.organization.category)
     }
     fn classify(kind: ConversationKind, category: ConversationCategory) -> Self {
@@ -165,7 +166,7 @@ impl Desktop {
             .as_ref()?;
         self.preferences.active.navigation.account(key)
     }
-    fn placement(
+    pub(super) fn placement(
         &self,
         row: &ConversationView,
     ) -> Option<&talk_core::preferences::navigation::NavigationPlacement> {
@@ -178,14 +179,18 @@ impl Desktop {
             .iter()
             .find(|p| &p.room == key)
     }
-    fn section_collapsed(&self, section: Section) -> bool {
+    pub(super) fn section_collapsed(&self, section: Section) -> bool {
         self.account_layout()
             .map_or(self.collapsed_sections[section as usize], |layout| {
                 layout.collapsed(section.native())
             })
     }
-    pub(super) fn collapse_sidebar_section(&mut self, section: Section, cx: &mut Context<Self>) {
-        let collapsed = !self.section_collapsed(section);
+    pub(super) fn collapse_sidebar_section(
+        &mut self,
+        section: Section,
+        collapsed: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self
             .snapshot
             .accounts
@@ -225,18 +230,22 @@ impl Desktop {
         let mut values = self.preferences.active.clone();
         match values.navigation.apply(key, support, edit) {
             Ok(()) => self.commit_preferences(values, cx),
-            Err(error) => {
-                self.feedback = Some(super::feedback::Feedback::error(match error {
-                    talk_core::preferences::navigation::NavigationError::Capacity => {
-                        "Die lokale Gruppenablage ist voll. Entferne zuerst eine Gruppe oder Zuordnung."
-                    }
-                    talk_core::preferences::navigation::NavigationError::InvalidGroup => {
-                        "Bitte gib einen gültigen Gruppennamen ein."
-                    }
-                    _ => "Die Gruppierung ist für dieses Konto derzeit nicht verfügbar.",
-                }))
-            }
+            Err(error) => self.report_navigation_error(error),
         }
+    }
+    pub(super) fn report_navigation_error(
+        &mut self,
+        error: talk_core::preferences::navigation::NavigationError,
+    ) {
+        self.feedback = Some(super::feedback::Feedback::error(match error {
+            talk_core::preferences::navigation::NavigationError::Capacity => {
+                "Die lokale Gruppenablage ist voll. Entferne zuerst eine Gruppe oder Zuordnung."
+            }
+            talk_core::preferences::navigation::NavigationError::InvalidGroup => {
+                "Bitte gib einen gültigen Gruppennamen ein."
+            }
+            _ => "Die Gruppierung ist für dieses Konto derzeit nicht verfügbar.",
+        }))
     }
     pub(super) fn favorite_value(&self, row: &ConversationView) -> Option<bool> {
         use talk_core::ui::presentation::FeatureSupport;
@@ -393,6 +402,9 @@ impl Desktop {
                 cx,
             ));
         }
+        if self.new_group_open {
+            list = list.child(self.new_group_row(cx));
+        }
         let mut visible = 0;
         let mut grouped = Vec::new();
         // Favorites have one explicit group, independent of room category and
@@ -408,23 +420,29 @@ impl Desktop {
             .collect();
         if !favorites.is_empty() {
             list = list.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_2()
-                    .min_h(px(28.))
-                    .mt_2()
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_size(self.sp(12.))
-                    .text_color(t.sidebar_secondary)
-                    .child(self.scaled_icon("star-filled", SECTION_ICON_SIZE, t.accent))
-                    .child(self.l("Favoriten")),
+                self.drop_onto_heading(
+                    div()
+                        .id("sidebar-favorites")
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_2()
+                        .min_h(px(28.))
+                        .mt_2()
+                        .rounded(px(8.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_size(self.sp(12.))
+                        .text_color(t.sidebar_secondary)
+                        .child(self.scaled_icon("star-filled", SECTION_ICON_SIZE, t.accent))
+                        .child(self.l("Favoriten")),
+                    DropTarget::Favorites,
+                    cx,
+                ),
             );
             visible += favorites.len();
             for row in favorites {
                 grouped.push(row.context);
-                list = list.child(self.sidebar_room(row, cx));
+                list = list.child(self.draggable_room(row, DropTarget::Favorites, cx));
             }
         }
         if self.snapshot.tag_state == ContentState::Ready {
@@ -447,32 +465,40 @@ impl Desktop {
                                 .is_some_and(|ids| ids.as_slice().contains(&tag.id))
                     })
                     .collect();
-                if rows.is_empty() {
+                // A group the user made stays visible while empty, as a place to drop into.
+                let empty_visible = rows.is_empty()
+                    && tag.kind == TagKind::Custom
+                    && query.is_empty()
+                    && filter == SidebarFilter::All
+                    && !archived;
+                if rows.is_empty() && !empty_visible {
                     continue;
                 }
-                visible += rows.len();
+                visible += rows.len() + usize::from(empty_visible);
                 grouped.extend(rows.iter().map(|r| r.context));
+                let tag_collapsed =
+                    self.effective_collapsed(CollapseKey::Tag(tag.id), tag.collapsed);
                 list = list.child(
                     self.group_header(
                         gpui::SharedString::from(format!("sidebar-tag-{}", tag.id.local)),
                         tag.name.as_str().to_owned(),
                         (
-                            tag.collapsed && query.is_empty(),
+                            tag_collapsed && query.is_empty(),
                             rows.iter().filter(|r| r.unread > 0).count(),
                         ),
                         rooms
                             .iter()
                             .any(|r| r.organization.tag_change == talk_core::ui::Decision::Allowed),
-                        LocalAction::EditTag(TagEdit::Collapse {
-                            tag: tag.id,
-                            collapsed: !tag.collapsed,
-                        }),
+                        LocalAction::ToggleCollapse(CollapseKey::Tag(tag.id)),
                         cx,
                     ),
                 );
-                if !tag.collapsed || !query.is_empty() {
+                if !tag_collapsed || !query.is_empty() {
+                    if empty_visible {
+                        list = list.child(self.empty_group_hint());
+                    }
                     for row in rows {
-                        list = list.child(self.sidebar_room(row, cx));
+                        list = list.child(self.draggable_room(row, DropTarget::Tag(tag.id), cx));
                     }
                 }
             }
@@ -491,28 +517,35 @@ impl Desktop {
                             && self.placement(r).is_some_and(|p| p.group == Some(group.id))
                     })
                     .collect();
-                if rows.is_empty() {
+                let empty_visible = rows.is_empty()
+                    && query.is_empty()
+                    && filter == SidebarFilter::All
+                    && !archived;
+                if rows.is_empty() && !empty_visible {
                     continue;
                 }
                 rows.sort_by_key(|r| self.placement(r).map_or(0, |p| p.order));
-                visible += rows.len();
-                let mut changed = group.clone();
-                changed.collapsed = !changed.collapsed;
-                let scope = rows[0].context.account;
+                visible += rows.len() + usize::from(empty_visible);
+                let group_collapsed =
+                    self.effective_collapsed(CollapseKey::Group(group.id), group.collapsed);
                 list = list.child(self.group_header(
                     gpui::SharedString::from(format!("sidebar-group-{}", group.id.get())),
                     group.name.as_str().to_owned(),
                     (
-                        group.collapsed && query.is_empty(),
+                        group_collapsed && query.is_empty(),
                         rows.iter().filter(|r| r.unread > 0).count(),
                     ),
                     true,
-                    LocalAction::EditGroup(scope, NavigationEdit::UpsertGroup(changed)),
+                    LocalAction::ToggleCollapse(CollapseKey::Group(group.id)),
                     cx,
                 ));
-                if !group.collapsed || !query.is_empty() {
+                if !group_collapsed || !query.is_empty() {
+                    if empty_visible {
+                        list = list.child(self.empty_group_hint());
+                    }
                     for row in rows {
-                        list = list.child(self.sidebar_room(row, cx));
+                        list =
+                            list.child(self.draggable_room(row, DropTarget::Group(group.id), cx));
                     }
                 }
             }
@@ -534,18 +567,21 @@ impl Desktop {
             }
             rows.sort_by_key(|r| self.placement(r).map_or(0, |p| p.order));
             visible += rows.len();
-            let collapsed = self.section_collapsed(section) && query.is_empty();
+            let collapsed = self.effective_collapsed(
+                CollapseKey::Section(section),
+                self.section_collapsed(section),
+            ) && query.is_empty();
             list = list.child(self.group_header(
                 ("sidebar-section", section as usize),
                 self.l(section.key()).to_owned(),
                 (collapsed, rows.iter().filter(|r| r.unread > 0).count()),
                 true,
-                LocalAction::CollapseSection(section),
+                LocalAction::ToggleCollapse(CollapseKey::Section(section)),
                 cx,
             ));
             if !collapsed {
                 for row in rows {
-                    list = list.child(self.sidebar_room(row, cx));
+                    list = list.child(self.draggable_room(row, DropTarget::Section(section), cx));
                 }
             }
         }
@@ -826,7 +862,10 @@ impl Desktop {
                 )
                 .size(px(28.))
                 .min_h(px(28.))
-                .when(self.sidebar_menu == Some(menu), |d| d.bg(t.hover)),
+                .when(self.sidebar_menu == Some(menu), |d| d.bg(t.hover))
+                .when(menu == Menu::List && filter != SidebarFilter::All, |d| {
+                    d.bg(t.selected).text_color(t.selected_text)
+                }),
             )
         };
         let menu_surface = |menu: Menu, body: Div| {
@@ -878,6 +917,17 @@ impl Desktop {
                 ),
                 LocalAction::Open(Overlay::Discover),
                 cx,
+            ))
+            .child(div().h(px(1.)).my_1().bg(t.border))
+            .child(self.menu_item(
+                "new-group",
+                ("Neue Gruppe", "folder"),
+                Availability::when(
+                    self.can_create_group(),
+                    "Gruppen sind für dieses Konto derzeit nicht verfügbar.",
+                ),
+                LocalAction::NewGroup,
+                cx,
             ));
         let option = |index: usize, value: SidebarFilter, label: &'static str| {
             let enabled = can_filter
@@ -910,18 +960,9 @@ impl Desktop {
         let list_menu = div()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .px_2()
-                    .pt_1()
-                    .pb(px(2.))
-                    .text_size(self.sp(12.))
-                    .text_color(t.muted)
-                    .child(self.l("Anzeigen").to_owned()),
-            )
-            .child(option(0, SidebarFilter::All, "Alle Gespräche"))
-            .child(option(1, SidebarFilter::Unread, "Nur Ungelesene"))
-            .child(option(2, SidebarFilter::Mentions, "Nur Erwähnungen"))
+            .child(option(0, SidebarFilter::All, "Alle"))
+            .child(option(1, SidebarFilter::Unread, "Ungelesen"))
+            .child(option(2, SidebarFilter::Mentions, "Erwähnungen"))
             .child(div().h(px(1.)).my_1().bg(t.border))
             .child(self.menu_item(
                 "nav-archive",
@@ -951,7 +992,7 @@ impl Desktop {
             }),
         )
         .child(
-            trigger(Menu::List, "sidebar-options", "more", "Liste anpassen")
+            trigger(Menu::List, "sidebar-options", "list-filter", "Filter")
                 .when(self.sidebar_menu == Some(Menu::List), |d| {
                     d.child(menu_surface(Menu::List, list_menu))
                 }),
@@ -988,7 +1029,8 @@ impl Desktop {
     }
 
     /// Collapsible group heading. A collapsed group still says that something
-    /// inside it is unread.
+    /// inside it is unread. It quietly brightens under the pointer instead of
+    /// painting a block, and accepts dragged conversations.
     fn group_header(
         &self,
         id: impl Into<gpui::ElementId>,
@@ -999,8 +1041,22 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> gpui::Stateful<Div> {
         let t = self.theme;
-        let chevron = self.scaled_icon("chevron-down", SECTION_ICON_SIZE, t.muted);
-        self.button(id, "", ButtonStyle::Quiet, enabled, action, cx)
+        let id = id.into();
+        let drop = match &action {
+            LocalAction::ToggleCollapse(CollapseKey::Tag(tag)) => Some(DropTarget::Tag(*tag)),
+            LocalAction::ToggleCollapse(CollapseKey::Group(group)) => {
+                Some(DropTarget::Group(*group))
+            }
+            LocalAction::ToggleCollapse(CollapseKey::Section(section)) => {
+                Some(DropTarget::Section(*section))
+            }
+            _ => None,
+        };
+        let hovered = enabled && self.hovered_control.as_ref() == Some(&id);
+        let color = if hovered { t.text } else { t.sidebar_secondary };
+        let chevron = self.scaled_icon("chevron-down", SECTION_ICON_SIZE, color);
+        let header = self
+            .button(id, "", ButtonStyle::Quiet, enabled, action, cx)
             .justify_start()
             .gap(px(6.))
             .mt_2()
@@ -1009,7 +1065,7 @@ impl Desktop {
             .px_2()
             .font_weight(FontWeight::MEDIUM)
             .text_size(self.sp(12.))
-            .text_color(t.sidebar_secondary)
+            .text_color(color)
             .child(if collapsed {
                 chevron.with_transformation(gpui::Transformation::rotate(gpui::radians(
                     -std::f32::consts::FRAC_PI_2,
@@ -1025,7 +1081,56 @@ impl Desktop {
                     } else {
                         unread.to_string()
                     }))
-            })
+            });
+        match drop {
+            Some(target) => self.drop_onto_heading(header, target, cx),
+            None => header,
+        }
+    }
+
+    /// Inline naming of a new group; Enter creates it, Escape cancels.
+    fn new_group_row(&self, cx: &Context<Self>) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .pb_1()
+            .child(
+                self.input_surface(&self.group_name, cx)
+                    .flex_1()
+                    .min_w_0()
+                    .child(self.group_name.clone()),
+            )
+            .child(self.icon_button(
+                "new-group-create",
+                ("check", "Gruppe hinzufügen"),
+                ButtonStyle::Quiet,
+                Availability::when(
+                    !self.group_name.read(cx).content.trim().is_empty(),
+                    "Gib zuerst einen Namen ein.",
+                ),
+                LocalAction::CreateGroup,
+                cx,
+            ))
+            .child(self.icon_button(
+                "new-group-cancel",
+                ("x", "Abbrechen"),
+                ButtonStyle::Quiet,
+                Availability::available(),
+                LocalAction::CancelNewGroup,
+                cx,
+            ))
+    }
+
+    /// Shown inside a group that has no conversation yet.
+    fn empty_group_hint(&self) -> Div {
+        div()
+            .px_2()
+            .pl(px(28.))
+            .py(px(4.))
+            .child(self.hint(self.l("Gespräche hierher ziehen")))
     }
 
     /// Activity: the one place for what needs attention. Filters live inside
@@ -1230,7 +1335,11 @@ impl Desktop {
     /// keep their two real controls: native Tab can focus them and the existing
     /// reveal owner scrolls that same stable handle into view. Focused rows and
     /// expanded/variable-height rows always use their complete presentation.
-    fn sidebar_room(&self, row: &ConversationView, cx: &Context<Self>) -> gpui::Stateful<Div> {
+    pub(super) fn sidebar_room(
+        &self,
+        row: &ConversationView,
+        cx: &Context<Self>,
+    ) -> gpui::Stateful<Div> {
         let context = row.context;
         let host = div()
             .id(scoped_id("sidebar-row-host", context, 0, 0))

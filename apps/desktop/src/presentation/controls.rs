@@ -635,6 +635,20 @@ impl Desktop {
         {
             return feedback.dismiss_theme(self.theme);
         }
+        // Group headings brighten their text instead of painting a hover block.
+        let heading = match id {
+            ElementId::Name(name) => {
+                name.starts_with("sidebar-tag-") || name.starts_with("sidebar-group-")
+            }
+            ElementId::NamedInteger(name, _) => name.as_ref() == "sidebar-section",
+            _ => false,
+        };
+        if heading {
+            return super::Theme {
+                hover: gpui::transparent_black(),
+                ..self.theme
+            };
+        }
         // Actions on the failed-message banner sit on a red wash. The palette's
         // green hover would clash with it, so they darken the wash in place.
         if matches!(id, ElementId::Name(name) if name.starts_with("failed-")) {

@@ -86,6 +86,7 @@ impl AssetSource for Assets {
             "icons/inbox.svg" => include_bytes!("../../assets/icons/inbox.svg"),
             "icons/at.svg" => include_bytes!("../../assets/icons/at.svg"),
             "icons/minus.svg" => include_bytes!("../../assets/icons/minus.svg"),
+            "icons/list-filter.svg" => include_bytes!("../../assets/icons/list-filter.svg"),
             "icons/plus.svg" => include_bytes!("../../assets/icons/plus.svg"),
             "icons/settings.svg" => include_bytes!("../../assets/icons/settings.svg"),
             "icons/users.svg" => include_bytes!("../../assets/icons/users.svg"),

@@ -40,7 +40,23 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Invitations from other servers",
         "Invitaciones de otros servidores",
     ),
+    ("Filter", "Filter", "Filtro"),
+    (
+        "Gespräche hierher ziehen",
+        "Drag conversations here",
+        "Arrastra conversaciones aquí",
+    ),
     ("Getrennt seit", "Offline for", "Sin conexión desde hace"),
+    (
+        "Gib zuerst einen Namen ein.",
+        "Enter a name first.",
+        "Escribe primero un nombre.",
+    ),
+    (
+        "Gruppen sind für dieses Konto derzeit nicht verfügbar.",
+        "Groups are currently unavailable for this account.",
+        "Los grupos no están disponibles para esta cuenta por ahora.",
+    ),
     (
         "Hier noch nicht verfügbar",
         "Not available here yet",
@@ -62,6 +78,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Messages could not be loaded.",
         "No se pudieron cargar los mensajes.",
     ),
+    ("Neue Gruppe", "New group", "Nuevo grupo"),
     (
         "Neues Gespräch oder Verzeichnis",
         "New conversation or directory",

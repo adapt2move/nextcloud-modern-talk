@@ -307,6 +307,14 @@
       "upstream_sha256": "4f3237183dcaabfac92f4e94c776a9a9e45c3c5e77a921061a6b34b61eb5413f"
     },
     {
+      "asset": "list-filter.svg",
+      "upstream_path": "icons/list-filter.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/list-filter.svg",
+      "sha256": "a83a45b46fad6eafd0114e883bd10d019f896d7682e3d486b5c3d726650e1c8c",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "502573071e3b8118356eb408df781872f0608071b4b09cd99954ba1d8e2b8b37"
+    },
+    {
       "asset": "lock.svg",
       "upstream_path": "icons/lock.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/lock.svg",
