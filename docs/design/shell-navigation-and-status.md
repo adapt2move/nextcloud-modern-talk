@@ -16,13 +16,9 @@ Gespräche                  +  ⋯       list title, two menus
 Account                      ⚙        compact footer
 ```
 
-The sidebar used to carry eight navigation rows, a three-way tab filter and the room list.
-Most rows were rarely used and all of them looked equally important. The new order
-follows how often each thing is needed:
-
 | Need | Where it lives | Why there |
 | --- | --- | --- |
-| Find or switch | Search field, `⌘K` / `Strg K` | Constant, keyboard-first, unchanged. |
+| Find or switch | Search field, `⌘K` / `Strg K` | Constant, keyboard-first. |
 | What needs me | **Aktivität**, one row with a count | Unread, mentions, threads and reminders answer one question. They share a page with a small filter control instead of four sidebar rows. |
 | Talk to someone | The room list | The list is the main content. Groups collapse, and a collapsed group still shows its unread count. |
 | Start something | **+** on the list title: "Neues Gespräch", "Offene Gespräche durchsuchen" | Creation and discovery are one verb. They appear only where a list grows. |
@@ -42,8 +38,7 @@ Aktivität filters, in order: Ungelesen, Erwähnungen, Threads, Erinnerungen. Th
 Erinnerungen are absent when the server lacks the feature. Erwähnungen is disabled, with a
 reason, until a mention state is known. The Activity page reuses the room
 row (with an avatar tile and a last-message preview) and the existing thread and reminder
-bodies; the former Reminders dialog is gone. Entering Erinnerungen refreshes the
-reminders as the dialog did.
+bodies; entering Erinnerungen refreshes the reminders.
 
 ## Title bar status
 
@@ -109,7 +104,7 @@ access is unconfirmed.
 | Server denies or limits access | Inline notice under the header, role and icon chosen by cause (lock, clock, cloud), with "Erneut versuchen". |
 | List failed to load | Compact notice in the sidebar with "Erneut laden" under its text. |
 
-## Evidence scenarios
+## Development scenarios
 
 `sidebar-rich`, `sidebar-activity`, `sidebar-activity-mentions`, `sidebar-new-menu`,
 `sidebar-list-menu`, `sidebar-archive`, `sidebar-load-failed`, `connection-reconnecting`,

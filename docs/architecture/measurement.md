@@ -1,12 +1,16 @@
-# Measurement interfaces and qualification plan
+# Performance measurement contract
 
-Status: bootstrap contract, **no workload runner, validator, collector or benchmark is implemented here**. Q.PERF-01/02/07/08 and V.PERF.PEAK/WORKLOAD remain authoritative; this assigns owners and concrete integration seams without claiming an approved workload.
+Use the [performance requirements](../quality/performance.md) for workload budgets
+and [verification cases](../quality/verification.md#vperfpeak--complete-process-and-peak-evidence)
+for completeness checks. This defines acceptance measurements, not a shipped
+collector API or a claim that a budget has passed. The bounded diagnostic runners
+in [development](../development.md) establish only their stated Linux scope.
 
 ## Ownership and executable workload seam
 
 The lab/testing contributor owns versioned manifest files, synthetic generators, deterministic trace replay and actual-versus-planned validation under `tests/lab/`, with run outputs in private evidence outside contributor documentation. The application owner supplies typed intent injection and nonsecret action/result/residency counters; the media owner supplies per-stream negotiated **and delivered** observations; the platform owner supplies the collector adapter below. The independent performance reviewer freezes each workload and qualification manifest before acceptance runs. Two independent runners reconstruct and compare the normalized plan. The PM accepts resulting evidence, not the author or tool exit code alone.
 
-The [existing manifest template](../quality/verification.md) is the human review source. The future executable representation is UTF-8 JSON, schema `workload-v1`, rejecting unknown keys, missing values, duplicate object keys, nonfinite numbers and unresolved placeholders. It has these required top-level objects; durations/timestamps are integer nanoseconds relative to the declared monotonic epoch, sizes are bytes, hashes are lowercase SHA-256 hex. A schema/fixture change creates a new reviewed profile; no tolerance is changed after observing a result.
+An acceptance workload manifest uses UTF-8 JSON, a versioned schema, rejecting unknown keys, missing values, duplicate object keys, nonfinite numbers and unresolved placeholders. It has these required top-level objects; durations/timestamps are integer nanoseconds relative to the declared monotonic epoch, sizes are bytes, hashes are lowercase SHA-256 hex. A schema/fixture change creates a new reviewed profile; no tolerance is changed after observing a result.
 
 | Object | Required fields and validation |
 | --- | --- |
@@ -18,15 +22,6 @@ The [existing manifest template](../quality/verification.md) is the human review
 | `streams` | one record per sender→receiver stream: codec/layer/processing path, audio rate/channels/activity, camera/screen dimensions/fps/bitrate, deterministic source asset, tile/preview visibility and subscription schedule; sender/receiver screen profiles separate |
 | `tolerances` | per-action timing/count limits, paging/residency conditions, per-stream quality/delivery windows and maximum observation gaps; zero count deviation where the workload fixes exact counts |
 | `collection` | collector/qualification IDs and hashes, sampling cadence, lifetime/peak method and error bounds, owned/system-service attribution, CPU/network/GPU/power boundaries and overhead procedure |
-
-Define four executable operations for the lab-owned driver; their implementation/CLI name is pending, **these are not runnable commands today**:
-
-1. `prepare(manifest, fixture_store) -> normalized_plan + hashes`: parse strictly, verify source hashes, reproduce fixtures and expand all cadence descriptions into exact actions/stream schedules. No random draws depend on wall time or execution speed. An unapproved/missing field returns `InvalidManifest`.
-2. `replay(plan, typed_application_port, stream_driver, observer) -> actual_trace`: run exactly the frozen schedule, including failed/busy/cancelled actions; do not silently omit actions. Backpressure is an observed failure or permitted explicit outcome, not a change to counts. Deterministic media must move/speak; static frames or muted silence do not substitute.
-3. `validate(plan, actual_trace, stream_series, lifecycle_evidence) -> verdict + deviations`: compare sequence IDs, target identities, counts/times, results, cache/page residency, negotiated/delivered quality, frame/audio activity and observation gaps against predeclared tolerances. Missing observations are incomplete; lighter load/quality is invalid, never a budget pass.
-4. `summarize(validated_run, collection) -> acceptance_evidence`: only a valid workload with complete qualified collection can reach budget evaluation. Preserve raw traces and worst runs. Two reconstructions must produce identical normalized-plan hashes before native acceptance measurements.
-
-Each observation record has schema, run ID, sequence, clock epoch/time, source owner and kind. Allowed kinds are action-start/result, cache-page-state, stream-negotiated, stream-delivered, policy-source/expiry/enforcement, queue-depth and phase-change. Stream-delivered includes stream ID, sample interval, frame/audio counts, dimensions/rate/layer/processing path and gaps. Use bounded records (≤64 KiB); collector backpressure/record loss invalidates completeness rather than silently dropping evidence. Never include message text, RTP/frame bytes, credentials, endpoints with tokens or private file paths.
 
 ## Complete process and peak collector
 
@@ -41,13 +36,15 @@ The platform performance owner provides `CollectorSession` with this lifecycle:
 | `close_lifetime(birth_id, evidence)` | Retain physical-footprint **lifetime high-water**, source/API/structure revision, units, time coverage, exit mode and uncertainty. Evidence must survive crash/forced termination; voluntary final reports alone do not qualify. |
 | `finish_after_final_exit()` | Prove no owned lifetimes remain/open or were missed; emit aggregate p95/sample maximum, per-process maxima, `U`, qualification/error bounds and `Complete`/`Incomplete`. Unknown/lost peak evidence yields incomplete. |
 
-Candidate macOS live metrics use `TASK_VM_INFO.phys_footprint`; potential lifetime sources include `ledger_phys_footprint_peak` and `rusage_info_v4.ri_lifetime_max_phys_footprint`, declared in the [pinned Apple headers](source-evidence.md#a-src-05--native-measurement). This is a research candidate, **not a claim of retrieval rights, structure compatibility or exited-process coverage on macOS 15.7**. The implementation must verify returned structure size/revision and kernel semantics on the exact SDK/OS. It must never relabel `resident_size_peak`, RSS `ru_maxrss`, allocator bytes or a sampled footprint maximum as physical-footprint lifetime high-water.
-
-The planned design combines runtime-owned spawn registration with an external OS lifetime observer and native live/high-water queries. A future implementation must demonstrate a retained exit/termination evidence path for normal, crashed, killed, short-lived and reparented helpers. No documented universally usable exited-task API has been established by this bootstrap. If the selected OS path cannot recover an abnormal exit's high-water, mark the run incomplete; a faster sampler or last volunteered report cannot repair that gap. This is a collector qualification blocker for native memory acceptance, not an excuse to report zero.
-
-With complete lifetime evidence, compute `U = sum(high_water_bytes for every owned lifetime)`. `U` is a conservative bound on simultaneous aggregate footprint; it is **not** a measured simultaneous peak. Apply workload peak ceilings across launch, warm-up, steady and teardown. If `U` is too loose/large, a separately reviewed concurrent bound with explicit temporal/size error may replace it. An observed ceiling breach fails; missing evidence is incomplete. Keep p95 and sampled maximum as distinct metrics.
-
-GPU resources/shared surfaces and WindowServer/system-media deltas need separate native collectors, stated overlap and missing-cost fields. Do not sum overlapping unified-memory metrics or claim total client memory while omitting costs. CPU includes all owned helpers and 100% means one logical core. Network includes control/TLS/retries/media; power is measured package delta, not battery life. Capture driver/helper cost belongs to the native run even when the app uses an isolated media process.
+Native metrics need validation on the exact SDK/OS, including permissions, API
+revisions and abnormal exits. RSS, allocator bytes and sampled maxima are not
+physical-footprint lifetime peaks. Missing exit data makes collection incomplete.
+With complete lifetime data, the sum of all owned lifetime high-water values is a
+conservative aggregate bound, not a measured simultaneous peak. A looser bound above
+the budget needs a qualified tighter collector; a sampled maximum cannot repair it.
+Report GPU/shared-surface and system-service costs separately with overlaps stated.
+CPU includes helpers; network includes control, retries and media; power is measured
+package delta, not battery life.
 
 ## Qualification procedure
 
@@ -61,8 +58,10 @@ The lab and platform owners author a frozen `collector-qualification-v1` manifes
 
 For workload qualification, two runners reproduce identical fixture/plan hashes; intentionally change active-chat message count, search/residency pattern, camera quality, camera-plus-screen directions and screen role. The validator must reject each incompatible workload rather than accept a smaller resource result. Run all V.PERF.PEAK/WORKLOAD cases and retain exact manifests, commands, binaries, raw time series, normalized deviations and independent review. Linux server/API tests cannot pass these macOS native gates.
 
-## Media allocation versus measurement
+## Shipping media topology
 
-The [media allocation contract](media-allocation.md) describes prospective limits and observer interfaces. The alpha's maintained WebRTC engine runs in-process; the earlier two-helper allocation model is not an implemented isolation or hard-memory guarantee. Measure the actual topology, including native engine allocations, GPU resources, device queues and any platform helper, rather than assuming the planned topology exists.
-
-Controlled-buffer envelopes (140 MiB direct video, 268 MiB conference, 388 MiB either conference+screen direction, 572 MiB maximum slot, 1,144 MiB two slots) and separate auxiliary ceilings are reservation design limits, **not** measured footprint or revised Q.PERF budgets. Native/GPU/driver overhead, mappings and main-process work remain measured under the existing accounting. No profile is qualified by this arithmetic. The accepted workloads, quality/direction/codec requirements and targets are unchanged; additional qualified profiles supplement them and cannot silently reduce parity or inherit a baseline pass.
+The shipping Rust WebRTC engine runs in-process with GStreamer codecs. Measure
+actual native allocations, device queues, GPU resources and platform helpers.
+Application queue bounds do not cap decoder, OS or GPU allocations; there is no
+implemented global reservation ledger or hard process-memory guarantee. Functional
+interoperability and bounded diagnostic samples cannot establish full-profile budgets.

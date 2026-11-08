@@ -1,10 +1,10 @@
 # Conversations, discovery, and membership
 
-This document defines conversation, discovery and membership behavior. Use the [typed domain](terminology.md) and [compatibility gates](../compatibility/README.md); see the [feature inventory](../compatibility/feature-inventory.md) and [known limitations](../limitations.md) for implemented scope and limitations. Sources: [conversation API, constants, preset factory/controller, and participant API](../compatibility/baselines-and-sources.md#protocol-sources).
+This document defines conversation, discovery and membership behavior. Use the [typed domain](terminology.md) and [compatibility gates](../compatibility/README.md); see [known limitations](../limitations.md) for implemented scope and limitations. Sources: [conversation API, constants, preset factory/controller, and participant API](../compatibility/baselines-and-sources.md#protocol-sources).
 
 ## CONV-001
 
-**Browse one coherent conversation (P1).** Show name, avatar/fallback, unread/mention markers, last activity, muted state, and a call indicator without implying all information is current. Chat, files, people, and call controls address the same room. List loading, no conversations, no filter matches, access removed, and offline cache are distinct states. Respect server read-only/changelog/former-direct/note-to-self behavior.
+**Browse one coherent conversation.** Show name, avatar/fallback, unread/mention markers, last activity, muted state, and a call indicator without implying all information is current. Chat, files, people, and call controls address the same room. List loading, no conversations, no filter matches, access removed, and offline cache are distinct states. Respect server read-only/changelog/former-direct/note-to-self behavior.
 
 Acceptance: changing views preserves the room identity and draft. Opening a list row never starts microphone/camera capture. A room removed by the server disappears from live navigation after reconciliation; stale offline content is visibly stale and follows the cache policy.
 
@@ -18,13 +18,13 @@ Use one account-scoped avatar owner across member lists, messages, navigation an
 
 ## CONV-002
 
-**Create direct, group, public, and note-to-self conversations (P1).** Start a direct conversation by server user identity; reuse an existing returned direct room. Create a group independently of inviting a directory group. Offer note-to-self only when supported. Public creation requires all guest/password policies. Do not offer adding third parties to a locked direct room; where supported, explicitly create an extended conversation and keep its history separate.
+**Create direct, group, public, and note-to-self conversations.** Start a direct conversation by server user identity; reuse an existing returned direct room. Create a group independently of inviting a directory group. Offer note-to-self only when supported. Public creation requires all guest/password policies. Do not offer adding third parties to a locked direct room; where supported, explicitly create an extended conversation and keep its history separate.
 
 Acceptance: a creation restriction (`conversations.can-create`) removes disallowed group/public actions while preserving permitted direct actions. Submission errors preserve safe form input. A timed-out creation is reconciled before retry to avoid duplicate rooms. Note-to-self does not present an incoming colleague call or fabricated participants.
 
 ## CONV-003
 
-**Apply actual server presets (P1).** Load the account's returned preset set when `conversation-presets` is available. Resolve creation in this order:
+**Apply actual server presets.** Load the account's returned preset set when `conversation-presets` is available. Resolve creation in this order:
 
 1. Merge returned default → selected preset → explicit user changes → administrator-forced parameters.
 2. Apply the understood server invariants in CONV-004/010 **after** that merge. They can constrain a forced value or reject a conflicting request. Forced defaults are not permission to bypass an invariant.
@@ -37,7 +37,7 @@ Acceptance: ordinary users see no administrator-only announcement preset unless 
 
 ## CONV-004
 
-**Respect voice, webinar, presentation, channel, announcement, classified, and preserved behavior (recognition P1; advanced controls P3).** Present attributes as room behavior. The following rules apply when the compatible server contract is established; a version or preset label alone is insufficient. [Pinned rules and implementation](../compatibility/baselines-and-sources.md#preset-and-policy-precedence).
+**Respect voice, webinar, presentation, channel, announcement, classified, and preserved behavior.** Present attributes as room behavior. The following rules apply when the compatible server contract is established; a version or preset label alone is insufficient. [Pinned rules and implementation](../compatibility/baselines-and-sources.md#preset-and-policy-precedence).
 
 | Behavior | Normative rule and distinction |
 | --- | --- |
@@ -56,19 +56,19 @@ Acceptance: verify channel call denial for owner/moderator/member and member-lis
 
 ## CONV-005
 
-**Separate guest access, discoverability, and invitation (P1 settings; P2 guest joining).** Expose “Gäste über Link zulassen” separately from “In der Suche sichtbar”. Explain the actual audience of each discoverability scope. Password requirements are validated before a room becomes public; never briefly publish a passwordless room as a workaround. Copy links only after successful creation/update, and do not put a room password in the URL.
+**Separate guest access, discoverability, and invitation.** Expose “Gäste über Link zulassen” separately from “In der Suche sichtbar”. Explain the actual audience of each discoverability scope. Password requirements are validated before a room becomes public; never briefly publish a passwordless room as a workaround. Copy links only after successful creation/update, and do not put a room password in the URL.
 
 Acceptance: all supported guest-access/discoverability combinations render independently. A discoverable room does not imply admission or publishing rights. Password denial, expired/removed links, banned guests, and lobby admission produce separate states without leaking private membership. Revoking guest access invalidates stale invitation UI.
 
 ## CONV-006
 
-**Find and join eligible conversations (P1).** Separate joined-conversation filtering, directory/person lookup, message search, and discoverable-room search. Optional phonebook matching (P3) requires `phonebook-search`, explicit user input, and the server's privacy contract; do not upload the user's address book automatically. Label discoverable results with known name, topic, access, and join requirements without exposing unavailable private data. Loading and zero results are not equivalent. Joining a room and joining its call remain separate choices.
+**Find and join eligible conversations.** Separate joined-conversation filtering, directory/person lookup, message search, and discoverable-room search. Optional phonebook matching requires `phonebook-search`, explicit user input, and the server's privacy contract; do not upload the user's address book automatically. Label discoverable results with known name, topic, access, and join requirements without exposing unavailable private data. Loading and zero results are not equivalent. Joining a room and joining its call remain separate choices.
 
 Acceptance: permissions and discoverability are rechecked at join time. A result that becomes private produces “Zugriff nicht mehr verfügbar” and no stale join confirmation. Search failures retain the query and offer retry; they do not show “Keine Ergebnisse”.
 
 ## CONV-007
 
-**Invite people and show membership accurately (P1 basic; P3 advanced).** Support individual users and permitted NextCloud groups, circles/teams, email guests, and federated identities as distinct invitation sources. Explain that importing/inviting a group is a server operation, not a promise of a permanent synchronized group binding. Show partial success and rejected recipients. Moderator email resend and CSV import are separately gated; preview and validate CSV recipients before an explicit send.
+**Invite people and show membership accurately.** Support individual users and permitted NextCloud groups, circles/teams, email guests, and federated identities as distinct invitation sources. Explain that importing/inviting a group is a server operation, not a promise of a permanent synchronized group binding. Show partial success and rejected recipients. Moderator email resend and CSV import are separately gated; preview and validate CSV recipients before an explicit send.
 
 Retain the last observed member count across conversation selection and routine refresh. Keep at most 100 count observations per account, scoped to its current room identities. Refresh counts in the background after ten minutes, with at most one failed attempt per room each 60 seconds. A refresh does not blank a known count or replace it with a spinner. Eligible ordinary-room counts and their observation times persist under AUTH-009; restoring a count never reconstructs a restricted participant list.
 
@@ -78,13 +78,13 @@ Acceptance: same-named users/groups remain distinguishable by source and server.
 
 ## CONV-008
 
-**Manage roles and permissions (recognition P1; controls P3).** Display actual owner/moderator/guest roles and effective per-action permissions. Promote/demote only with server support and authority. Owner transfer needs `promote-demote-owner` where applicable and explicit consequences. Editing default permissions may reset participant overrides; explain this before submission. Do not expose the obsolete call-specific permission mode as a functioning feature.
+**Manage roles and permissions.** Display actual owner/moderator/guest roles and effective per-action permissions. Promote/demote only with server support and authority. Owner transfer needs `promote-demote-owner` where applicable and explicit consequences. Editing default permissions may reset participant overrides; explain this before submission. Do not expose the obsolete call-specific permission mode as a functioning feature.
 
 Acceptance: a permission/role change arriving while an action is pending blocks/reconciles that action. Reactions can remain permitted when chat is denied. Unknown role or permission semantics do not grant moderator powers. A denied mutation restores the last confirmed values and reports the reason.
 
 ## CONV-009
 
-**Organize personally (P1 favorites/unread; P3 full organization).** Support favorites, archive/unarchive, important/sensitive markers, tags, sort/group modes, and list density according to the relevant local capabilities/settings. Personal archive is not room deletion. Keep user-selected grouping predictable across refresh. Talk-25-specific automatic-unarchive and collapsed-tag unread preferences appear only when advertised.
+**Organize personally.** Support favorites, archive/unarchive, important/sensitive markers, tags, sort/group modes, and list density according to the relevant local capabilities/settings. Personal archive is not room deletion. Keep user-selected grouping predictable across refresh. Talk-25-specific automatic-unarchive and collapsed-tag unread preferences appear only when advertised.
 
 Acceptance: a failed favorite/archive/tag update rolls back visibly. A room may be archived yet have a live call or new activity; follow returned policy without losing it permanently. Sensitive presentation applies across list, search, switcher, and OS notifications. Tags on one account never organize another account's rooms.
 
@@ -98,7 +98,7 @@ Custom groups support creation, rename, removal, ordering, collapse and room ass
 
 ## CONV-010
 
-**Edit metadata and lifecycle settings (P3; read state P1).** Gate name, description, avatar, guest access, password, read-only mode, mention policy, expiration, and recording-consent settings individually. Show server limits. Distinguish leave room, leave current session, delete room, clear history, preserve, and keep/unbind a temporary event/phone/classified room. Destructive confirmations name the room and scope; CONV-004 invariants apply to edits as well as creation.
+**Edit metadata and lifecycle settings.** Gate name, description, avatar, guest access, password, read-only mode, mention policy, expiration, and recording-consent settings individually. Show server limits. Distinguish leave room, leave current session, delete room, clear history, preserve, and keep/unbind a temporary event/phone/classified room. Destructive confirmations name the room and scope; CONV-004 invariants apply to edits as well as creation.
 
 For a queued classified room, the supported moderator “Behalten”/unbind action changes the object association from `classified` to `classified_persist`. Confirm that returned transition before claiming exemption from the classified room-retention sweep, including future calls. It does not clear the classified attribute, sensitive treatment, exposure restrictions or message-expiry policy. Do not implement “keep” by erasing attributes/object data locally. Owner-controlled preservation and moderator keep are different actions; neither is a promise of universal retention immunity. [Retention and keep evidence](../compatibility/baselines-and-sources.md#preset-and-policy-precedence).
 

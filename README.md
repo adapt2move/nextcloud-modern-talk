@@ -1,32 +1,45 @@
 # NextCloud Modern Talk
 
-A native desktop client for teams using NextCloud Talk, built in Rust with GPUI and no WebView. It brings conversations, messages, files and calls together, with Google Sans typography, blue and sage accents, and system, light and dark appearance.
+A native desktop client for NextCloud Talk, built in Rust with GPUI and no WebView.
+Keep team conversations, shared files and calls in one workspace.
 
-The target server families are **NextCloud 34 / Talk 24** and **NextCloud 35 / Talk 25**. Availability depends on server capabilities, configuration and permissions. macOS is the first product target; Linux is a development and packaging target.
+- A focused sidebar with search, Activity, favorites and conversation menus.
+- Messages, threads, reactions, polls, voice messages and file browsing.
+- Audio/video calls and screen sharing, subject to server policy and the supported media profile.
+- Multiple accounts, bounded offline history, drafts and queued outgoing changes.
+- English, German and Spanish UI, light/dark appearance, and blue or sage accents.
 
-The alpha includes browser-based account connection, conversation settings, messaging with typing and presence, threads, file browsing, polls and voice messages, reminders and scheduled sends, audio/video calls with screen sharing, and automatic update downloads. Bounded local history, drafts and outgoing intents support offline use and reconnect recovery. The macOS DMG includes its media runtime; no separate GStreamer installation is needed. The native UI uses Lucide icons, contextual chat actions and subtle transitions that respect Reduce Motion. Download an [alpha release](https://github.com/adapt2move/nextcloud-modern-talk/releases) and follow the [installation guide](docs/install.md), including the macOS first-launch approval. See the [changelog](docs/changelog.md) for recent changes and [known limitations](docs/limitations.md) for remaining gaps.
+Targets **NextCloud 34 / Talk 24** and **NextCloud 35 / Talk 25**. Features depend on
+server capabilities, configuration and permissions. **macOS comes first** (Apple
+Silicon); Linux supports development and packaging. Windows is compile-only.
+This is alpha software; see [known limitations](docs/limitations.md).
 
-![Native chat with grouped navigation, favorites and fictional team messages](docs/assets/chat.png)
+**[Download an alpha release](https://github.com/adapt2move/nextcloud-modern-talk/releases)**
+and follow the [installation guide](docs/install.md) for requirements, first launch
+and updates. The macOS DMG includes its media runtime.
 
-Native Linux/X11 screenshot of the current app in light appearance, using the
-German interface and fictional team messages (`--ui-scenario chat`). This
-standalone development scenario is not connected to a server.
+![Native chat with the Activity sidebar and fictional German team messages](docs/assets/chat.png)
+
+Linux/X11 capture of the compiled app at 1280×720, light appearance with the blue
+accent and German UI. The `chat` scenario uses fictional team data and is not
+connected to a server.
 
 ## Contribute
 
-Start with [Contributing](CONTRIBUTING.md) and the [development guide](docs/development.md) for prerequisites, the pinned toolchain and scoped commands. UI scenarios use fictional data and do not log into a server. The [backend lab](docs/backend-lab.md) uses Docker and synthetic accounts.
-
-With prerequisites and [Go Task](https://taskfile.dev/docs/installation) installed,
-run `task dev` to build and start the debug app, or `task build` for an optimized
-release binary. `task --list` shows the other development commands. See the
-[development guide](docs/development.md#native-ui-entrypoint) for preview and
-packaging commands.
+Read [Contributing](CONTRIBUTING.md) and [development](docs/development.md) for
+prerequisites, builds and checks. With prerequisites and
+[Go Task](https://taskfile.dev/docs/installation) installed, use `task dev` to build
+and run the app, or `task verify` for the standard checks. Fictional UI scenarios
+and the disposable [backend lab](docs/backend-lab.md) support development without
+production accounts.
 
 ## Documentation
 
-- [Product requirements](docs/product/README.md) and [feature inventory](docs/compatibility/feature-inventory.md)
+- [Documentation index](docs/README.md), [changelog](docs/changelog.md) and [known limitations](docs/limitations.md)
+- [Product requirements](docs/product/README.md) and [compatibility contract](docs/compatibility/README.md)
 - [Architecture](docs/architecture/README.md) and [design reference](docs/design/README.md)
-- [CI policy](docs/ci.md) and [release tooling](tools/release/README.md)
-- [Documentation index](docs/README.md) and [security reporting](SECURITY.md)
+- [CI policy](docs/ci.md), [release tooling](tools/release/README.md) and [security reporting](SECURITY.md)
 
-Licensed under [EUPL-1.2](LICENSE); third-party assets retain their [notices and licenses](NOTICE.md). This is an independent project, not an official NextCloud client.
+Licensed under [EUPL-1.2](LICENSE); third-party assets retain their
+[notices and licenses](NOTICE.md). This is an independent project, not an official
+NextCloud client.

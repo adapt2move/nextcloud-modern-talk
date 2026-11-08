@@ -122,5 +122,5 @@ threads, and only then emits Drained. An escalated exit is
 semantics are not qualified for production leases; no recovery or auto-rejoin
 path exists.
 
-See [allocation coverage](../../docs/architecture/media-allocation.md) and the
+See [performance accounting](../../docs/quality/performance.md) and the
 [development guide](../../docs/development.md) for execution constraints.
