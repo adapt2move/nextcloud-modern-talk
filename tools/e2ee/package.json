@@ -1,0 +1,9 @@
+{
+  "name": "nmt-e2ee-interop",
+  "private": true,
+  "type": "module",
+  "description": "Reference peer for the call E2EE interoperability test; not shipped.",
+  "dependencies": {
+    "@matrix-org/olm": "3.2.15"
+  }
+}
