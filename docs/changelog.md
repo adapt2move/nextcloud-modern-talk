@@ -1,19 +1,23 @@
-# v0.0.13 alpha
+# v0.0.14 alpha
 
-- Navigate with a leaner sidebar, one Activity view and conversation menus;
-  inspect connection status from the title bar.
-- Read calmer notices and clearer access, password, lobby and read-only states,
-  with refined grain and glass surfaces.
-- See pending and failed sends, delivery receipts and attached message tools;
-  use the corrected thread menu and pinned-message label.
-- Open and reply to threads using the server's thread identity, with capability
-  checks and clear errors when an action is unavailable.
-- Join public conversations before loading history and paste same-server links
-  into open-conversation discovery from the sidebar's “+” menu.
-- Receive Talk test notifications and refreshed background notifications through
-  polling every three seconds.
-- See specific call admission and security-policy explanations, with safe defaults
-  when server policy is unknown.
+- Make calls end-to-end encrypted when the server requires it, compatible with
+  the Talk web client's protocol; a lock in the call header shows when this
+  client protects the call. Live interoperability is not yet verified.
+- Reach TURN relays over TLS and TCP (including port 443); certificates are
+  verified by the system trust store, so a company CA installed in the system
+  works.
+- Play audio files shared in a conversation in the app.
+- Send without waiting: the editor empties at once and only the receipt clock
+  shows progress. Failed sends give the words back.
+- Group conversations by dragging them onto groups, create groups from the “+”
+  menu, and collapse sections instantly. The list filter is now a filter icon.
+- Add reactions beyond the quick grid with the system emoji picker; the message
+  menu is grouped and also opens on a secondary click.
+- Schedule messages with one-click times and an optional calendar.
+- Record voice messages with a scrolling live trace.
+- Calmer visuals: no more tile seams, smooth chat and dialog surfaces with gray
+  steps, neutral hover in dialogs, a pill-shaped leave button, and screen-sharing
+  access shown only as a warning when missing.
 
-[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.13/docs/install.md)
-· [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.13/docs/limitations.md)
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.14/docs/install.md)
+· [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.14/docs/limitations.md)

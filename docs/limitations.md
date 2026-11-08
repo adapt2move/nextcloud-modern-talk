@@ -1,6 +1,6 @@
 # Known limitations
 
-These are the limits of **v0.0.13 alpha**. Features follow current server
+These are the limits of **v0.0.14 alpha**. Features follow current server
 capabilities, configuration, room policy and permissions; the
 [product requirements](product/README.md) describe intended behavior, not a claim
 of complete parity with the official clients.
