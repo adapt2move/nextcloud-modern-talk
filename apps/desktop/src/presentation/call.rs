@@ -421,48 +421,48 @@ impl Desktop {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(
+                    .child({
+                        // Actions get their own full-width row under the text. In
+                        // the same wrapping row as the text they overlapped it.
+                        let mut actions: Vec<gpui::AnyElement> = Vec::new();
+                        if matches!(gate, RequiredGate::CallPolicy(_)) {
+                            actions.push(self.button("retry-call-policy", "Erneut verbinden", ButtonStyle::Secondary, true,
+                                LocalAction::Intent(UiIntent::ReconnectCall(call.scope)), cx).into_any_element());
+                        }
+                        if gate == RequiredGate::Lobby {
+                            let timer = self.snapshot.conversation_panel.as_ref()
+                                .filter(|p| !p.details_stale && p.context.account == call.scope.account && p.context.conversation == call.scope.conversation)
+                                .and_then(|p| p.details.as_ref()).and_then(|details| details.lobby_timer)
+                                .and_then(|at| self.settings_port.local_datetime(at))
+                                .and_then(|time| super::localization::local_datetime(self.locale, time.as_str()));
+                            if let Some(time) = timer {
+                                actions.push(self.hint(&self.lf("Beginn: {time}", &[("time", time.as_str())])).into_any_element());
+                            }
+                        }
+                        if let Some(kind) = match gate {
+                            RequiredGate::MicrophonePermission => Some(talk_core::preferences::permissions::PermissionKind::Microphone),
+                            RequiredGate::CameraPermission => Some(talk_core::preferences::permissions::PermissionKind::Camera),
+                            _ => None,
+                        } {
+                            actions.push(if self.observation(kind).can_open_settings {
+                                self.button("gate-system-settings", "Systemeinstellungen öffnen", ButtonStyle::Secondary, true,
+                                    LocalAction::Permission(kind, talk_core::preferences::permissions::PermissionAction::OpenSystemSettings), cx).into_any_element()
+                            } else {
+                                div().text_size(self.sp(12.)).text_color(if t.dark { t.stage_text } else { t.muted })
+                                    .child(self.l("Systemeinstellungen sind auf diesem System nicht verfügbar.")).into_any_element()
+                            });
+                        }
+                        if gate == RequiredGate::RecordingConsent {
+                            actions.push(self.button("required-gate", "Zustimmung prüfen", ButtonStyle::Secondary, true,
+                                LocalAction::Open(Overlay::RecordingConsent), cx).into_any_element());
+                        }
+                        actions.push(self.button("gate-leave", "Anruf verlassen", ButtonStyle::Quiet, true,
+                            LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))), cx).into_any_element());
                         self.notice(BannerRole::Warning, self.l(title), Some(self.l(description)), Some("lock"))
                             .w_full()
                             .max_w(px(480.))
-                            .when(matches!(gate, RequiredGate::CallPolicy(_)), |d| {
-                                d.child(self.button("retry-call-policy", "Erneut verbinden", ButtonStyle::Secondary, true,
-                                    LocalAction::Intent(UiIntent::ReconnectCall(call.scope)), cx))
-                            })
-                            .when(gate == RequiredGate::Lobby, |d| {
-                                let timer = self.snapshot.conversation_panel.as_ref()
-                                    .filter(|p| !p.details_stale && p.context.account == call.scope.account && p.context.conversation == call.scope.conversation)
-                                    .and_then(|p| p.details.as_ref()).and_then(|details| details.lobby_timer)
-                                    .and_then(|at| self.settings_port.local_datetime(at))
-                                    .and_then(|time| super::localization::local_datetime(self.locale, time.as_str()));
-                                d.when_some(timer, |d,time| d.child(self.hint(&self.lf("Beginn: {time}", &[("time",time.as_str())]))))
-                            })
-                             .when_some(match gate {
-                        RequiredGate::MicrophonePermission => Some(talk_core::preferences::permissions::PermissionKind::Microphone),
-                        RequiredGate::CameraPermission => Some(talk_core::preferences::permissions::PermissionKind::Camera),
-                        _ => None,
-                    }, |d, kind| {
-                        if self.observation(kind).can_open_settings {
-                            d.child(self.button("gate-system-settings", "Systemeinstellungen öffnen", ButtonStyle::Secondary, true,
-                                LocalAction::Permission(kind, talk_core::preferences::permissions::PermissionAction::OpenSystemSettings), cx))
-                        } else {
-                            d.child(div().text_size(self.sp(12.)).text_color(if t.dark { t.stage_text } else { t.muted })
-                                .child(self.l("Systemeinstellungen sind auf diesem System nicht verfügbar.")))
-                        }
-                    })
-                    .when(gate == RequiredGate::RecordingConsent, |d| {
-                                d.child(self.button(
-                                    "required-gate",
-                                    "Zustimmung prüfen",
-                                    ButtonStyle::Secondary,
-                                    true,
-                                    LocalAction::Open(Overlay::RecordingConsent),
-                                    cx,
-                                ))
-                            })
-                            .child(self.button("gate-leave", "Anruf verlassen", ButtonStyle::Quiet, true,
-                                LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))), cx)),
-                    ),
+                            .child(div().w_full().flex().flex_wrap().items_center().gap_2().children(actions))
+                    }),
             );
         }
         if matches!(call.stage, CallStage::Outgoing) {

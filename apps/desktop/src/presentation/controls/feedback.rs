@@ -112,6 +112,7 @@ impl Desktop {
                 div()
                     .flex_1()
                     .min_w(px(150.))
+                    .pr_2()
                     .flex()
                     .flex_col()
                     .child(
