@@ -39,8 +39,8 @@ cover the native toolkit and assets.
 - A send feels instant: the editor empties on admission and the message looks sent.
   Sending and waiting show only the small clock where the receipt ticks go. Only the
   unclear-status explanation (warning) and "Nicht gesendet" (error) say so in words under
-  the message in 12 pt text, with plain-text actions on a neutral hover. Only the newest
-  own message keeps its sent or read receipt at rest. A pinned message carries "Angeheftet" under its text.
+  the message in 12 pt text, with plain-text actions on a neutral hover. Every
+  own message shows its receipt at the bottom right of the row. A pinned message carries "Angeheftet" under its text.
 - A menu belongs to the surface that opened it: its open state, anchor and visibility are
   judged against that surface's own scroll region.
 

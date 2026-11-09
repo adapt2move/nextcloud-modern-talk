@@ -188,7 +188,6 @@ impl Desktop {
             || palette_open
             || keyboard_here;
         let shown = has_toolbar && surface_active;
-        let last_own = delivery.is_some() && self.is_last_own_message(context, m, thread);
         // A send feels instant: the message looks delivered and only the small
         // clock where the ticks go reveals that it is still on its way. Receipts
         // are ambient: the newest own message carries its state at rest and
@@ -196,7 +195,6 @@ impl Desktop {
         // in words beneath the message.
         let resting = delivery.filter(|indicator| !indicator.needs_attention());
         let attention = delivery.filter(|indicator| indicator.needs_attention());
-        let unsettled = delivery.is_some_and(DeliveryIndicator::is_unsettled);
         let metadata = |text: &str| {
             self.hint(text)
                 .text_size(self.sp(13.))
@@ -231,24 +229,6 @@ impl Desktop {
                         )
                         .when(m.own, |d| d.child(metadata(self.l("Du"))))
                         .child(metadata(&time_label))
-                        .when_some(resting.filter(|_| !continuation), |d, indicator| {
-                            d.child(
-                                self.delivery_indicator(
-                                    indicator,
-                                    row_id("message-delivery", 0),
-                                    cx,
-                                )
-                                // Share the toolbar owner: GPUI group-hover styles
-                                // can retain the last in-window position on exit.
-                                .opacity(
-                                    if last_own || surface_active || unsettled {
-                                        1.
-                                    } else {
-                                        0.
-                                    },
-                                ),
-                            )
-                        })
                         .when(m.metadata.edited, |d| {
                             d.child(metadata(self.l("Bearbeitet")))
                         }),
@@ -771,25 +751,6 @@ impl Desktop {
                                 .opacity(0.)
                                 .group_hover(action_group.clone(), |s| s.opacity(1.)),
                         )
-                        // A grouped newest own message keeps its receipt in the
-                        // gutter at rest; the time takes its place while hovered.
-                        .when_some(resting.filter(|_| last_own || unsettled), |d, indicator| {
-                            d.child(
-                                div()
-                                    .absolute()
-                                    .top_0()
-                                    .right_0()
-                                    .h(self.sp(20.))
-                                    .flex()
-                                    .items_center()
-                                    .opacity(if surface_active { 0. } else { 1. })
-                                    .child(self.delivery_indicator(
-                                        indicator,
-                                        row_id("message-delivery", 0),
-                                        cx,
-                                    )),
-                            )
-                        })
                         .into_any_element()
                 } else {
                     self.person_trigger(
@@ -813,6 +774,13 @@ impl Desktop {
                     ).into_any_element()
                 })
                 .child(content)
+                // The receipt sits at the bottom right of the message, like the
+                // ticks in other chat clients.
+                .children(resting.map(|indicator| {
+                    div().flex().flex_col().flex_none().justify_end().child(
+                        self.delivery_indicator(indicator, row_id("message-delivery", 0), cx),
+                    )
+                }))
                 .when(!thread, |d| d.child(self.pin_source_anchor(context, m.local_id)))
                 // The toolbar never enters the message's flex layout: revealing it
                 // cannot move text, metadata or receipts.
@@ -1125,28 +1093,6 @@ impl Desktop {
             })
     }
 
-    /// The newest own message carries its receipt at rest; see `message_row_surface`.
-    fn is_last_own_message(
-        &self,
-        context: talk_core::ui::presentation::ConversationRef,
-        message: &MessageView,
-        thread: bool,
-    ) -> bool {
-        let latest = if thread {
-            let Some((_, root)) = self.thread_parent.filter(|(room, _)| *room == context) else {
-                return false;
-            };
-            self.snapshot
-                .message_panel
-                .as_ref()
-                .filter(|panel| panel.context == context)
-                .and_then(|panel| latest_own(panel.thread_messages.as_slice().iter()))
-                .or_else(|| latest_own(self.thread_row(context, root).into_iter()))
-        } else {
-            latest_own(self.snapshot.messages.as_slice().iter())
-        };
-        latest == Some(message.local_id)
-    }
     fn message_delivery(&self, message: &MessageView) -> Option<DeliveryIndicator> {
         let panel = self
             .snapshot
@@ -1210,13 +1156,6 @@ impl Desktop {
     }
 }
 
-/// The newest own message that can carry a receipt: not deleted, not a system line.
-fn latest_own<'a>(rows: impl DoubleEndedIterator<Item = &'a MessageView>) -> Option<u128> {
-    rows.rev()
-        .find(|row| row.own && !row.metadata.deleted && !row.metadata.system)
-        .map(|row| row.local_id)
-}
-
 fn call_status(message: &MessageView) -> Option<(&'static str, bool)> {
     if !message.metadata.system || message.metadata.deleted {
         return None;
@@ -1230,6 +1169,9 @@ fn call_status(message: &MessageView) -> Option<(&'static str, bool)> {
         SystemEvent::Unknown | SystemEvent::Other => None,
     }
 }
+
+/// Messages of one author within this window share one header.
+const GROUP_WINDOW_SECONDS: u64 = 300;
 
 /// Presentation groups never create protocol threads. Match a known actor key,
 /// not a display name. The clock owner supplies the displayed calendar boundary.
@@ -1271,7 +1213,7 @@ fn grouped_message_surface(
             .metadata
             .timestamp
             .checked_sub(previous.metadata.timestamp)
-            .is_some_and(|elapsed| elapsed <= 120)
+            .is_some_and(|elapsed| elapsed <= GROUP_WINDOW_SECONDS)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1289,11 +1231,6 @@ impl DeliveryIndicator {
     /// waiting show a clock, accepted and read are ambient receipts.
     fn needs_attention(self) -> bool {
         matches!(self, Self::Failed | Self::Uncertain)
-    }
-
-    /// Still on its way: shown as the clock, never as words.
-    fn is_unsettled(self) -> bool {
-        matches!(self, Self::Queued | Self::Offline | Self::Pending)
     }
 
     fn with_connection(self, offline: bool) -> Self {
@@ -1396,9 +1333,9 @@ mod tests {
     }
 
     #[test]
-    fn grouping_uses_actor_identity_and_at_most_two_minutes_between_messages() {
+    fn grouping_uses_actor_identity_and_at_most_five_minutes_between_messages() {
         let previous = authored_message(1, Some("users:one"), 32_400);
-        let mut current = authored_message(2, Some("users:one"), 32_520);
+        let mut current = authored_message(2, Some("users:one"), 32_700);
         assert!(grouped_message(&previous, &current, true));
         current.metadata.timestamp += 1;
         assert!(!grouped_message(&previous, &current, true));
@@ -1524,7 +1461,6 @@ mod tests {
             DeliveryIndicator::Pending,
         ] {
             assert!(!indicator.needs_attention(), "{indicator:?}");
-            assert!(indicator.is_unsettled(), "{indicator:?}");
             assert!(!indicator.label().is_empty());
         }
         for indicator in [DeliveryIndicator::Failed, DeliveryIndicator::Uncertain] {
@@ -1537,33 +1473,6 @@ mod tests {
         // The unclear state keeps its honest explanation; failure names the outcome.
         assert!(DeliveryIndicator::Uncertain.label().contains("abgeglichen"));
         assert_eq!(DeliveryIndicator::Failed.label(), "Nicht gesendet");
-    }
-
-    #[test]
-    fn the_newest_own_message_is_the_one_that_keeps_its_receipt_at_rest() {
-        let mut rows = [
-            authored_message(1, Some("users:one"), 1),
-            authored_message(2, Some("users:one"), 2),
-            authored_message(3, Some("users:two"), 3),
-            authored_message(4, Some("users:one"), 4),
-        ];
-        assert_eq!(
-            latest_own(rows.iter()),
-            None,
-            "nobody is the current account"
-        );
-        rows[1].own = true;
-        rows[3].own = true;
-        assert_eq!(latest_own(rows.iter()), Some(4));
-        rows[3].metadata.deleted = true;
-        assert_eq!(
-            latest_own(rows.iter()),
-            Some(2),
-            "a tombstone has no receipt"
-        );
-        rows[1].metadata.system = true;
-        assert_eq!(latest_own(rows.iter()), None);
-        assert_eq!(latest_own([].iter()), None);
     }
 
     #[test]
