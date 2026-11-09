@@ -59,10 +59,12 @@ def requirement(config, identifier=None):
     return result
 
 
-def sign(path, run, *, application=False):
+def sign(path, run, *, application=False, identifier=None):
     config = configuration()
     if not config:
-        run(["codesign", "--force", "--sign", "-", "--timestamp=none", path])
+        # Ad-hoc: still name non-application code by the app's identifier on request.
+        extra = ["--identifier", identifier] if identifier and not application else []
+        run(["codesign", "--force", "--sign", "-", "--timestamp=none", *extra, path])
         return
     args = ["codesign", "--force"]
     if config["keychain"]:
@@ -74,6 +76,11 @@ def sign(path, run, *, application=False):
         # Preserve the alpha runtime profile. A self-signed certificate cannot
         # supply the Apple Team ID required by hardened library validation.
         args += ["--timestamp=none"]
+    if identifier and not application:
+        # Code that talks to a system service as part of the app (the notification
+        # helper) must carry the app's identifier, or macOS does not associate it
+        # with the app's permissions.
+        args += ["--identifier", identifier]
     if application:
         args += ["--identifier", IDENTIFIER, "--entitlements", Path(__file__).with_name("macos-entitlements.plist")]
         if config["mode"] == "internal":

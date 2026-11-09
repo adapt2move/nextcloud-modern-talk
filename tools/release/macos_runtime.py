@@ -295,7 +295,12 @@ def relocate(path, info, physical, libraries):
         args += ["-id", "@rpath/" + path.name]
     if len(args) > 1:
         run([*args, path])
-    macos_signing.sign(path, run)
+    # The notification helper acts for the app: macOS only applies the app's
+    # notification permission to code that carries the app's identifier.
+    macos_signing.sign(
+        path, run,
+        identifier=macos_signing.IDENTIFIER if path.name == "talk-native-helper" else None,
+    )
     run(["codesign", "--verify", "--strict", path])
 
 

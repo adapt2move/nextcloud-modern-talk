@@ -682,6 +682,21 @@ class PersistentSigningTests(unittest.TestCase):
         self.assertIn("--entitlements", commands[0])
         self.assertIn('identifier "org.adapt2move.nextcloud-modern-talk"', commands[-1][-2])
 
+    def test_the_notification_helper_is_signed_with_the_app_identifier(self):
+        import macos_signing
+        for env in ({}, {"NMT_MACOS_SIGNING_IDENTITY": "A" * 40, "NMT_MACOS_SIGNING_MODE": "internal",
+                         "NMT_MACOS_SIGNING_CERTIFICATE": "A" * 40, "NMT_MACOS_REQUIRE_SIGNED": "1"}):
+            helper, plugin = [], []
+            with patch.dict(os.environ, env, clear=True):
+                macos_signing.sign(Path("talk-native-helper"), helper.append,
+                                   identifier=macos_signing.IDENTIFIER)
+                macos_signing.sign(Path("plugin.dylib"), plugin.append)
+            signing = next(c for c in helper if "--sign" in c)
+            self.assertEqual(signing[signing.index("--identifier") + 1],
+                             "org.adapt2move.nextcloud-modern-talk",
+                             "macOS applies the app's notification permission by identifier")
+            self.assertNotIn("--identifier", next(c for c in plugin if "--sign" in c))
+
     def test_internal_signing_pins_the_leaf_and_identifier_without_claiming_developer_id(self):
         import macos_signing
         env = {"NMT_MACOS_SIGNING_IDENTITY": "A" * 40, "NMT_MACOS_SIGNING_MODE": "internal",
