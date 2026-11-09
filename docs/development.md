@@ -125,14 +125,17 @@ task dev -- --ui-scenario chat --ui-preserve-preferences
 
 This opens a native GPUI window without server login or capture. Launch without `--ui-scenario` for ordinary browser login and restored accounts. Previews, focus/keyboard checks and appearance fixtures do not establish integrated behavior. See [native UI boundaries](design/README.md). Keep `--licenses` output and installed notices with packages.
 
-To refresh the README image from the compiled Linux app:
+To refresh the README images from the compiled Linux app:
 
 ```sh
 python3 tools/ui/capture.py --binary target/debug/talk-desktop \
-  --output /tmp/talk-readme --scenarios chat --width 1280 --height 720
+  --output /tmp/talk-readme --width 1280 --height 800 --locale de \
+  --scenarios chat,chat:dark,sidebar-activity:light:sage,call-reactions
 ```
 
-Inspect `chat-light-blue.png` before copying it to `docs/assets/chat.png`.
+Inspect the captures, then copy `chat-light-blue.png` to `docs/assets/chat.png`,
+`chat-dark-blue.png` to `chat-dark.png`, `sidebar-activity-light-sage.png` to
+`activity.png` and `call-reactions-light-blue.png` to `call.png`.
 Keep the README caption accurate about the platform and synthetic data.
 
 Use `login-server-denied`, `chat-server-denied`, `chat-server-unavailable` and `accounts-server-denied` to inspect connection-error copy with fictional data.
