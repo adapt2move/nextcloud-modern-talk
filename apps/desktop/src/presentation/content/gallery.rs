@@ -205,10 +205,13 @@ impl Desktop {
     ) -> Div {
         let media = matches!(kind(object), Kind::Image | Kind::Video);
         let target = AssetTarget::Thumbnail(reference.clone());
+        // The sender's own picture of a file they just sent stays on screen when
+        // the server cannot (yet) serve its preview: it is the file they chose, so
+        // this grants nothing. Anyone else's denied preview stays denied.
         let preview = self.asset_image(&target).or_else(|| {
             (!matches!(
                 self.asset(&target).map(|a| a.state),
-                Some(AssetState::Denied | AssetState::Missing | AssetState::Unsupported)
+                Some(AssetState::Missing | AssetState::Unsupported)
             ))
             .then(|| self.confirmed_upload_image(&reference))
             .flatten()
