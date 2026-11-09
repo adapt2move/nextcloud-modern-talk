@@ -1804,6 +1804,17 @@ impl Accounts {
                 }),
         )
     }
+    /// No draft write is queued or running and none has failed. Only then does a
+    /// restart keep every accepted draft.
+    pub(super) fn composer_drafts_settled(&self) -> bool {
+        self.cache.draft_failures.is_empty()
+            && !self
+                .cache
+                .writes
+                .iter()
+                .chain(self.cache.in_flight.iter())
+                .any(|w| matches!(w.command, DataCommand::PutDraft(_)))
+    }
     pub(super) fn save_composer_draft(
         &mut self,
         context: ConversationRef,
@@ -2641,6 +2652,46 @@ mod tests {
             !model.cache.revoked(scope.account, &stable()),
             "new runtime needs a new policy observation"
         );
+    }
+    #[test]
+    fn drafts_are_settled_only_after_every_draft_write_succeeded() {
+        let mut model = super::super::tests::model();
+        model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
+        let context = model.snapshot.selected.unwrap();
+        install(&mut model, context.account);
+        model.cache.accounts[0].bindings.push(Binding {
+            context,
+            key: metadata().key,
+            ordinary: true,
+            metadata_observed: false,
+        });
+        assert!(model.composer_drafts_settled());
+        let draft = talk_core::ui::messaging::ComposerDraft {
+            thread: None,
+            reply: None,
+            body: text("Keep me across the update"),
+        };
+        model.save_composer_draft(context, draft).unwrap();
+        assert!(!model.composer_drafts_settled(), "queued write");
+        model.cache.in_flight = model.cache.writes.pop();
+        assert!(!model.composer_drafts_settled(), "running write");
+        model.complete_data(
+            Work::Write(context.account.account, 1),
+            Err(IdentityError::WorkerUnavailable),
+        );
+        assert!(
+            !model.composer_drafts_settled(),
+            "failed write stays unsettled"
+        );
+        model.cache.in_flight = model.cache.writes.pop();
+        model.complete_data(
+            Work::Write(context.account.account, 1),
+            Ok(RuntimeReply::AccountData {
+                account: context.account.account,
+                result: Ok(DataResult::Saved),
+            }),
+        );
+        assert!(model.composer_drafts_settled());
     }
     #[test]
     fn draft_writes_coalesce_keep_newer_text_and_retain_failed_storage_work() {

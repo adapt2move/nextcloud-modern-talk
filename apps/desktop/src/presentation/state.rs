@@ -484,9 +484,19 @@ impl Drafts {
     }
     /// Restart must not discard another room's draft, quoted/thread draft, or
     /// an empty editor whose previous submission is still unresolved.
+    #[cfg(test)]
     pub fn has_unsent(&self) -> bool {
         self.entries.iter().any(|draft| {
             !draft.text.as_str().is_empty() || draft.pending.is_some() || draft.uncertain
+        })
+    }
+    /// Content a restart would lose even after every plain draft was written:
+    /// unresolved sends and drafts that are deliberately memory-only.
+    pub fn has_unpersistable(&self) -> bool {
+        self.entries.iter().any(|draft| {
+            draft.pending.is_some()
+                || draft.uncertain
+                || (draft.target.private_reply.is_some() && !draft.text.as_str().is_empty())
         })
     }
     /// Removing one account must explain only the drafts and unresolved sends
@@ -1566,6 +1576,49 @@ pub(super) mod tests {
         drafts.save(first, "").unwrap();
         assert!(!drafts.has_unsent_for_account(first.account.account));
         assert!(drafts.has_unsent_for_account(other.account.account));
+    }
+    #[test]
+    fn plain_text_drafts_do_not_block_a_restart_but_unresolved_sends_do() {
+        let mut drafts = Drafts::default();
+        let first = context(1);
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        // Written drafts survive a restart, so they never block it.
+        drafts.save(first, "Continue after the update").unwrap();
+        assert!(drafts.has_unsent());
+        assert!(!drafts.has_unpersistable());
+        // A submitted message that is still unresolved would be lost or doubled.
+        let request = drafts.send(first, Decision::Allowed, &mut port).unwrap();
+        drafts.save(first, "").unwrap();
+        assert!(drafts.has_unpersistable());
+        assert!(drafts.complete(SubmissionResult {
+            request,
+            context: first,
+            result: Completion::ServerAccepted,
+        }));
+        assert!(!drafts.has_unpersistable());
+        // Private replies are never written to disk, so their text blocks.
+        assert!(
+            drafts.set_target(
+                first,
+                talk_core::ui::messaging::ComposeTarget {
+                    private_reply: Some(talk_core::ui::messaging::PrivateReplyTarget {
+                        source: talk_core::preferences::navigation::NavigationRoomKey::new(
+                            "r1:00000000000000000000000000000001",
+                        )
+                        .unwrap(),
+                        message: 12,
+                        author: talk_core::ui::Text::new("Mara").unwrap(),
+                        body: talk_core::ui::Text::new("Quote").unwrap(),
+                    }),
+                    ..Default::default()
+                }
+            )
+        );
+        drafts.save(first, "Memory only").unwrap();
+        assert!(drafts.has_unpersistable());
     }
     #[test]
     fn restart_guard_covers_other_rooms_targets_and_unresolved_empty_drafts() {

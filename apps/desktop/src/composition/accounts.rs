@@ -2247,6 +2247,9 @@ impl NativeDesktopPort for Port {
     ) -> Result<(), SubmitError> {
         self.0.borrow_mut().save_composer_draft(context, draft)
     }
+    fn composer_drafts_settled(&self) -> bool {
+        self.0.borrow().composer_drafts_settled()
+    }
 
     #[cfg(debug_assertions)]
     fn enable_latency_probe(&mut self) {

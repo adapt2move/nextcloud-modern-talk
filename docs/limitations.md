@@ -90,6 +90,10 @@ of complete parity with the official clients.
   32 entries and 128 KiB per account. Writes are asynchronous; abrupt exit can
   restore older text. Attachments and private replies stay session-local. Failed
   saves show session-only retention; unsent drafts are never evicted to make room.
+  Installing an update stores plain drafts first and waits up to five seconds for
+  those writes; it refuses and says so when a write fails or times out. Unresolved
+  sends, private-reply drafts, message edits and active text composition still
+  block the restart.
 - The outgoing queue holds at most 64 intents / 512 KiB per account and checks
   fresh authority before dispatch. Uncertain effects use bounded read-only
   reconciliation and are never blindly replayed. Failed sends appear above the

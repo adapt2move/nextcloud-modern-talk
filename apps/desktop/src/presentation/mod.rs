@@ -320,6 +320,8 @@ pub struct Desktop {
     // Successful install admission drains all service owners. This latch is
     // never cleared by an error snapshot; composition owns restart/quit.
     update_restart_pending: bool,
+    /// Generation and deadline of an install that waits for draft writes.
+    update_install_wait: Option<(u64, Instant)>,
     room_ui: conversation_dialog::RoomUi,
     people_card: people_card::Card,
     account_search_ui: account_search::AccountSearchUi,
@@ -739,6 +741,7 @@ impl Desktop {
             material_preview,
             updates: settings_port.update_snapshot(),
             update_restart_pending: false,
+            update_install_wait: None,
             text_selection,
             _text_selection_observer: text_selection_observer,
             _text_link_subscription: text_link_subscription,
@@ -1906,13 +1909,21 @@ impl Desktop {
             }
             LocalAction::InstallUpdate(generation) => {
                 if generation == self.updates.generation
+                    && self.update_install_wait.is_none()
                     && self.can_install_update()
                     && self.save_thread_draft(cx)
                     && self.save_draft(cx)
                 {
-                    if self.drafts.has_unsent()
-                        || self.thread_drafts.has_unsent()
-                        || !self.composer.read(cx).content.is_empty()
+                    // Plain drafts survive the restart: they are written below and
+                    // the install waits for those writes. Only content that is never
+                    // stored blocks it.
+                    let selected_unstored = self.snapshot.selected.is_some_and(|context| {
+                        self.message_ui.composer_load_failed == Some(context)
+                    }) && !self.composer.read(cx).content.is_empty();
+                    if self.drafts.has_unpersistable()
+                        || self.thread_drafts.has_unpersistable()
+                        || selected_unstored
+                        || self.message_ui.editing.is_some()
                         || self.message_ui.pending_edit.is_some()
                         || self.has_thread_edit(None)
                         || self.input_composing(cx)
@@ -1921,16 +1932,15 @@ impl Desktop {
                             "Schließe ungesendete Nachrichten vor dem Neustart ab oder leere sie.",
                         ));
                     } else {
-                        match self.settings_port.install_update(generation) {
-                            Ok(()) => self.freeze_for_update(window, cx),
-                            Err(error) => {
-                                if error != talk_core::preferences::updates::UpdateError::Busy
-                                    && let Some(label) = preferences::update_error_label(error)
-                                {
-                                    self.feedback = Some(Feedback::error(label));
-                                }
-                            }
-                        }
+                        self.draft_storage_unavailable = self
+                            .drafts
+                            .persist(self.port.as_mut())
+                            .or(self.thread_drafts.persist(self.port.as_mut()));
+                        self.update_install_wait = Some((
+                            generation,
+                            Instant::now() + std::time::Duration::from_secs(5),
+                        ));
+                        self.continue_update_install(window, cx);
                     }
                 }
             }
@@ -3520,6 +3530,39 @@ impl Desktop {
             cx.stop_propagation();
         }
     }
+    /// Starts the install once every draft write has settled. Drafts that cannot
+    /// be stored, or writes that outlast the deadline, cancel it visibly.
+    fn continue_update_install(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((generation, deadline)) = self.update_install_wait else {
+            return;
+        };
+        if generation != self.updates.generation || !self.can_install_update() {
+            self.update_install_wait = None;
+            return;
+        }
+        let drafts_stored = self.draft_storage_unavailable.is_none();
+        if drafts_stored && self.port.composer_drafts_settled() {
+            self.update_install_wait = None;
+            match self.settings_port.install_update(generation) {
+                Ok(()) => self.freeze_for_update(window, cx),
+                Err(error) => {
+                    if error != talk_core::preferences::updates::UpdateError::Busy
+                        && let Some(label) = preferences::update_error_label(error)
+                    {
+                        self.feedback = Some(Feedback::error(label));
+                    }
+                }
+            }
+        } else if !drafts_stored || Instant::now() >= deadline {
+            self.update_install_wait = None;
+            self.feedback = Some(Feedback::error(
+                "Entwürfe konnten nicht gespeichert werden. Der Neustart wurde nicht gestartet.",
+            ));
+            cx.notify();
+        } else {
+            window.request_animation_frame();
+        }
+    }
     fn freeze_for_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.update_restart_pending = true;
         self.disable_update_inputs(cx);
@@ -3670,6 +3713,7 @@ impl Render for Desktop {
             });
         }
         self.materials.begin_frame();
+        self.continue_update_install(window, cx);
         if let Some(started) = self.highlight_started {
             if started.elapsed() >= std::time::Duration::from_millis(1400) {
                 self.highlight_started = None;

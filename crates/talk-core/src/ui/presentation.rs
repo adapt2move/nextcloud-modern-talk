@@ -1053,6 +1053,12 @@ pub trait NativeDesktopPort {
         Err(SubmitError::Unavailable(UnavailableReason::Unsupported))
     }
 
+    /// True once every accepted draft text has reached durable storage. A port
+    /// that cannot prove this reports false, so a restart waits or refuses.
+    fn composer_drafts_settled(&self) -> bool {
+        false
+    }
+
     fn try_submit(&mut self, intent: UiIntent) -> Result<(), SubmitError>;
     fn take_snapshot(&mut self) -> Option<PresentationSnapshot>;
 }

@@ -92,6 +92,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Esta instalación no admite actualizaciones automáticas.",
     ),
     (
+        "Entwürfe konnten nicht gespeichert werden. Der Neustart wurde nicht gestartet.",
+        "Drafts could not be saved. The restart was not started.",
+        "No se pudieron guardar los borradores. El reinicio no se ha iniciado.",
+    ),
+    (
         "Schließe ungesendete Nachrichten vor dem Neustart ab oder leere sie.",
         "Finish or clear unsent messages before restarting.",
         "Termina o borra los mensajes sin enviar antes de reiniciar.",
