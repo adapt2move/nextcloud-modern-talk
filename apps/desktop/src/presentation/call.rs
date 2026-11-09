@@ -317,6 +317,29 @@ impl Desktop {
                     failed,
                     self.l(label),
                 )
+                .when(
+                    matches!(
+                        call.sharing,
+                        ScreenShareState::Failed(ScreenShareFailure::PermissionDenied)
+                    ) && self
+                        .observation(
+                            talk_core::preferences::permissions::PermissionKind::ScreenSharing,
+                        )
+                        .can_open_settings,
+                    |d| {
+                        d.child(self.button(
+                            "share-permission",
+                            "Systemeinstellungen öffnen",
+                            ButtonStyle::Secondary,
+                            true,
+                            LocalAction::Permission(
+                                talk_core::preferences::permissions::PermissionKind::ScreenSharing,
+                                talk_core::preferences::permissions::PermissionAction::OpenSystemSettings,
+                            ),
+                            cx,
+                        ))
+                    },
+                )
                 .when(retry, |d| {
                     d.child(self.button(
                         "share-again",
@@ -384,6 +407,42 @@ impl Desktop {
                 )
                 .into_any_element(),
             );
+        }
+        if joined && !lobby {
+            use talk_core::preferences::permissions::{PermissionAction, PermissionKind};
+            for (state, kind, icon, text) in [
+                (
+                    call.microphone,
+                    PermissionKind::Microphone,
+                    "mic-off",
+                    "Mikrofon nicht erlaubt: Erlaube Talk den Zugriff in den Systemeinstellungen, damit dich andere hören.",
+                ),
+                (
+                    call.camera,
+                    PermissionKind::Camera,
+                    "video-off",
+                    "Kamera nicht erlaubt: Erlaube Talk den Zugriff in den Systemeinstellungen, damit andere dich sehen.",
+                ),
+            ] {
+                if state != MediaState::Denied {
+                    continue;
+                }
+                let can_open = self.observation(kind).can_open_settings;
+                notices.push(
+                    self.stage_notice(icon, true, self.l(text))
+                        .when(can_open, |d| {
+                            d.child(self.button(
+                                ("call-permission", kind as usize),
+                                "Systemeinstellungen öffnen",
+                                ButtonStyle::Secondary,
+                                true,
+                                LocalAction::Permission(kind, PermissionAction::OpenSystemSettings),
+                                cx,
+                            ))
+                        })
+                        .into_any_element(),
+                );
+            }
         }
         if self.local_feedback_visible() {
             notices.push(self.feedback_view(cx));
@@ -1145,11 +1204,15 @@ impl Desktop {
                 .when(id != "screen-share" && state == MediaState::Off, |d| {
                     d.bg(gpui::rgb(0x9e3e32)).text_color(gpui::white())
                 });
+            // No permission or no device: the whole control is greyed out and
+            // explains itself in its tooltip and in the notice above the stage.
+            let blocked = matches!(state, MediaState::Denied | MediaState::Unavailable);
             let mut group = div()
                 .relative()
                 .flex()
                 .items_center()
                 .rounded_full()
+                .when(blocked, |g| g.opacity(0.45))
                 .bg(if id != "screen-share" && state == MediaState::Off {
                     gpui::rgb(0x9e3e32).into()
                 } else {
@@ -1173,7 +1236,7 @@ impl Desktop {
                             },
                         ),
                         ButtonStyle::Stage,
-                        Availability::available().hinted(),
+                        Availability::when(!blocked, media_reason(state)).hinted(),
                         LocalAction::CallDevicePicker(call.scope, kind),
                         cx,
                     )

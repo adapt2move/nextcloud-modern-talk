@@ -313,6 +313,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Encender cámara (V)",
     ),
     (
+        "Kamera nicht erlaubt: Erlaube Talk den Zugriff in den Systemeinstellungen, damit andere dich sehen.",
+        "Camera not allowed: allow Talk to use it in System Settings so others can see you.",
+        "Cámara no permitida: permite a Talk usarla en los Ajustes del sistema para que los demás te vean.",
+    ),
+    (
         "Keine Berechtigung zum Anrufstart",
         "No permission to start a call",
         "Sin permiso para iniciar una llamada",
@@ -348,6 +353,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Mikrofon einschalten (M)",
         "Turn microphone on (M)",
         "Encender micrófono (M)",
+    ),
+    (
+        "Mikrofon nicht erlaubt: Erlaube Talk den Zugriff in den Systemeinstellungen, damit dich andere hören.",
+        "Microphone not allowed: allow Talk to use it in System Settings so others can hear you.",
+        "Micrófono no permitido: permite a Talk usarlo en los Ajustes del sistema para que los demás te oigan.",
     ),
     (
         "Mikrofon und Kamera bleiben bis zur Annahme aus.",
