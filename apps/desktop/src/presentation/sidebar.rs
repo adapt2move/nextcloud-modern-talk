@@ -302,12 +302,11 @@ impl Desktop {
             .flex_col()
             .px(px(12.))
             .pt(px(14.))
-            .pb(px(10.))
-            // No divider on the right: the floating content card carries its own
-            // border and shadow, so a sidebar hairline reads as a stray line.
-            // The sidebar material itself lives on the shell, so the gutter
-            // around the card continues it without a seam.
-            .child(super::controls::inner_highlight(t, 0.));
+            .pb(px(10.));
+        // No divider on the right and no top highlight: the floating content card
+        // carries its own border and shadow, so a hairline reads as a stray line.
+        // The sidebar material itself lives on the shell, so the gutter around the
+        // card continues it without a seam.
         if self
             .preferences
             .active
