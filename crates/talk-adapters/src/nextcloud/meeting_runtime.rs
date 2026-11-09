@@ -441,6 +441,30 @@ pub(super) async fn refresh(
         evidence,
     })
 }
+/// What a failed policy refresh does to a live call.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RefreshFailure {
+    /// A short network hiccup while the last qualified refresh still holds: keep
+    /// the call as it is and try again.
+    RetryQuietly,
+    /// The last refresh is too old to cover the gap: show the policy gate, keep trying.
+    RetryAndGate,
+    /// A rejection, or too many consecutive failures: stop and show the gate.
+    Stop,
+}
+/// The policy lease is valid 13 s from the request start (see `talk_core::policy`).
+/// Staying quiet for 10 s therefore never outlasts the evidence it relies on.
+const QUIET_REFRESH_WINDOW: Duration = Duration::from_secs(10);
+const MAX_REFRESH_FAILURES: u8 = 8;
+fn refresh_failure(transient: bool, failures: u8, since_good: Duration) -> RefreshFailure {
+    if !transient || failures >= MAX_REFRESH_FAILURES {
+        RefreshFailure::Stop
+    } else if since_good < QUIET_REFRESH_WINDOW {
+        RefreshFailure::RetryQuietly
+    } else {
+        RefreshFailure::RetryAndGate
+    }
+}
 async fn write_loop(
     mut writer: MeetingWriter,
     mut commands: mpsc::Receiver<Write>,
@@ -454,6 +478,7 @@ async fn write_loop(
     let mut refresh_at = Instant::now();
     let mut requested = 0;
     let mut refresh_failures = 0u8;
+    let mut last_good = Instant::now();
     let mut tick = tokio::time::interval(Duration::from_millis(50));
     while session.live() {
         tick.tick().await;
@@ -522,6 +547,7 @@ async fn write_loop(
             }
         }
         if Instant::now() >= refresh_at {
+            let refresh_started = Instant::now();
             match refresh(
                 &mut writer,
                 scope,
@@ -533,6 +559,7 @@ async fn write_loop(
             {
                 Ok(bundle) => {
                     refresh_failures = 0;
+                    last_good = refresh_started;
                     session.set_control_degraded(false);
                     if policy
                         .try_send(PolicyUpdate {
@@ -552,25 +579,28 @@ async fn write_loop(
                         error.evidence.name()
                     );
                     session.set_control_degraded(true);
-                    if let Ok(mut snapshot) = session.snapshot.lock() {
-                        snapshot.phase =
-                            Phase::Waiting(calls::Gate::PolicyUnavailable(error.evidence));
-                    }
-                    if matches!(
+                    let transient = matches!(
                         error.kind,
                         api::ErrorKind::Transport
                             | api::ErrorKind::Deadline
                             | api::ErrorKind::ServerUnavailable
                             | api::ErrorKind::RateLimited
-                    ) && refresh_failures < 3
+                    );
+                    let action = refresh_failure(transient, refresh_failures, last_good.elapsed());
+                    if action != RefreshFailure::RetryQuietly
+                        && let Ok(mut snapshot) = session.snapshot.lock()
                     {
-                        refresh_failures += 1;
-                        // No success or sliding grant is emitted on failure.
-                        // Existing publication still expires at its original lease.
-                        refresh_at = Instant::now() + Duration::from_secs(1);
-                        continue;
+                        snapshot.phase =
+                            Phase::Waiting(calls::Gate::PolicyUnavailable(error.evidence));
                     }
-                    break;
+                    if action == RefreshFailure::Stop {
+                        break;
+                    }
+                    refresh_failures += 1;
+                    // No success or sliding grant is emitted on failure.
+                    // Existing publication still expires at its original lease.
+                    refresh_at = Instant::now() + Duration::from_secs(1);
+                    continue;
                 }
             }
             refresh_at = Instant::now() + Duration::from_secs(5);
@@ -1673,6 +1703,32 @@ fn closed_phase(owner: Phase, observed: Phase, completed: bool) -> Phase {
 #[cfg(test)]
 mod policy_gate_tests {
     use super::*;
+    #[test]
+    fn a_short_network_blip_keeps_the_call_but_old_evidence_or_rejection_does_not() {
+        let fresh = Duration::from_secs(4);
+        let old = QUIET_REFRESH_WINDOW;
+        assert_eq!(
+            refresh_failure(true, 0, fresh),
+            RefreshFailure::RetryQuietly
+        );
+        assert_eq!(
+            refresh_failure(true, 3, fresh),
+            RefreshFailure::RetryQuietly
+        );
+        assert_eq!(refresh_failure(true, 3, old), RefreshFailure::RetryAndGate);
+        assert_eq!(refresh_failure(false, 0, fresh), RefreshFailure::Stop);
+        assert_eq!(
+            refresh_failure(true, MAX_REFRESH_FAILURES, fresh),
+            RefreshFailure::Stop
+        );
+        // The quiet window must stay inside the lease the evidence relies on.
+        assert!(
+            QUIET_REFRESH_WINDOW.as_millis()
+                < u128::from(
+                    talk_core::policy::MAX_SOURCE_AGE_MS - talk_core::policy::SOURCE_ALLOWANCE_MS
+                )
+        );
+    }
     #[test]
     fn shutdown_preserves_policy_evidence_and_new_restrictive_decisions() {
         let missing = Phase::Waiting(calls::Gate::PolicyUnavailable(
