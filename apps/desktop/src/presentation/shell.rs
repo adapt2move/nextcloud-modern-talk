@@ -115,7 +115,20 @@ impl Desktop {
                     },
                 ))
         });
-        let layout = div().size_full().relative().flex();
+        let t = self.theme;
+        // One material behind sidebar and content gutter: the card floats on it,
+        // so the window edge below and around the card matches the sidebar.
+        let layout = div()
+            .size_full()
+            .relative()
+            .flex()
+            .children(
+                (!t.reduced_transparency).then(|| super::controls::glass(t.sidebar, t.dark, 0.)),
+            )
+            .children(
+                self.materials
+                    .layer(super::controls::Texture::Grain, t.reduced_transparency),
+            );
         let layout = if let Some(sidebar) = sidebar {
             if narrow {
                 layout.child(

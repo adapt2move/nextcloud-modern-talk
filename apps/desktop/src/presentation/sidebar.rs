@@ -305,13 +305,8 @@ impl Desktop {
             .pb(px(10.))
             // No divider on the right: the floating content card carries its own
             // border and shadow, so a sidebar hairline reads as a stray line.
-            .children(
-                (!t.reduced_transparency).then(|| super::controls::glass(t.sidebar, t.dark, 0.)),
-            )
-            .children(
-                self.materials
-                    .layer(super::controls::Texture::Grain, t.reduced_transparency),
-            )
+            // The sidebar material itself lives on the shell, so the gutter
+            // around the card continues it without a seam.
             .child(super::controls::inner_highlight(t, 0.));
         if self
             .preferences
@@ -706,8 +701,6 @@ impl Desktop {
                 .gap_2()
                 .pt_2()
                 .mt_2()
-                .border_t_1()
-                .border_color(t.border)
                 .child(profile)
                 .child(self.icon_button(
                     "settings",
