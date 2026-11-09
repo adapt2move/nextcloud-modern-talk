@@ -3038,7 +3038,10 @@ impl Desktop {
         let target = self.drafts.target(context);
         // Explicit reply/edit context and silent sending are the only persistent
         // composer states; each is one slim strip with its own dismissal.
-        if let Some(motion_id) = self.compose_motion_id(context) {
+        // A quote or new-thread marker belongs to the message that was just sent:
+        // its strip goes away with the send and returns only if the send fails.
+        let sent = self.drafts.in_flight(context) && self.message_ui.editing.is_none();
+        if let Some(motion_id) = self.compose_motion_id(context).filter(|_| !sent) {
             let strip = if target.new_thread {
                 self.composer_strip(
                     Some("chat"),
@@ -3294,6 +3297,7 @@ impl Desktop {
     pub(super) fn quote_preview(&self, author: &str, body: Option<&str>) -> Div {
         div()
             .relative()
+            .w_full()
             .min_w_0()
             .pl(px(11.))
             .py(px(2.))

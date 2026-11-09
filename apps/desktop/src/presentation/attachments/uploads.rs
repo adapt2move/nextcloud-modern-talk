@@ -352,26 +352,41 @@ impl Desktop {
                         ))),
                 )
         });
-        if file.state == UploadState::Uploading {
-            let ratio = file
-                .bytes
-                .filter(|n| *n != 0)
-                .map_or(0., |n| (file.transferred as f32 / n as f32).clamp(0., 1.));
+        // One bar for the whole send: it fills while the bytes travel and stays
+        // full, in a calmer tone, while the server shares and confirms the file.
+        let uploading = file.state == UploadState::Uploading;
+        let ratio = file
+            .bytes
+            .filter(|n| *n != 0)
+            .map_or(0., |n| (file.transferred as f32 / n as f32).clamp(0., 1.));
+        if pending && file.state != UploadState::Selected {
             card = card.child(
                 div()
-                    .h(px(2.))
+                    .h(px(4.))
                     .w_full()
                     .rounded_full()
                     .bg(self.theme.border)
                     .child(
                         div()
                             .h_full()
-                            .w(gpui::relative(ratio))
-                            .bg(self.theme.accent)
+                            .w(gpui::relative(if uploading { ratio } else { 1. }))
+                            .bg(if uploading {
+                                self.theme.accent
+                            } else {
+                                self.theme.muted
+                            })
                             .rounded_full(),
                     ),
             );
         }
+        let amount = (uploading && file.bytes.is_some_and(|n| n != 0)).then(|| {
+            format!(
+                "{} / {} · {} %",
+                crate::presentation::localization::file_size(self.locale, Some(file.transferred)),
+                crate::presentation::localization::file_size(self.locale, file.bytes),
+                (ratio * 100.).floor() as u32,
+            )
+        });
         card.child(
             div()
                 .flex()
@@ -383,6 +398,15 @@ impl Desktop {
                         .flex_1()
                         .child(self.hint(self.l(label)).text_size(self.sp(12.))),
                 )
+                .when_some(amount, |d, amount| {
+                    d.child(
+                        div()
+                            .flex_none()
+                            .text_size(self.sp(12.))
+                            .text_color(self.theme.muted)
+                            .child(amount),
+                    )
+                })
                 .when(pending, |d| d.child(self.pending_dots(self.theme.muted)))
                 .when(retry, |d| {
                     d.child(self.icon_button(

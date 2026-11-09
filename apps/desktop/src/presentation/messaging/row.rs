@@ -257,6 +257,7 @@ impl Desktop {
                                 cx,
                             )
                             .justify_start()
+                            .w_full()
                             .min_w_0()
                             .p_0()
                             .child(quote)

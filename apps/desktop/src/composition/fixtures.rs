@@ -97,6 +97,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-busy",
     "chat-send-pending",
     "chat-message-states",
+    "chat-quote",
     "chat-message-hover",
     "chat-delivery-states",
     "chat-delivery-sent",
@@ -360,6 +361,23 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         return state;
     }
 
+    if scenario == Some("chat-quote") {
+        let mut state = snapshot(Some("chat"));
+        let last = state.messages.as_slice().last().map(|m| m.local_id);
+        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut m| {
+            if Some(m.local_id) == last {
+                m.metadata.parent = Some(talk_core::ui::messaging::Reply {
+                    id: 1,
+                    external: false,
+                    author: text("Jonas Weber"),
+                    text: text("Können wir die Suche noch mit einem Tastenkürzel öffnen, zum Beispiel mit Befehl-K oder Strg-K, damit man nicht zur Maus greifen muss?"),
+                    unavailable: false,
+                });
+            }
+            m
+        }));
+        return state;
+    }
     if scenario == Some("private-reply") {
         let mut state = snapshot(Some("chat-ux"));
         let direct = context(3);
@@ -2666,6 +2684,7 @@ impl DevelopmentPort {
                         | "chat-message-hover"
                         | "chat-delivery-states"
                         | "chat-delivery-sent"
+                        | "chat-quote"
                         | "chat-send-pending"
                         | "unread-divider"
                         | "unread-jump"

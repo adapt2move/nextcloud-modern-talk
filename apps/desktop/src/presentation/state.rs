@@ -477,6 +477,14 @@ impl Drafts {
     pub(super) fn probe_request_sequence(&self) -> u64 {
         self.next_request
     }
+    /// The message of the active compose target was admitted and its result is
+    /// still outstanding. Its quote already belongs to that message.
+    pub fn in_flight(&self, context: ConversationRef) -> bool {
+        let target = self.target(context);
+        self.entries.iter().any(|d| {
+            d.context == context && same_draft_target(&d.target, &target) && d.pending.is_some()
+        })
+    }
     pub fn pending(&self, context: ConversationRef) -> bool {
         self.entries
             .iter()
@@ -1619,6 +1627,37 @@ pub(super) mod tests {
         );
         drafts.save(first, "Memory only").unwrap();
         assert!(drafts.has_unpersistable());
+    }
+    #[test]
+    fn a_quote_is_in_flight_with_its_message_and_stays_after_a_failure() {
+        let mut drafts = Drafts::default();
+        let room = context(1);
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        assert!(drafts.set_target(
+            room,
+            talk_core::ui::messaging::ComposeTarget {
+                reply_to: Some(42),
+                ..Default::default()
+            }
+        ));
+        drafts.save(room, "Answer").unwrap();
+        assert!(!drafts.in_flight(room));
+        let request = drafts.send(room, Decision::Allowed, &mut port).unwrap();
+        assert!(drafts.in_flight(room), "the strip hides at once");
+        assert!(drafts.complete(SubmissionResult {
+            request,
+            context: room,
+            result: Completion::Failed(UnavailableReason::Unsupported),
+        }));
+        assert!(!drafts.in_flight(room));
+        assert_eq!(
+            drafts.target(room).reply_to,
+            Some(42),
+            "a failure keeps the quote"
+        );
     }
     #[test]
     fn restart_guard_covers_other_rooms_targets_and_unresolved_empty_drafts() {

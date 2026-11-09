@@ -493,16 +493,13 @@ impl NextcloudClient {
             .and_then(|id| id.parse::<u64>().ok())
             .filter(|id| *id > 0)
             .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
-        // The message and the room were just read fresh, so a cached preview is
-        // served only to someone who may see it now. Restricted rooms stay uncached.
-        let cache_key = if self.previews.is_some() {
-            let room = self.content_room(c, message.conversation, caps).await?;
-            (!room.classified && !room.sensitive && !room.unknown_restrictions).then(|| {
-                super::previews::key(file, large, object.size, object.mime_type.as_deref())
-            })
-        } else {
-            None
-        };
+        // The message and its room were just read fresh (`attachment` also refuses
+        // classified, sensitive and unknown-policy rooms), so a cached preview is
+        // served only to someone who may see it now.
+        let cache_key = self
+            .previews
+            .is_some()
+            .then(|| super::previews::key(file, large, object.size, object.mime_type.as_deref()));
         if let Some(key) = &cache_key
             && let Some(store) = self.previews.as_mut()
         {
