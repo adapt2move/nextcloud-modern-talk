@@ -147,6 +147,8 @@ of complete parity with the official clients.
   Linux/Windows use Download for outgoing files.
 - macOS PDF preview renders only the first page, up to 4 MiB. Linux/Windows use
   server thumbnails. Raster previews are bounded; GIF/WebP show still frames.
+  Opened previews are kept in a per-account file (up to 96 MiB, thirty days) so the
+  detail view reuses them, also after a restart; restricted rooms stay uncached.
   Unsupported or larger content offers browser handoff or download. Link cards
   depend on the server's reference providers and fetch no arbitrary embedded web
   content. Locations can open OpenStreetMap deliberately; map tiles are not loaded.

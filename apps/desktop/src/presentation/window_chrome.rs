@@ -129,8 +129,11 @@ impl Desktop {
             .children(connection)
             .children(drag_fill)
             .when_some(
-                self.download_status(cx)
-                    .filter(|_| !self.projection_blocked),
+                // The detail view carries the same status itself; showing both
+                // doubled it.
+                self.download_status(cx).filter(|_| {
+                    !self.projection_blocked && self.overlay != Some(Overlay::ContentPreview)
+                }),
                 |d, status| d.child(status),
             )
             .when(navigation && self.narrow_navigation(window), |d| {

@@ -2338,9 +2338,7 @@ impl Desktop {
             DownloadState::Committing => ("download", "Datei wird gespeichert …"),
             DownloadState::Saved => ("check", "Datei gespeichert."),
             DownloadState::Cancelled => ("x", "Download abgebrochen."),
-            DownloadState::Failed(_) => {
-                ("alert-circle", "Download fehlgeschlagen. Erneut versuchen.")
-            }
+            DownloadState::Failed(_) => ("alert-circle", "Download fehlgeschlagen."),
         };
         let active = matches!(
             transfer.state,
@@ -2354,10 +2352,10 @@ impl Desktop {
             div()
                 .relative()
                 .flex_none()
-                .w(px(280.))
-                .max_w(gpui::relative(0.45))
-                .min_w(px(100.))
-                .h(px(32.))
+                .w(px(340.))
+                .max_w(gpui::relative(0.5))
+                .min_w(px(120.))
+                .h(px(34.))
                 .rounded(px(6.))
                 .bg(self.theme.subtle)
                 .overflow_hidden()
@@ -2377,12 +2375,14 @@ impl Desktop {
                             div()
                                 .truncate()
                                 .text_size(self.sp(12.))
+                                .line_height(self.sp(15.))
                                 .child(transfer.name.as_str().to_owned()),
                         )
                         .child(
                             div()
                                 .truncate()
                                 .text_size(self.sp(12.))
+                                .line_height(self.sp(15.))
                                 .text_color(self.theme.muted)
                                 .child(if active {
                                     match transfer.total {

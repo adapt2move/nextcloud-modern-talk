@@ -493,6 +493,58 @@ impl NextcloudClient {
             .and_then(|id| id.parse::<u64>().ok())
             .filter(|id| *id > 0)
             .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
+        // The message and the room were just read fresh, so a cached preview is
+        // served only to someone who may see it now. Restricted rooms stay uncached.
+        let cache_key = if self.previews.is_some() {
+            let room = self.content_room(c, message.conversation, caps).await?;
+            (!room.classified && !room.sensitive && !room.unknown_restrictions).then(|| {
+                super::previews::key(file, large, object.size, object.mime_type.as_deref())
+            })
+        } else {
+            None
+        };
+        if let Some(key) = &cache_key
+            && let Some(store) = self.previews.as_mut()
+        {
+            match store.get(key, super::messaging::now_unix()) {
+                Ok(Some((bytes, pages))) => {
+                    self.transport.validate(c)?;
+                    let image = match pages {
+                        Some(pages) => ImageBytes::first_pdf_page(bytes, pages),
+                        None => ImageBytes::new(bytes),
+                    };
+                    if let Ok(image) = image {
+                        return Ok(ContentResult::Image(image));
+                    }
+                }
+                Ok(None) => {}
+                // A broken store only disables caching; the network path stays.
+                Err(()) => self.previews = None,
+            }
+        }
+        let result = self.fetch_attachment_image(c, &object, file, large).await?;
+        if let (Some(key), ContentResult::Image(image), Some(store)) =
+            (&cache_key, &result, self.previews.as_mut())
+            && store
+                .put(
+                    key,
+                    &(image.as_slice().to_vec(), image.document_pages()),
+                    super::messaging::now_unix(),
+                )
+                .is_err()
+        {
+            self.previews = None;
+        }
+        Ok(result)
+    }
+    async fn fetch_attachment_image(
+        &mut self,
+        c: &OperationContext,
+        object: &api::chat::RichObject,
+        file: u64,
+        large: bool,
+    ) -> Result<ContentResult, PortError> {
+        let object = object.clone();
         if large
             && matches!(
                 object.mime_type.as_deref(),

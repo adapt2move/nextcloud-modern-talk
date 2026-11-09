@@ -2399,6 +2399,10 @@ impl Worker {
                 self.ledger.clone(),
                 self.account,
             )));
+            client.set_preview_store(Box::new(super::previews::Store::new(
+                self.ledger.clone(),
+                self.account,
+            )));
         }
         client.set_media_service(self.media.clone());
         client.set_account_rejection_handler(

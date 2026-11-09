@@ -19,6 +19,7 @@ mod notifications;
 mod pdf_preview;
 mod people;
 mod preferences;
+pub(crate) mod previews;
 mod projection;
 mod references;
 mod reminders;
@@ -117,6 +118,7 @@ struct ActiveConversation {
 /// mutation remains uncertain in its finite journal. This journal is memory-only.
 pub struct NextcloudClient {
     avatars: avatars::Avatars,
+    previews: Option<Box<dyn previews::PreviewStore>>,
     account_rejection: Option<AccountRejection>,
     media_service: Option<std::sync::Arc<crate::media::MediaService>>,
     meeting_owner: Option<meeting::CallOwner>,
@@ -228,6 +230,7 @@ impl NextcloudClient {
     fn with_transport(transport: Transport) -> Result<Self, PortError> {
         Ok(Self {
             avatars: avatars::Avatars::default(),
+            previews: None,
             account_rejection: None,
             transport,
             media_service: None,
@@ -272,6 +275,9 @@ impl NextcloudClient {
     }
     pub(crate) fn set_avatar_store(&mut self, store: Box<dyn avatars::AvatarStore>) {
         self.avatars.store = Some(store);
+    }
+    pub(crate) fn set_preview_store(&mut self, store: Box<dyn previews::PreviewStore>) {
+        self.previews = Some(store);
     }
     pub(crate) fn set_account_rejection_handler(&mut self, handler: AccountRejection) {
         self.account_rejection = Some(handler);

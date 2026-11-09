@@ -10,6 +10,7 @@ pub mod lab;
 mod ledger;
 mod login;
 mod network;
+mod previews;
 mod private_fs;
 mod provider;
 mod runtime;

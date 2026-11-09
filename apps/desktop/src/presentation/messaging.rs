@@ -223,6 +223,12 @@ struct MessageGeometry {
     painted: Vec<(usize, u128, gpui::Bounds<gpui::Pixels>, bool)>,
     visible_read: Option<(ConversationRef, u128)>,
     unread_visible: Option<bool>,
+    /// The first-unread target that has been on screen (or was jumped past with
+    /// End). Once seen, "jump to unread" has nothing left to offer for it.
+    unread_seen: Option<(ConversationRef, u128)>,
+    /// Whether the last layout showed the newest row. Used while the window is
+    /// not laid out (hidden, notification received) so new messages still follow.
+    last_at_bottom: bool,
     anchor: Option<(u128, gpui::Pixels)>,
     header_inset: gpui::Pixels,
     boundary_inset: gpui::Pixels,
@@ -651,12 +657,14 @@ impl Desktop {
             return true;
         }
         let viewport = self.message_ui.list.viewport_bounds();
-        viewport.size.height > px(0.)
-            && self
-                .message_ui
-                .list
-                .bounds_for_item(count - 1)
-                .is_some_and(|bounds| bounds.bottom() <= viewport.bottom() + px(1.))
+        match self.message_ui.list.bounds_for_item(count - 1) {
+            Some(bounds) if viewport.size.height > px(0.) => {
+                bounds.bottom() <= viewport.bottom() + px(1.)
+            }
+            // Not laid out right now (window hidden, minimized or behind another
+            // one): keep following if the reader was at the end at the last layout.
+            _ => self.message_ui.geometry.borrow().last_at_bottom,
+        }
     }
 
     pub(super) fn prepare_message_motion(&self, window: &Window) {
@@ -885,6 +893,8 @@ impl Desktop {
                     .push((context, anchor, top.offset_in_item));
             }
             self.message_ui.context = self.snapshot.selected;
+            // A freshly opened conversation starts at its newest message.
+            self.message_ui.geometry.borrow_mut().last_at_bottom = true;
             self.message_ui.unread_marker = self.snapshot.selected.and_then(|context| {
                 self.snapshot
                     .conversations
@@ -2449,6 +2459,7 @@ impl Desktop {
         let keyboard_history = self.message_ui.history.clone();
         let layout_history = self.message_ui.history.clone();
         let keyboard_arrival = self.message_ui.arrival.clone();
+        let keyboard_geometry = self.message_ui.geometry.clone();
         let layout_list = self.message_ui.list.clone();
         let keyboard_list = self.message_ui.list.clone();
         let keyboard_focus = self.navigation.history_focus();
@@ -2467,6 +2478,7 @@ impl Desktop {
             .filter(|(room, _)| Some(*room) == context);
         let show_unread_jump = unread_target.is_some()
             && self.message_ui.geometry.borrow().unread_visible == Some(false)
+            && self.message_ui.geometry.borrow().unread_seen != unread_target
             || unread_target.is_none() && unread_marker.is_some();
         self.message_ui.geometry.borrow_mut().painted.clear();
         let inert = self.background_inert;
@@ -2495,10 +2507,14 @@ impl Desktop {
                         item_ix: 0,
                         offset_in_item: px(0.),
                     }),
-                    "end" => keyboard_list.scroll_to(ListOffset {
-                        item_ix: keyboard_list.item_count(),
-                        offset_in_item: px(0.),
-                    }),
+                    "end" => {
+                        // Jumping to the newest message passes every unread one.
+                        keyboard_geometry.borrow_mut().unread_seen = unread_target;
+                        keyboard_list.scroll_to(ListOffset {
+                            item_ix: keyboard_list.item_count(),
+                            offset_in_item: px(0.),
+                        })
+                    }
                     _ => return,
                 }
                 if matches!(event.keystroke.key.as_str(), "pageup" | "home") {
@@ -2525,6 +2541,9 @@ impl Desktop {
                         *id == target && bounds.bottom() > visible.top() && bounds.top() < visible.bottom()
                     })
                 });
+                if unread_visible {
+                    geometry.unread_seen = unread_target;
+                }
                 if unread_target.is_some() && geometry.unread_visible != Some(unread_visible) {
                     geometry.unread_visible = Some(unread_visible);
                     window.refresh();
@@ -2534,6 +2553,9 @@ impl Desktop {
                         group_ends.iter().find(|(start,_,_,_)|start==index).map_or_else(||index.checked_add(1),|(_,end,_,_)|Some(*end)) == Some(layout_list.item_count())
                             && bounds.bottom() <= viewport.bottom() + px(1.)
                     });
+                if viewport.size.height > px(0.) {
+                    geometry.last_at_bottom = at_bottom;
+                }
                 let painted_anchor = geometry
                     .painted
                     .iter()

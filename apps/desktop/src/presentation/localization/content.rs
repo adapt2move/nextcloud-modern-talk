@@ -66,6 +66,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Descarga cancelada.",
     ),
     (
+        "Download fehlgeschlagen.",
+        "Download failed.",
+        "La descarga ha fallado.",
+    ),
+    (
         "Download fehlgeschlagen. Erneut versuchen.",
         "Download failed. Try again.",
         "La descarga ha fallado. Inténtalo de nuevo.",

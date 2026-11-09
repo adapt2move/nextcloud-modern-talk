@@ -1733,6 +1733,97 @@ fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
 }
 
 #[test]
+fn preview_disk_cache_is_account_scoped_durable_lru_bounded_and_removed_on_logout() {
+    use super::previews::Store;
+    use crate::nextcloud::previews::{PreviewStore, TTL};
+    use std::sync::Mutex;
+    let fixture = Fixture::new();
+    let mut ledger = fixture.ledger();
+    let mut accounts = Vec::new();
+    for user in ["synthetic-a", "synthetic-b"] {
+        let a = ledger.reserve(format!("https://{user}.invalid/")).unwrap();
+        let op = ledger
+            .stage(
+                a.id,
+                LoginAttemptId::from_local(random().unwrap()),
+                StorageBackend::PrivateFile,
+                user,
+            )
+            .unwrap();
+        ledger.settle(op, true).unwrap();
+        let revision = ledger.account(a.id).unwrap().revision;
+        ledger.activate(op, revision).unwrap();
+        accounts.push(a.id);
+    }
+    let session = ledger
+        .reserve("https://session.invalid/".into())
+        .unwrap()
+        .id;
+    let ledger = Arc::new(Mutex::new(ledger));
+    let mut a = Store::new(ledger.clone(), accounts[0]);
+    let mut b = Store::new(ledger.clone(), accounts[1]);
+    let mut temporary = Store::new(ledger.clone(), session);
+    let key = |n: u64| format!("{n:064x}");
+    let png = (b"first-page".to_vec(), Some(3));
+    assert!(
+        temporary.put(&key(1), &png, 100).is_err(),
+        "session-only accounts never persist"
+    );
+    a.put(&key(1), &png, 100).unwrap();
+    assert!(b.get(&key(1), 101).unwrap().is_none(), "scoped per account");
+    assert_eq!(a.get(&key(1), 101).unwrap().unwrap(), png);
+    // The cache survives a restart.
+    drop((a, b, temporary, ledger));
+    let ledger = Arc::new(Mutex::new(fixture.ledger()));
+    let mut a = Store::new(ledger.clone(), accounts[0]);
+    assert_eq!(a.get(&key(1), 102).unwrap().unwrap(), png);
+    assert!(a.get(&key(1), 100 + TTL).unwrap().is_none(), "expires");
+    assert!(
+        a.get(&key(1), 99).unwrap().is_none(),
+        "clock rollback expires"
+    );
+    // Bounded by bytes: the least recently opened entry leaves first.
+    let big = (vec![7u8; 4 * 1024 * 1024], None);
+    for n in 10..30 {
+        a.put(&key(n), &big, 200).unwrap();
+    }
+    a.put(&key(50), &big, 201).unwrap();
+    let kept = (10..30)
+        .chain([50])
+        .filter(|n| a.get(&key(*n), 202).unwrap().is_some())
+        .count();
+    assert!(kept * 4 <= 96, "at most 96 MiB of previews, kept {kept}");
+    assert!(a.get(&key(50), 203).unwrap().is_some(), "the newest stays");
+    assert!(
+        fixture
+            .0
+            .join(format!("previews-{:032x}.sqlite", accounts[0].as_local()))
+            .metadata()
+            .unwrap()
+            .len()
+            <= 112 * 1024 * 1024
+    );
+    a.put(&key(60), &(vec![0; 4 * 1024 * 1024 + 1], None), 204)
+        .unwrap();
+    assert!(
+        a.get(&key(60), 205).unwrap().is_none(),
+        "oversized stays out of disk"
+    );
+    ledger
+        .lock()
+        .unwrap()
+        .suppress(accounts[0], false, None, true)
+        .unwrap();
+    assert!(a.get(&key(1), 206).is_err());
+    assert!(
+        !fixture
+            .0
+            .join(format!("previews-{:032x}.sqlite", accounts[0].as_local()))
+            .exists()
+    );
+}
+
+#[test]
 fn schema_six_upgrade_recovers_historical_connection_without_changing_eligibility() {
     let fixture = Fixture::new();
     let (account, operation, revision) = {
