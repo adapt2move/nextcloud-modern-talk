@@ -461,6 +461,56 @@ class MacRuntimeTests(unittest.TestCase):
             self.assertLess(len(str(raised.exception)), 2300)
 
 
+class DownloadResumeTests(unittest.TestCase):
+    """The mirror sometimes ends a response early; the checksum still decides."""
+    class Response(io.BytesIO):
+        def __init__(self, data, status=200, headers=None):
+            super().__init__(data)
+            self.status, self.headers = status, headers or {}
+
+    def fetch(self, responses, payload, **kwargs):
+        seen = []
+        def urlopen(request, timeout):
+            seen.append(request.get_header("Range"))
+            return responses.pop(0)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runtime.urllib.request, "urlopen", side_effect=urlopen), \
+                patch.object(runtime.time, "sleep"):
+            destination = Path(directory) / "archive"
+            runtime.download("https://mirror.test/archive", hashlib.sha256(payload).hexdigest(),
+                             destination, 1024, **kwargs)
+            return destination.read_bytes(), seen
+
+    def test_a_truncated_response_resumes_at_the_received_offset(self):
+        payload = bytes(range(100))
+        cut = self.Response(payload[:37], headers={"Content-Length": "100"})
+        rest = self.Response(payload[37:], status=206, headers={"Content-Range": "bytes 37-99/100"})
+        data, seen = self.fetch([cut, rest], payload)
+        self.assertEqual(data, payload)
+        self.assertEqual(seen, [None, "bytes=37-"])
+
+    def test_corrupt_content_is_never_accepted_by_resuming(self):
+        payload = bytes(range(100))
+        cut = self.Response(b"!" + payload[1:37], headers={"Content-Length": "100"})
+        rest = self.Response(payload[37:], status=206, headers={"Content-Range": "bytes 37-99/100"})
+        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+            self.fetch([cut, rest], payload)
+
+    def test_a_server_that_ignores_the_resume_request_fails_instead_of_corrupting(self):
+        payload = bytes(range(100))
+        cut = self.Response(payload[:37], headers={"Content-Length": "100"})
+        whole = self.Response(payload, headers={"Content-Length": "100"})
+        with self.assertRaisesRegex(ValueError, "ignored a resume request"):
+            self.fetch([cut, whole], payload)
+
+    def test_a_download_that_never_completes_stops(self):
+        payload = bytes(range(100))
+        responses = [self.Response(payload[:10], headers={"Content-Length": "100"})] + [
+            self.Response(b"", status=206, headers={"Content-Range": "bytes 10-99/100"}) for _ in range(7)]
+        with self.assertRaisesRegex(ValueError, "ended early"):
+            self.fetch(responses, payload)
+
+
 class MacPackageTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="nmt-mac-package-fixture-")

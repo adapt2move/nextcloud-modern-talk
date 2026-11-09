@@ -128,7 +128,8 @@ class SdkRanges(unittest.TestCase):
         body = self.payload[start:end + 1]
         if self.corrupt and start == 0:
             body = b"!" + body[1:]
-        if self.incomplete and start == 0:
+        if self.incomplete and start < len(self.payload) // 4:
+            # Part 0 never completes, not even when its remainder is requested.
             body = body[:-1]
         elif self.short_reads and start == 0:
             self.short_reads -= 1
@@ -162,12 +163,16 @@ class SdkRanges(unittest.TestCase):
                 setattr(self, kind, False)
                 self.assertEqual(list(self.root.iterdir()), [])
 
-    def test_short_range_retries_only_its_part_without_appending_partial_bytes(self):
+    def test_short_range_resumes_only_its_part_at_the_received_offset(self):
         self.short_reads = 1
         self.download()
         self.assertEqual(self.destination.read_bytes(), self.payload)
         self.assertEqual(len(self.seen), 5)
-        self.assertEqual(sum(start == 0 for start, _ in self.seen), 2)
+        self.assertEqual(sum(start == 0 for start, _ in self.seen), 1)
+        # The cut response is never requested again from its beginning: only the
+        # missing last byte of that part is asked for.
+        width = (len(self.payload) + 3) // 4
+        self.assertIn((width - 1, width - 1), self.seen)
         self.sleep.assert_called_once_with(1)
         self.assertEqual(list(self.root.iterdir()), [self.destination])
 
@@ -180,12 +185,14 @@ class SdkRanges(unittest.TestCase):
         self.assertEqual(self.destination.read_bytes(), self.payload)
         self.sleep.assert_not_called()
 
-    def test_repeated_truncation_stops_after_three_attempts_and_removes_parts(self):
+    def test_a_part_that_never_completes_stops_after_eight_attempts_and_removes_parts(self):
         self.incomplete = True
         with self.assertRaisesRegex(ValueError, "incomplete byte range"):
             self.download()
-        self.assertEqual(sum(start == 0 for start, _ in self.seen), 3)
-        self.assertEqual(self.sleep.call_args_list, [mock.call(1), mock.call(2)])
+        part_zero = [seen for seen in self.seen if seen[0] < len(self.payload) // 4]
+        self.assertEqual(len(part_zero), 8)
+        self.assertEqual(self.sleep.call_args_list,
+                         [mock.call(delay) for delay in (1, 2, 4, 8, 16, 16, 16)])
         self.assertEqual(list(self.root.iterdir()), [])
 
     def test_transient_metadata_503_retries_before_downloading_verified_parts(self):

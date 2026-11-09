@@ -7,6 +7,7 @@ scanner and explicitly used plugins seed the transitive Mach-O dependency walk.
 Native tools inspect/sign code; they never execute the application or plugins.
 """
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -109,15 +110,42 @@ def unsigned_executable_sha256(path):
         return digest.hexdigest()
 
 
-def download(url, expected, destination, limit):
-    total, digest = 0, hashlib.sha256()
-    with urllib.request.urlopen(url, timeout=60) as response, destination.open("xb") as output:
-        while chunk := response.read(1024 * 1024):
-            total += len(chunk)
-            if total > limit:
-                raise ValueError("Native source/runtime download exceeds its limit")
-            digest.update(chunk)
-            output.write(chunk)
+def download(url, expected, destination, limit, attempts=8):
+    """Fetch one pinned archive, resuming after a truncated or dropped response.
+
+    The upstream mirror sometimes ends a response early. Resuming at the received
+    offset keeps the stream a single verified byte sequence; the checksum of the
+    whole file decides, so a resumed download is exactly as trusted as a whole one.
+    """
+    total, digest, size = 0, hashlib.sha256(), None
+    with destination.open("xb") as output:
+        for attempt in range(attempts):
+            headers = {"Range": f"bytes={total}-"} if total else {}
+            try:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as response:
+                    if total and response.status != 206:
+                        raise ValueError("Native source/runtime server ignored a resume request")
+                    if size is None:
+                        content_range = response.headers.get("Content-Range", "")
+                        length = response.headers.get("Content-Length", "")
+                        size = (int(content_range.rsplit("/", 1)[1]) if "/" in content_range and content_range.rsplit("/", 1)[1].isdigit()
+                                else int(length) if length.isdigit() else -1)
+                    while chunk := response.read(1024 * 1024):
+                        total += len(chunk)
+                        if total > limit:
+                            raise ValueError("Native source/runtime download exceeds its limit")
+                        digest.update(chunk)
+                        output.write(chunk)
+            except (OSError, http.client.HTTPException):
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(min(2 ** attempt, 8))
+                continue
+            if size is None or size < 0 or total >= size:
+                break
+            if attempt == attempts - 1:
+                raise ValueError("Native source/runtime download ended early: " + destination.name)
+            time.sleep(1)
     if digest.hexdigest() != expected:
         raise ValueError("Native source/runtime checksum mismatch: " + destination.name)
 

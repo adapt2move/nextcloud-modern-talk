@@ -35,12 +35,12 @@ class IncompleteDownload(ValueError):
     """A correctly identified response ended before all expected bytes arrived."""
 
 
-def retry_transfer(operation, deadline):
-    """Three attempts within the original deadline; never retry invalid content."""
-    for attempt in range(3):
+def retry_transfer(operation, deadline, attempts=3):
+    """A few attempts within the original deadline; never retry invalid content."""
+    for attempt in range(attempts):
         if time.monotonic() >= deadline:
             raise ValueError("SDK download exceeded its time limit")
-        delay = 2 ** attempt
+        delay = 2 ** min(attempt, 4)
         try:
             return operation()
         except urllib.error.HTTPError as error:
@@ -54,11 +54,11 @@ def retry_transfer(operation, deadline):
                 if not retry_after.strip().isascii() or not retry_after.strip().isdigit():
                     raise
                 delay = max(delay, int(retry_after))
-            if attempt == 2 or time.monotonic() + delay >= deadline:
+            if attempt == attempts - 1 or time.monotonic() + delay >= deadline:
                 raise
         except (IncompleteDownload, http.client.IncompleteRead, urllib.error.URLError,
                 TimeoutError, ConnectionError):
-            if attempt == 2 or time.monotonic() + delay >= deadline:
+            if attempt == attempts - 1 or time.monotonic() + delay >= deadline:
                 raise
         time.sleep(delay)
 
@@ -112,23 +112,25 @@ def download(url, destination, expected):
                 parts = [Path(temporary) / str(index) for index in range((size + width - 1) // width)]
                 def fetch(index):
                     start, end = index * width, min((index + 1) * width, size) - 1
-                    request = urllib.request.Request(url, headers={"Range": f"bytes={start}-{end}"})
+                    wanted, part = end - start + 1, parts[index]
                     def transfer():
-                        part_created = False
+                        # The mirror cuts some ranges at a fixed offset, so repeating
+                        # the same range repeats the cut. Keep what arrived and ask
+                        # only for the rest; the final checksum still covers it all.
+                        have = part.stat().st_size if part.exists() else 0
+                        first = start + have
+                        request = urllib.request.Request(url, headers={"Range": f"bytes={first}-{end}"})
                         try:
                             with urllib.request.urlopen(request, timeout=60) as response:
-                                if response.status != 206 or response.headers.get("Content-Range", "").strip() != f"bytes {start}-{end}/{size}":
+                                if response.status != 206 or response.headers.get("Content-Range", "").strip() != f"bytes {first}-{end}/{size}":
                                     raise ValueError("SDK server returned an unexpected byte range")
-                                with parts[index].open("xb") as output:
-                                    part_created = True
-                                    received = copy(response, output, end - start + 1)
-                                if received != end - start + 1:
-                                    raise IncompleteDownload("SDK server returned an incomplete byte range")
-                        except BaseException:
-                            if part_created:
-                                parts[index].unlink(missing_ok=True)
-                            raise
-                    retry_transfer(transfer, deadline)
+                                with part.open("ab") as output:
+                                    copy(response, output, wanted - have)
+                        except (http.client.IncompleteRead, ConnectionError, TimeoutError):
+                            pass  # keep the bytes that arrived; the size check below decides
+                        if part.stat().st_size != wanted:
+                            raise IncompleteDownload("SDK server returned an incomplete byte range")
+                    retry_transfer(transfer, deadline, attempts=8)
                 with ThreadPoolExecutor(max_workers=4) as pool:
                     list(pool.map(fetch, range(len(parts))))
                 with destination.open("xb") as output:
