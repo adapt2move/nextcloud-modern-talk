@@ -227,6 +227,8 @@ pub const SCENARIOS: &[&str] = &[
     "call-active",
     "call-requested",
     "sharing",
+    "sharing-closed",
+    "call-guest",
     "call-denied",
     "room",
     "voice-room",
@@ -1715,7 +1717,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 3
             } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
                 2
-            } else if matches!(scenario, "room" | "prejoin") {
+            } else if matches!(scenario, "room" | "prejoin" | "call-guest") {
                 4
             } else {
                 1
@@ -1786,6 +1788,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-end-confirm"
             | "call-reactions"
             | "sharing"
+            | "sharing-closed"
+            | "call-guest"
             | "call-denied"
             | "call-active"
             | "call-requested"
@@ -1798,6 +1802,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             3
         } else if matches!(scenario, "voice" | "call-dock") {
             2
+        } else if scenario == "call-guest" {
+            4
         } else {
             1
         };
@@ -1807,6 +1813,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 "Mara Fischer"
             } else if id == 2 {
                 "Teamküche"
+            } else if id == 4 {
+                "Designbesprechung"
             } else {
                 "Produktteam"
             }),
@@ -1861,6 +1869,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             },
             sharing: if scenario == "sharing" {
                 ScreenShareState::Sharing
+            } else if scenario == "sharing-closed" {
+                ScreenShareState::Failed(
+                    talk_core::ui::presentation::ScreenShareFailure::SourceClosed,
+                )
             } else {
                 ScreenShareState::Idle
             },

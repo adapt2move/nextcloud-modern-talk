@@ -2,6 +2,7 @@
 mod breakouts;
 mod members;
 
+use super::Feedback;
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
     controls::{Availability, BannerRole},
@@ -325,6 +326,55 @@ impl Desktop {
                 cx,
             );
             self.room_ui.loaded = true;
+        }
+    }
+    /// Copy the guest link of the call's room without opening the settings. The
+    /// link and the room policy arrive separately, so the copy settles later.
+    pub(super) fn request_call_guest_link(
+        &mut self,
+        context: ConversationRef,
+        cx: &mut Context<Self>,
+    ) {
+        if self.snapshot.selected != Some(context) {
+            return;
+        }
+        self.open_room_dialog(Overlay::Settings, cx);
+        self.guest_link_copy = Some(context);
+        self.submit_room(ConversationAction::GuestLink);
+    }
+    pub(super) fn settle_call_guest_link(&mut self, cx: &mut Context<Self>) {
+        let Some(context) = self.guest_link_copy else {
+            return;
+        };
+        let Some(panel) =
+            self.snapshot.conversation_panel.as_ref().filter(|panel| {
+                panel.context == context && self.snapshot.selected == Some(context)
+            })
+        else {
+            self.guest_link_copy = None;
+            return;
+        };
+        if let (Some(details), Some(link)) = (&panel.details, &panel.guest_link) {
+            let blocked = details.classified || details.sensitive;
+            if !blocked {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(link.as_str().to_owned()));
+            }
+            self.guest_link_copy = None;
+            self.feedback = Some(if blocked {
+                Feedback::error("Weitergeben ist durch die Gesprächsrichtlinie gesperrt.")
+            } else {
+                Feedback::info("Gästelink kopiert.")
+            });
+            cx.notify();
+        } else if matches!(panel.state, RemoteState::Failed(..)) {
+            self.guest_link_copy = None;
+            self.feedback = Some(Feedback::error(
+                "Der Gästelink konnte nicht geladen werden.",
+            ));
+            cx.notify();
+        } else if panel.details.is_some() && panel.guest_link.is_none() && !panel.state.pending() {
+            // The first request lost the race with the details read: ask again.
+            self.submit_room(ConversationAction::GuestLink);
         }
     }
     fn submit_room(&mut self, action: ConversationAction) {

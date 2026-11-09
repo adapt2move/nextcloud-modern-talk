@@ -110,19 +110,14 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Selecciona primero tu consentimiento.",
     ),
     (
-        "Bildschirmfreigabe ist auf diesem System nicht verfügbar.",
-        "Screen sharing is unavailable on this system.",
-        "La pantalla compartida no está disponible en este sistema.",
+        "Bildschirmfreigabe wird auf diesem System nicht unterstützt.",
+        "Screen sharing is not supported on this system.",
+        "Compartir pantalla no es compatible con este sistema.",
     ),
     (
         "Bildschirmfreigabe wird gestartet …",
         "Starting screen sharing…",
         "Iniciando la pantalla compartida…",
-    ),
-    (
-        "Bildschirmzugriff verweigert. Prüfe die Systemeinstellungen.",
-        "Screen access was denied. Check system settings.",
-        "Se ha denegado el acceso a la pantalla. Revisa los ajustes del sistema.",
     ),
     (
         "Bis zur Annahme bleiben Mikrofon und Kamera aus. Die Geräte werden erst nach Freigabe aktiviert.",
@@ -160,6 +155,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El estado de la llamada no está claro. Sal de la llamada y comprueba si terminó.",
     ),
     (
+        "Der Gästelink konnte nicht geladen werden.",
+        "The guest link could not be loaded.",
+        "No se pudo cargar el enlace para invitados.",
+    ),
+    (
         "Der Server erlaubt keinen neuen Anruf. Einem laufenden Anruf kannst du beitreten.",
         "The server does not allow a new call. You can join an active call.",
         "El servidor no permite iniciar llamadas. Puedes unirte a una llamada activa.",
@@ -190,9 +190,14 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Compartir pantalla requiere autorización.",
     ),
     (
-        "Die Bildschirmfreigabe hat zu lange gedauert. Versuche es erneut.",
-        "Screen sharing timed out. Try again.",
-        "Se ha agotado el tiempo para compartir pantalla. Inténtalo de nuevo.",
+        "Die Freigabe ist nicht erlaubt. Erlaube Talk den Bildschirmzugriff in den Systemeinstellungen.",
+        "Sharing is not allowed. Allow Talk to access the screen in System Settings.",
+        "No se permite compartir. Permite a Talk acceder a la pantalla en los Ajustes del sistema.",
+    ),
+    (
+        "Die Freigabe konnte nicht gestartet werden, das System hat nicht geantwortet. Versuche es erneut.",
+        "Sharing could not start because the system did not respond. Try again.",
+        "No se pudo iniciar la pantalla compartida porque el sistema no respondió. Inténtalo de nuevo.",
     ),
     (
         "Die Gesprächs- oder Serverrichtlinie ist nicht kompatibel. Prüfe die Servereinstellungen und versuche es erneut.",
@@ -223,11 +228,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Die Signalisierungseinstellungen konnten nicht bestätigt werden. Versuche es erneut.",
         "Signaling settings could not be confirmed. Try again.",
         "No se han podido confirmar los ajustes de señalización. Inténtalo de nuevo.",
-    ),
-    (
-        "Die geteilte Quelle wurde geschlossen. Wähle erneut einen Bildschirm oder ein Fenster.",
-        "The shared source closed. Choose a screen or window again.",
-        "La fuente compartida se ha cerrado. Elige otra vez una pantalla o ventana.",
     ),
     (
         "Dieser Anruf erfordert Ende-zu-Ende-Verschlüsselung, die dieser Client noch nicht unterstützt.",
@@ -261,6 +261,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Erneut klingeln", "Ring again", "Volver a llamar"),
     (
+        "Freigabe beendet: Fenster oder Bildschirm ist nicht mehr verfügbar.",
+        "Sharing ended: the window or screen is no longer available.",
+        "Se ha detenido la pantalla compartida: la ventana o pantalla ya no está disponible.",
+    ),
+    (
         "Für alle beenden",
         "End for everyone",
         "Finalizar para todas las personas",
@@ -269,6 +274,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Gerätewechsel stoppt die Übertragung.",
         "Changing devices stops the stream.",
         "Cambiar de dispositivo detiene la transmisión.",
+    ),
+    (
+        "Gästelink kopiert.",
+        "Guest link copied.",
+        "Enlace para invitados copiado.",
     ),
     ("Hand gehoben", "Hand raised", "Mano levantada"),
     ("Hand heben", "Raise hand", "Levantar la mano"),
@@ -355,6 +365,7 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Iniciar videollamada",
     ),
     ("Moderation", "Moderation", "Moderación"),
+    ("Neu auswählen", "Choose again", "Elegir de nuevo"),
     ("Neu beitreten", "Rejoin", "Volver a unirse"),
     ("Nicht beitreten", "Do not join", "No unirse"),
     ("Nicht im Anruf", "Not in the call", "Fuera de la llamada"),

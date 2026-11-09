@@ -134,6 +134,7 @@ pub enum LocalAction {
     ToggleCallModeration,
     ToggleCallSecondary,
     DismissRecordingFailure(CallScope),
+    CopyCallGuestLink(CallScope),
     ToggleCallReactions(CallScope),
     ConfirmEndCall,
     ConfirmRecording,
@@ -432,6 +433,8 @@ pub struct Desktop {
     call_ended_duration: Option<(CallScope, std::time::Duration)>,
     call_ended_frame_pending: Option<CallScope>,
     dismissed_recording_failure: Option<CallScope>,
+    /// A guest-link copy that waits for the room details and the link itself.
+    guest_link_copy: Option<ConversationRef>,
     call_recovery: call::recovery::Recovery,
     call_clock: Option<gpui::Task<()>>,
     recording_consent: call::consent::State,
@@ -842,6 +845,7 @@ impl Desktop {
             call_ended_duration: None,
             call_ended_frame_pending: None,
             dismissed_recording_failure: None,
+            guest_link_copy: None,
             call_recovery: call::recovery::Recovery::default(),
             call_clock: None,
             recording_consent,
@@ -1480,6 +1484,7 @@ impl Desktop {
             cx.notify();
         }
         self.retain_thread_edit();
+        self.settle_call_guest_link(cx);
         if self.waiting_in_lobby() {
             self.call_chat_open = false;
             self.call_participants_open = false;
@@ -2429,6 +2434,13 @@ impl Desktop {
                     self.overlay = None;
                     self.root_focus.focus(window);
                 }
+            }
+            LocalAction::CopyCallGuestLink(scope) => {
+                let context = ConversationRef {
+                    account: scope.account,
+                    conversation: scope.conversation,
+                };
+                self.request_call_guest_link(context, cx);
             }
             LocalAction::DismissRecordingFailure(scope) => {
                 if self.snapshot.call.as_ref().is_some_and(|call| {

@@ -300,26 +300,41 @@ impl Desktop {
             .flex()
             .flex_col()
             .gap_4();
+        // Status and error notices float over the stage. In the flow they pushed
+        // the participants around every time one appeared or went away.
+        let mut notices: Vec<gpui::AnyElement> = Vec::new();
         if let Some(label) = sharing_label(call.sharing).filter(|_| !lobby) {
-            stage = stage.child(
-                div()
-                    .flex_none()
-                    .p_3()
-                    .rounded(px(10.))
-                    .bg(t.stage_panel)
-                    .text_color(if matches!(call.sharing, ScreenShareState::Failed(_)) {
-                        t.warning
-                    } else {
-                        t.stage_text
-                    })
-                    .child(self.l(label)),
+            let failed = matches!(call.sharing, ScreenShareState::Failed(_));
+            let retry = matches!(
+                call.sharing,
+                ScreenShareState::Failed(
+                    ScreenShareFailure::SourceClosed | ScreenShareFailure::TimedOut
+                )
+            );
+            notices.push(
+                self.stage_notice(
+                    if failed { "info" } else { "monitor-up" },
+                    failed,
+                    self.l(label),
+                )
+                .when(retry, |d| {
+                    d.child(self.button(
+                        "share-again",
+                        "Neu auswählen",
+                        ButtonStyle::Secondary,
+                        true,
+                        LocalAction::Intent(UiIntent::ShareScreen(call.scope)),
+                        cx,
+                    ))
+                })
+                .into_any_element(),
             );
         }
         if self
             .call_recovery
             .visible(call.scope, std::time::Instant::now())
         {
-            stage = stage.child(
+            notices.push(
                 self.banner_with_icon(
                     BannerRole::Warning,
                     self.l("Ton oder Bild fehlen?"),
@@ -335,11 +350,12 @@ impl Desktop {
                     true,
                     LocalAction::Intent(UiIntent::RecoverCallMedia(call.scope)),
                     cx,
-                )),
+                ))
+                .into_any_element(),
             );
         }
         if call.stage == CallStage::Reconnecting {
-            stage = stage.child(
+            notices.push(
                 self.banner_with_leading(
                     BannerRole::Warning,
                     self.l("Verbindung wird wiederhergestellt …"),
@@ -365,8 +381,12 @@ impl Desktop {
                             cx,
                         ))
                     },
-                ),
+                )
+                .into_any_element(),
             );
+        }
+        if self.local_feedback_visible() {
+            notices.push(self.feedback_view(cx));
         }
         if let CallStage::Required(gate) = call.stage
             && self.overlay != Some(Overlay::RecordingConsent)
@@ -952,6 +972,26 @@ impl Desktop {
                 )
             };
         }
+        let notice_layer = (!notices.is_empty()).then(|| {
+            div()
+                .absolute()
+                .top(px(12.))
+                .left(px(16.))
+                .right(px(16.))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap_2()
+                .children(notices.into_iter().map(|notice| {
+                    div()
+                        .w_full()
+                        .max_w(px(720.))
+                        .occlude()
+                        .flex()
+                        .flex_col()
+                        .child(notice)
+                }))
+        });
         let body = div()
             .flex_1()
             .min_h_0()
@@ -1137,7 +1177,12 @@ impl Desktop {
                         LocalAction::CallDevicePicker(call.scope, kind),
                         cx,
                     )
+                    // Same height as the main half and no outline: only a divider
+                    // on the left, so the pair reads as one pill.
                     .w(px(28.))
+                    .h(px(44.))
+                    .min_h(px(44.))
+                    .border_0()
                     .border_l_1()
                     .border_color(t.stage)
                     .rounded(px(0.))
@@ -1405,7 +1450,21 @@ impl Desktop {
             } else {
                 gpui::transparent_black()
             })
-            .children((!t.reduced_transparency).then(|| super::controls::glass(t.stage, true, 0.)))
+            // The card does not clip to its rounded corners, so the bar rounds its
+            // own bottom corners and paints its glass with the same radii.
+            .rounded_b(px(super::controls::CONTENT_RADIUS - 1.))
+            .children((!t.reduced_transparency).then(|| {
+                super::controls::glass_corners(
+                    t.stage,
+                    true,
+                    gpui::Corners {
+                        top_left: px(0.),
+                        top_right: px(0.),
+                        bottom_left: px(super::controls::CONTENT_RADIUS - 1.),
+                        bottom_right: px(super::controls::CONTENT_RADIUS - 1.),
+                    },
+                )
+            }))
             .flex_none()
             .flex()
             .items_center()
@@ -1520,6 +1579,24 @@ impl Desktop {
                                     .text_color(if t.dark { t.danger } else { t.danger_bg }).text_size(self.sp(12.))
                                     .font_weight(FontWeight::BOLD).child(format!("● {}", self.l("Aufzeichnung läuft"))))
                             })
+                            .when(
+                                self.selected().is_some_and(|row| {
+                                    row.context.account == call.scope.account
+                                        && row.context.conversation == call.scope.conversation
+                                        && row.kind
+                                            == talk_core::ui::presentation::ConversationKind::GuestAccessible
+                                }),
+                                |header| {
+                                    header.child(self.icon_button(
+                                        "call-guest-link",
+                                        ("link", "Gästelink kopieren"),
+                                        ButtonStyle::Stage,
+                                        Availability::available().labelled(),
+                                        LocalAction::CopyCallGuestLink(call.scope),
+                                        cx,
+                                    ))
+                                },
+                            )
                             .child(self.icon_button(
                                 "minimize-call",
                                 ("chevron-down", "Anruf minimieren"),
@@ -1548,16 +1625,15 @@ impl Desktop {
                         },
                         |d, status| d.child(div().flex_none().px_5().py_2().text_size(self.sp(12.)).child(self.l(status))),
                     )
-                    .when(self.local_feedback_visible(), |d| {
-                        d.child(
-                            div()
-                                .flex_none()
-                                .px_5()
-                                .py_2()
-                                .child(self.feedback_view(cx)),
-                        )
-                    })
-                    .child(body)
+                    .child(
+                        div()
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .child(body)
+                            .children(notice_layer),
+                    )
                     .when(!matches!(call.stage, CallStage::Outgoing | CallStage::Required(_)), |d| d.child(controls))
                     .when(call.recording == talk_core::ui::presentation::CallRecordingState::Failed && self.dismissed_recording_failure != Some(call.scope), |d| d.child(
                         div().absolute().top(px(68.)).left(px(16.)).right(px(16.)).min_h(px(36.)).px_3().rounded(px(8.))
@@ -1567,6 +1643,35 @@ impl Desktop {
             )
             .bg(t.stage),
         )
+    }
+    /// A readable status line on the dark call stage. Failures use a light amber
+    /// mark; the text keeps the stage's own foreground for contrast.
+    fn stage_notice(&self, icon: &'static str, warning: bool, text: &str) -> Div {
+        let t = self.theme;
+        let dark_stage = super::Theme { dark: true, ..t };
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_3()
+            .px_4()
+            .py_3()
+            .rounded(px(10.))
+            .bg(t.stage_panel)
+            .border_1()
+            .border_color(gpui::rgba(0xffffff24))
+            .shadow(dark_stage.elevation(super::theme::Elevation::Popover))
+            .text_color(t.stage_text)
+            .child(self.scaled_icon(
+                icon,
+                16.,
+                if warning {
+                    gpui::rgb(0xf0b840).into()
+                } else {
+                    t.stage_text
+                },
+            ))
+            .child(div().flex_1().min_w_0().child(text.to_owned()))
     }
     fn call_reaction(
         &self,
@@ -1824,17 +1929,17 @@ fn sharing_label(state: ScreenShareState) -> Option<&'static str> {
         ScreenShareState::Starting => Some("Bildschirmfreigabe wird gestartet …"),
         ScreenShareState::Sharing => Some("Dein Bildschirm wird geteilt."),
         ScreenShareState::Failed(ScreenShareFailure::Unavailable) => {
-            Some("Bildschirmfreigabe ist auf diesem System nicht verfügbar.")
+            Some("Bildschirmfreigabe wird auf diesem System nicht unterstützt.")
         }
-        ScreenShareState::Failed(ScreenShareFailure::PermissionDenied) => {
-            Some("Bildschirmzugriff verweigert. Prüfe die Systemeinstellungen.")
-        }
-        ScreenShareState::Failed(ScreenShareFailure::SourceClosed) => Some(
-            "Die geteilte Quelle wurde geschlossen. Wähle erneut einen Bildschirm oder ein Fenster.",
+        ScreenShareState::Failed(ScreenShareFailure::PermissionDenied) => Some(
+            "Die Freigabe ist nicht erlaubt. Erlaube Talk den Bildschirmzugriff in den Systemeinstellungen.",
         ),
-        ScreenShareState::Failed(ScreenShareFailure::TimedOut) => {
-            Some("Die Bildschirmfreigabe hat zu lange gedauert. Versuche es erneut.")
+        ScreenShareState::Failed(ScreenShareFailure::SourceClosed) => {
+            Some("Freigabe beendet: Fenster oder Bildschirm ist nicht mehr verfügbar.")
         }
+        ScreenShareState::Failed(ScreenShareFailure::TimedOut) => Some(
+            "Die Freigabe konnte nicht gestartet werden, das System hat nicht geantwortet. Versuche es erneut.",
+        ),
     }
 }
 
