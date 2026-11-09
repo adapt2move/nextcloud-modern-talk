@@ -58,6 +58,8 @@ pub(crate) struct Session {
 /// the sole admitted remote screen at up to 1920x1080. The sole consumer
 /// takes ownership; identity is retained through the renderer, never inferred
 /// from whichever peer happened to decode most recently.
+/// Reserved participant id of the local sender within a call generation.
+pub const LOCAL_PARTICIPANT: u128 = 0;
 pub struct VideoImage {
     pub participant: u128,
     pub width: u32,
@@ -374,7 +376,26 @@ impl Session {
     }
     pub(crate) fn retain_video(&self, peers: &[u128]) {
         if let Ok(mut images) = self.received.try_lock() {
-            images.retain(|i| peers.contains(&i.participant));
+            images.retain(|i| i.participant == LOCAL_PARTICIPANT || peers.contains(&i.participant));
+        }
+    }
+    /// The sender's own camera, for the self view only. Zero is the reserved
+    /// local participant; it shares the 16-frame bound with the remote streams
+    /// and never reaches the encoder or the wire.
+    pub(crate) fn show_local(&self, width: u32, height: u32, rgba: &[u8]) {
+        if !self.valid() {
+            return;
+        }
+        if let Ok(mut images) = self.received.try_lock() {
+            if images.len() >= 16 || images.iter().any(|i| i.participant == LOCAL_PARTICIPANT) {
+                return;
+            }
+            images.push(VideoImage {
+                participant: LOCAL_PARTICIPANT,
+                width,
+                height,
+                rgba: rgba.to_vec(),
+            });
         }
     }
     pub(crate) fn show_video(&self, participant: u128, frame: VideoFrame) {
@@ -486,6 +507,8 @@ impl CaptureHandle {
         }
         *video = Some(frame);
         s.camera_seen.store(true, Ordering::Release);
+        drop(video);
+        s.show_local(width, height, rgba);
         true
     }
     pub fn screen_generation(&self) -> Option<u64> {
@@ -656,6 +679,21 @@ mod screen_tests {
         session.publish.store(4, Ordering::Release);
         session.screen_deadline.store(60_000, Ordering::Release);
         (service, session, handle)
+    }
+    #[test]
+    fn the_own_camera_reaches_the_self_view_once_and_survives_peer_retention() {
+        let (_service, session, handle) = admitted();
+        let pixels = [9u8; 16];
+        session.show_local(2, 2, &pixels);
+        // One frame per sender until the consumer has taken it.
+        session.show_local(2, 2, &[1u8; 16]);
+        session.retain_video(&[]);
+        let image = handle.take_video().expect("local frame");
+        assert_eq!(image.participant, LOCAL_PARTICIPANT);
+        assert_eq!(image.rgba, pixels);
+        assert!(handle.take_video().is_none());
+        session.show_local(2, 2, &pixels);
+        assert!(handle.take_video().is_some());
     }
     #[test]
     fn synchronous_stop_retires_starts_queued_before_control_overload() {

@@ -1218,20 +1218,37 @@ fn project(
                 })
             }
         },
-        streams: page(value.participants.as_slice().iter().map(|p| {
-            talk_core::ui::presentation::CallStreamView {
-                local_id: p.local,
-                participant: p.participant,
-                participant_name: text(p.name.as_str()),
-                kind: if p.kind == talk_core::calls::StreamKind::Screen {
-                    CallTileKind::Screen
-                } else {
-                    CallTileKind::Camera
-                },
-                dimensions: p.dimensions,
-                flowing: p.flowing,
-            }
-        })),
+        streams: page(
+            value
+                .participants
+                .as_slice()
+                .iter()
+                .map(|p| talk_core::ui::presentation::CallStreamView {
+                    local_id: p.local,
+                    participant: p.participant,
+                    participant_name: text(p.name.as_str()),
+                    kind: if p.kind == talk_core::calls::StreamKind::Screen {
+                        CallTileKind::Screen
+                    } else {
+                        CallTileKind::Camera
+                    },
+                    dimensions: p.dimensions,
+                    flowing: p.flowing,
+                })
+                // The sender's own camera for the self view: zero is the reserved
+                // local participant. Last, so remote streams keep the 16 places.
+                .chain((value.camera == DeviceState::Active).then(|| {
+                    talk_core::ui::presentation::CallStreamView {
+                        local_id: 0,
+                        participant: 0,
+                        participant_name: account
+                            .map_or_else(|| text(""), |a| text(a.self_name.as_str())),
+                        kind: CallTileKind::Camera,
+                        dimensions: None,
+                        flowing: true,
+                    }
+                })),
+        ),
         replacement_generation: false,
         remote_audio_received: value.counters.audio_received,
         recording: match value.recording {
