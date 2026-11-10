@@ -355,6 +355,8 @@ pub struct Desktop {
     motion_frames: std::rc::Rc<std::cell::Cell<u64>>,
     /// The inline emoji picker: which composer opened it, its tab and recent picks.
     emoji_panel: Option<(ConversationRef, bool)>,
+    emoji_anchor: [std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>; 2],
+    emoji_point: Option<gpui::Point<gpui::Pixels>>,
     emoji_category: usize,
     emoji_recent: Vec<&'static str>,
     keyboard_navigation: bool,
@@ -779,6 +781,8 @@ impl Desktop {
             dialog_motion: motion::DialogMotion::default(),
             motion_frames: Default::default(),
             emoji_panel: None,
+            emoji_anchor: Default::default(),
+            emoji_point: None,
             emoji_category: 0,
             emoji_recent: Vec::new(),
             keyboard_navigation: false,
@@ -4181,6 +4185,7 @@ impl Render for Desktop {
         let incoming_card = incoming.then(|| self.incoming(cx));
         let message_menu = self.message_menu_popup(window, cx);
         let composer_menu = self.composer_menu_popup(window, cx);
+        let emoji_popover = self.emoji_popover(cx);
         let pin_motion_overlay = self.pin_motion_overlay(cx);
         let reveal = self.navigation.reveal.clone();
         let view = div()
@@ -4281,6 +4286,7 @@ impl Render for Desktop {
                     && (this.person_key(event, window, cx)
                         || this.cloud_browser_key(event, window, cx)
                         || this.member_dialog_key(event, window, cx)
+                        || this.emoji_popover_key(event, window, cx)
                         || this.composer_menu_key(event, window, cx)
                         || this.message_menu_key(event, window, cx)
                         || this.message_deadline_key(event, window, cx)
@@ -4326,6 +4332,7 @@ impl Render for Desktop {
                     .when_some(incoming_card, |d, card| d.child(card))
                     .when_some(message_menu, |d, menu| d.child(menu))
                     .when_some(composer_menu, |d, menu| d.child(menu))
+                    .when_some(emoji_popover, |d, popover| d.child(popover))
                     .when_some(pin_motion_overlay, |d, motion| d.child(motion)),
             )
             .children(self.window_resize_edges(window));

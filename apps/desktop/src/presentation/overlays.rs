@@ -84,9 +84,7 @@ impl Desktop {
                                 .min_h_0()
                                 .child(
                                     self.thread_body(cx)
-                                        .children(self.message_deadline_card_on(true, cx))
-                                        .children(self.reaction_capture_card_on(true, cx))
-                                        .children(self.composer_emoji_card_on(true, cx)),
+                                        .children(self.message_deadline_card_on(true, cx)),
                                 ),
                         )
                         .child(self.thread_composer_view(cx)),

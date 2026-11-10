@@ -174,7 +174,7 @@ Use `chat-content`, `chat-content-loading` and `chat-content-failed` to inspect 
 
 Use `chat-upload` and `chat-upload-uncertain` for the immediate outgoing image row, inline progress and missing-confirmation actions. These are fictional projections with no file/server effects.
 
-Use `chat-attachments` for compact JSON/ZIP cards and the selected-file strip, and `shared-media` for the shared-content dialog with a picture grid and file rows. Set `NMT_UI_EMOJI=1` with a chat scenario to start with the inline emoji picker open.
+Use `chat-attachments` for compact JSON/ZIP cards and the selected-file strip, and `shared-media` for the shared-content dialog with a picture grid and file rows. Set `NMT_UI_EMOJI=1` with a chat scenario to start with the emoji popover open.
 Remove chips, hover/focus Download and drop multiple local files into the chat.
 The fixture shows a pending send rather than fabricating upload success. It has
 no file or server I/O. Native Finder promises require a real macOS account-connected

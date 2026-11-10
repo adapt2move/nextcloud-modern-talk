@@ -669,7 +669,10 @@ was ihr miteinander besprecht.")),
                                             // Anchor the form to the viewport, not its
                                             // content height: validation must not move
                                             // the server field or the submit button.
-                                            .pt(px((sheet_height * 0.14).clamp(32., 80.)))
+                                            // About a quarter down puts the form near the optical
+                                            // centre of an ordinary window without tying its
+                                            // position to its own height.
+                                            .pt(px((sheet_height * 0.24).clamp(32., 200.)))
                                             .pb_8()
                                             .flex()
                                             .flex_col()

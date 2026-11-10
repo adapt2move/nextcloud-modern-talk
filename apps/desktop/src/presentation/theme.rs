@@ -134,9 +134,15 @@ impl Theme {
         )
     }
 
-    /// Content keeps the palette surface as its base in every appearance.
+    /// The content card. Light appearances let the chrome gradient tint the card
+    /// like frosted glass; the chrome is itself light, so text contrast holds.
+    /// Dark surfaces already sit one step above the chrome and stay opaque.
     pub fn content_material(self) -> gpui::Background {
-        self.surface.into()
+        if self.dark || self.reduced_transparency {
+            self.surface.into()
+        } else {
+            self.surface.opacity(0.7).into()
+        }
     }
 
     pub fn avatar(self, seed: usize) -> (Hsla, Hsla) {

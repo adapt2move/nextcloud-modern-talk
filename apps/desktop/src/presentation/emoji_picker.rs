@@ -1,6 +1,7 @@
-//! The built-in emoji picker: categories and a grid, shown inline above the composer
-//! (or in the reaction card) instead of the system's floating palette. It works the
-//! same on every platform, needs no focus hand-over and inserts at the caret.
+//! The built-in emoji picker: categories and a grid in a popover. It opens at the
+//! composer's emoji button, or at the pointer for a reaction, instead of the
+//! system's floating palette. It works the same on every platform, needs no focus
+//! hand-over and inserts at the caret.
 use super::controls::Availability;
 use super::*;
 
@@ -95,7 +96,7 @@ impl Desktop {
         div().flex().flex_col().gap_2().child(tabs).child(
             div()
                 .id("emoji-grid")
-                .max_h(px(208.))
+                .max_h(px(252.))
                 .overflow_y_scroll()
                 .flex()
                 .flex_wrap()
@@ -120,30 +121,93 @@ impl Desktop {
         )
     }
 
-    /// The picker above one composer, when that composer asked for it.
-    pub(in crate::presentation) fn composer_emoji_card_on(
-        &self,
-        thread: bool,
-        cx: &Context<Self>,
-    ) -> Option<gpui::AnyElement> {
-        let (context, in_thread) = self.emoji_panel?;
-        if in_thread != thread
-            || self.snapshot.selected != Some(context)
-            || thread && self.overlay != Some(Overlay::Thread)
-        {
-            return None;
-        }
-        Some(
-            self.composer_card()
-                .p_3()
-                .gap_2()
-                .child(self.emoji_grid(cx))
-                .into_any_element(),
-        )
+    /// Records where one composer's emoji button is, so the popover can open there.
+    pub(in crate::presentation) fn emoji_anchor(&self, thread: bool) -> impl IntoElement {
+        let cell = self.emoji_anchor[usize::from(thread)].clone();
+        gpui::canvas(move |bounds, _, _| cell.set(Some(bounds)), |_, _, _, _| {})
+            .absolute()
+            .inset_0()
     }
 
-    /// The picker inside the reaction card.
-    pub(in crate::presentation) fn reaction_emoji_grid(&self, cx: &Context<Self>) -> Div {
-        self.emoji_grid(cx)
+    fn emoji_popover_open(&self) -> bool {
+        self.reaction_request().is_some() || self.emoji_panel.is_some()
+    }
+
+    fn close_emoji_popover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.reaction_request().is_some() {
+            self.close_reaction_capture(window, cx);
+        } else {
+            self.emoji_panel = None;
+        }
+        cx.notify();
+    }
+
+    /// Escape closes the popover before anything behind it sees the key.
+    pub(super) fn emoji_popover_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.key != "escape" || !self.emoji_popover_open() {
+            return false;
+        }
+        self.close_emoji_popover(window, cx);
+        true
+    }
+
+    /// The picker as one root-layer popover: above the emoji button of the composer
+    /// that asked for it, or where the pointer was when a reaction was requested.
+    pub(super) fn emoji_popover(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+        let current = |context: ConversationRef, thread: bool| {
+            self.snapshot.selected == Some(context)
+                && (!thread || self.overlay == Some(Overlay::Thread))
+        };
+        let position = if let Some((context, thread)) = self.reaction_request() {
+            if !current(context, thread) {
+                return None;
+            }
+            self.emoji_point?
+        } else {
+            let (context, thread) = self.emoji_panel?;
+            if !current(context, thread) {
+                return None;
+            }
+            let button = self.emoji_anchor[usize::from(thread)].get()?;
+            gpui::point(button.left(), button.top() - px(8.))
+        };
+        let anchors = self.emoji_anchor.clone();
+        let panel = self
+            .context_menu_surface()
+            .id("emoji-popover")
+            .occlude()
+            .w(self.sp(346.))
+            .p_2()
+            .on_mouse_down_out(cx.listener(
+                move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    // The emoji button toggles the popover itself.
+                    let on_button = this.reaction_request().is_none()
+                        && anchors.iter().any(|anchor| {
+                            anchor
+                                .get()
+                                .is_some_and(|bounds| bounds.contains(&event.position))
+                        });
+                    if !on_button {
+                        this.close_emoji_popover(window, cx);
+                    }
+                },
+            ))
+            .child(self.emoji_grid(cx));
+        Some(
+            gpui::deferred(
+                gpui::anchored()
+                    .position(position)
+                    .anchor(gpui::Corner::BottomLeft)
+                    .snap_to_window_with_margin(px(12.))
+                    .child(panel),
+            )
+            .with_priority(2)
+            .into_any_element(),
+        )
     }
 }

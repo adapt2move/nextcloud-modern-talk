@@ -193,7 +193,9 @@ pub(in crate::presentation) fn inner_highlight(
 ) -> Div {
     div()
         .absolute()
-        .inset(px(1.))
+        // Absolute children are placed inside the parent's border, so this already
+        // sits on the inner edge and shares the inner corner radius.
+        .inset_0()
         .rounded(px((radius - 1.).max(0.)))
         .border_t_1()
         .border_color(theme.inner_highlight())

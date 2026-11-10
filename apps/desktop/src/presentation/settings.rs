@@ -250,8 +250,8 @@ impl Desktop {
             .p(px(16.))
             // GPUI's overflow mask is rectangular. Each opaque child at the
             // frame edge must draw the same inner corner as its parent.
-            .rounded_tl(px(12.))
-            .rounded_bl(px(12.))
+            .rounded_tl(px(15.))
+            .rounded_bl(px(15.))
             .bg(self.theme.inset())
             .border_r_1()
             .border_color(self.theme.border)

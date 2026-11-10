@@ -6,7 +6,7 @@ This is the design contract for conversation controls, governed by [CONV-004–0
 
 Remove the persistent right-hand conversation-details sidebar. Keep the main conversation navigation, timeline, file access and in-call chat. Preserve the reading position and draft when opening or closing a dialog.
 
-The room title opens a centered **Shared content** dialog for the current conversation. It lists only the existing server-projected shared files/media and pinned messages, with their typed download and context actions. Member management and conversation settings remain separate dialogs; the shared-content dialog does not recreate a details sidebar.
+The room title opens a centered **Shared content** dialog for the current conversation. It lists only the existing server-projected shared files/media and pinned messages, with their typed download and context actions. The last observed files and media are kept with the room's cached history, so the dialog shows them at once and refreshes them in the background. Member management and conversation settings remain separate dialogs; the shared-content dialog does not recreate a details sidebar.
 
 A **star** directly beside the title changes the real personal favorite state. Reveal the header star on header hover or keyboard focus; distinguish its confirmed active state. The sidebar always shows a star for confirmed favorites. A **search** icon beside the title opens the conversation search field immediately below the header. Ctrl+F on Windows/Linux and Command+F on macOS opens or focuses this field, and toggles it closed when already focused. Escape closes it and restores its invoking focus without discarding a draft or ending a call. Search, result paging and context navigation retain the originating account/room scope. The separate Command/Ctrl+K loaded-content search remains available. Do not intercept IME composition or unrelated modal shortcuts.
 
@@ -24,7 +24,7 @@ Per-message reply and more-actions icons reveal on that message's hover or keybo
 
 Nonessential hover, selection and reveal transitions are finite. Keyboard focus and input changes remain immediate; reduced motion suppresses decoration. Unknown system motion preferences suppress animation until the platform owner provides a value.
 
-The composer and the reaction card show a built-in emoji picker inline, identical on every platform: category tabs, a recent row and a scrolling grid of single-glyph emojis. A pick inserts at the caret like typed text, or reacts and closes the reaction card. The picker opens no system window, hands over no focus, reads no clipboard and does not cross a modal/account/room boundary; changing room or closing the composer retires it. The system's own character palette remains available through its keyboard shortcut on macOS.
+The built-in emoji picker is one popover, identical on every platform: category tabs, a recent row and a scrolling grid of single-glyph emojis. It opens above the composer's emoji button, or at the pointer when a message asks for another reaction. A pick inserts at the caret like typed text, or reacts and closes the popover; Escape or a click outside closes it. The picker opens no system window, hands over no focus, reads no clipboard and does not cross a modal/account/room boundary; changing room or closing the composer retires it. The system's own character palette remains available through its keyboard shortcut on macOS.
 
 ## Members and bots
 

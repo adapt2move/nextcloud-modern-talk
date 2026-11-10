@@ -918,18 +918,26 @@ impl Desktop {
                                         )
                                         .child(self.composer_menu_anchor(row.context, thread)),
                                     )
-                                    .child(self.icon_button(
-                                        emoji_id,
-                                        ("smile", "Emoji auswählen"),
-                                        ButtonStyle::Quiet,
-                                        emoji_availability,
-                                        if thread {
-                                            LocalAction::ThreadEmojiPicker(row.context)
-                                        } else {
-                                            LocalAction::EmojiPicker(row.context)
-                                        },
-                                        cx,
-                                    )),
+                                    .child(
+                                        self.icon_button(
+                                            emoji_id,
+                                            ("smile", "Emoji auswählen"),
+                                            // The open picker keeps its trigger visibly pressed.
+                                            if self.emoji_panel == Some((row.context, thread)) {
+                                                ButtonStyle::Secondary
+                                            } else {
+                                                ButtonStyle::Quiet
+                                            },
+                                            emoji_availability,
+                                            if thread {
+                                                LocalAction::ThreadEmojiPicker(row.context)
+                                            } else {
+                                                LocalAction::EmojiPicker(row.context)
+                                            },
+                                            cx,
+                                        )
+                                        .child(self.emoji_anchor(thread)),
+                                    ),
                             )
                             .child(
                                 div()
