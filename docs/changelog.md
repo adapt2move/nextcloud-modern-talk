@@ -2,6 +2,20 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.18 alpha (2026-11-10)
+
+### Fixes
+
+- **ui:** Keep call video inside its tile and unify call popovers and notices (`d7dd6f6`)
+- **calls:** Switch microphone, speaker and camera during a call (`db5107e`)
+- **accounts:** Keep the conversation list when a refresh is cancelled (`d04fc33`)
+
+### Performance
+
+- **calls:** Republish the call only when its observation changed (`7926c7e`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.18/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.18/docs/limitations.md)
+
 ## v0.0.17 alpha (2026-11-10)
 
 ### Features
