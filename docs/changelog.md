@@ -2,6 +2,29 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.17 alpha (2026-11-10)
+
+### Features
+
+- **ui:** Emoji popover, frosted light card, exact dialog corners, centred onboarding (`606cf91`)
+- **ui:** Continuous glass in dialogs, tidy shared content, inline emoji picker (`e13dabd`)
+
+### Fixes
+
+- **files:** Show shared files at once and keep them with the cached history (`c514161`)
+
+### Performance
+
+- **media:** Load cached thumbnails at frame cadence without re-measuring the chat (`2aace3e`)
+
+### Other changes
+
+- Give the picture-store test rooms distinct prefixes (`5e5335a`)
+- Log panics, notification outcomes, call phases, downloads and picture timings (`c322725`)
+- Keep pictures as plain files and show them from this computer first (`3d2a11e`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.17/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.17/docs/limitations.md)
+
 ## v0.0.16 alpha
 
 - Fix notifications on macOS: the notification helper now carries the app's
