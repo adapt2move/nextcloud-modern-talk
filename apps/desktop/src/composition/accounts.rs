@@ -1060,7 +1060,11 @@ impl Accounts {
                 self.complete_message((request, done.request.0), context, operation, work, result);
                 self.cache_history(context);
             }
-            Purpose::Call(scope) => self.complete_call(scope, result),
+            Purpose::Call(scope) => {
+                if !self.complete_call(scope, result) {
+                    return;
+                }
+            }
             Purpose::Typing(context, work) => self.complete_typing(context, work, result),
             Purpose::BreakoutLeave(scope, request, context, target, assigned) => {
                 self.complete_breakout_leave(scope, request, context, target, assigned, result)

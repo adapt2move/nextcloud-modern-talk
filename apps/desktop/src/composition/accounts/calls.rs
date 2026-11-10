@@ -1037,13 +1037,16 @@ impl Accounts {
             self.call_poll_at = Instant::now() + Duration::from_millis(250);
         }
     }
+    /// Returns whether the visible call changed. The call is observed four
+    /// times a second; an identical observation must not republish, re-apply
+    /// and redraw the whole presentation snapshot.
     pub(super) fn complete_call(
         &mut self,
         requested: CallScope,
         result: Result<RuntimeReply, IdentityError>,
-    ) {
+    ) -> bool {
         let Some(ui) = self.call_ui.as_mut().filter(|u| u.scope == requested) else {
-            return;
+            return false;
         };
         match result {
             Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(value)))
@@ -1085,6 +1088,19 @@ impl Accounts {
                 }
                 ui.last_gate = next_gate;
                 note_call_phase(&value.phase);
+                if value.call == requested
+                    && self.snapshot.call.as_ref().is_some_and(|old| {
+                        // The audio packet counter grows with every observation;
+                        // consumers only ask whether any audio arrived.
+                        let mut next = view.clone();
+                        if old.remote_audio_received > 0 && next.remote_audio_received > 0 {
+                            next.remote_audio_received = old.remote_audio_received;
+                        }
+                        *old == next
+                    })
+                {
+                    return false;
+                }
                 self.snapshot.call = Some(view);
                 self.snapshot.conversations =
                     page(self.snapshot.conversations.as_slice().iter().map(|row| {
@@ -1095,7 +1111,7 @@ impl Accounts {
                         row
                     }));
             }
-            Err(IdentityError::Request(ErrorKind::Busy)) => {}
+            Err(IdentityError::Request(ErrorKind::Busy)) => return false,
             _ => {
                 self.media.close_call(requested);
                 if let Some(call) = &mut self.snapshot.call {
@@ -1106,6 +1122,7 @@ impl Accounts {
                 }
             }
         }
+        true
     }
 }
 // One visible/current invitation. Other accounts remain observed and may offer
