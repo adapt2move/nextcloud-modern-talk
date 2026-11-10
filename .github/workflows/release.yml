@@ -1,27 +1,22 @@
-name: Alpha packages and release
+name: Release
+
+# One click: plan the version from the Conventional Commits since the last tag,
+# commit it, build both platforms, tag the exact built commit and publish.
 
 on:
   workflow_dispatch:
     inputs:
-      candidate:
-        description: Exact commit on main
-        required: true
-        type: string
-      tag:
-        description: Existing version tag (for example v0.0.1)
-        required: true
-        type: string
       publish:
-        description: Publish the verified assets as a GitHub prerelease
+        description: Commit the version, tag and publish the prerelease (off only builds the packages)
         required: true
-        default: false
+        default: true
         type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag }}
+  group: release
   cancel-in-progress: false
 
 defaults:
@@ -31,15 +26,93 @@ defaults:
 env:
   PYTHONDONTWRITEBYTECODE: "1"
   CARGO_TERM_COLOR: always
-  CANDIDATE: ${{ inputs.candidate }}
-  VERSION_TAG: ${{ inputs.tag }}
 
 jobs:
+  plan:
+    name: Plan from commits
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      head: ${{ steps.plan.outputs.head }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Release only from main, and only what the checks passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::Release runs only on main"; exit 1; }
+          # The version commit of an earlier attempt carries no check run of its own.
+          tested=$(git log -1 --format=%H --invert-grep --grep='^chore(release): v' HEAD)
+          passed=$(gh run list --workflow ci.yml --commit "$tested" --json conclusion --jq '[.[] | select(.conclusion == "success")] | length')
+          [ "$passed" -ge 1 ] || { echo "::error::The checks have not passed for ${tested:0:7}"; exit 1; }
+      - id: plan
+        run: python3 tools/release/plan.py plan --output "$RUNNER_TEMP/plan"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-plan
+          path: ${{ runner.temp }}/plan/*
+          if-no-files-found: error
+          retention-days: 7
+
+  prepare:
+    name: Version commit
+    needs: plan
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+      version: ${{ steps.commit.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.head }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-plan
+          path: ${{ runner.temp }}/plan
+      - id: commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLANNED: ${{ needs.plan.outputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          if [ "$PUBLISH" != true ]; then
+            # A trial run builds what main already is, under its current version.
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            echo "version=$(python3 tools/release/plan.py version)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --quiet origin main
+          [ "$(git rev-parse origin/main)" = "$(git rev-parse HEAD)" ] || { echo "::error::main moved since the plan; run the release again"; exit 1; }
+          if [ "$(python3 tools/release/bump.py --version "$PLANNED" --notes "$RUNNER_TEMP/plan/notes.md" --date "$(date -u +%F)")" = changed ]; then
+            git -c user.name=github-actions[bot] -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+              commit --all --quiet -m "chore(release): v$PLANNED"
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$PLANNED" >> "$GITHUB_OUTPUT"
+
   package-linux:
     name: Linux package and install smoke
+    needs: prepare
     runs-on: ubuntu-26.04
     timeout-minutes: 75
     env:
+      CANDIDATE: ${{ needs.prepare.outputs.sha }}
+      VERSION_TAG: v${{ needs.prepare.outputs.version }}
+      VERSION: ${{ needs.prepare.outputs.version }}
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       CC: clang
@@ -47,16 +120,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.candidate }}
+          ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - run: python3 tools/release/candidate.py
+      - run: python3 tools/release/candidate.py --untagged
       - name: Native prerequisites
         run: |
           sudo bash tools/ui/prepare-linux.sh
           sudo apt-get install -y --no-install-recommends dpkg-dev
       - run: python3 tools/release/toolchain.py --target x86_64-unknown-linux-gnu
-      - run: python3 tools/release/build.py --target x86_64-unknown-linux-gnu --version "${VERSION_TAG#v}" --output "$RUNNER_TEMP/packages"
+      - run: python3 tools/release/build.py --target x86_64-unknown-linux-gnu --version "$VERSION" --output "$RUNNER_TEMP/packages"
       - name: Install and exercise the packaged Linux binary
         run: |
           sudo apt-get install -y "$RUNNER_TEMP"/packages/*.deb
@@ -78,15 +151,20 @@ jobs:
 
   package-macos:
     name: macOS Apple Silicon package (compile only)
+    needs: prepare
     runs-on: macos-26
     timeout-minutes: 75
+    env:
+      CANDIDATE: ${{ needs.prepare.outputs.sha }}
+      VERSION_TAG: v${{ needs.prepare.outputs.version }}
+      VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.candidate }}
+          ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - run: python3 tools/release/candidate.py
+      - run: python3 tools/release/candidate.py --untagged
       - name: Load persistent signing identity for publication
         env:
           NMT_MACOS_REQUIRE_SIGNED: ${{ inputs.publish && '1' || '0' }}
@@ -99,7 +177,7 @@ jobs:
       - run: python3 tools/ci/build_env.py --target aarch64-apple-darwin --install-metal-toolchain
       - run: python3 tools/ci/prepare_gstreamer.py --target aarch64-apple-darwin
       - run: python3 tools/release/toolchain.py --target aarch64-apple-darwin
-      - run: python3 tools/release/build.py --target aarch64-apple-darwin --version "${VERSION_TAG#v}" --output "$RUNNER_TEMP/packages"
+      - run: python3 tools/release/build.py --target aarch64-apple-darwin --version "$VERSION" --output "$RUNNER_TEMP/packages"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages-macos
@@ -112,26 +190,39 @@ jobs:
         run: python3 tools/ci/macos_signing.py --cleanup
 
   publish:
-    name: Publish verified prerelease
-    needs: [package-linux, package-macos]
+    name: Tag and publish verified prerelease
+    needs: [plan, prepare, package-linux, package-macos]
     if: inputs.publish && github.repository == 'adapt2move/nextcloud-modern-talk' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: write
+    env:
+      CANDIDATE: ${{ needs.prepare.outputs.sha }}
+      VERSION_TAG: v${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.candidate }}
+          ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: packages-*
           path: ${{ runner.temp }}/packages
-      - name: Verify, create draft, upload, redownload, then publish
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-plan
+          path: ${{ runner.temp }}/plan
+      - name: Tag the built commit, verify, create draft, upload, redownload, then publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A retry after a failed publication finds its tag; candidate.py then checks it.
+          if ! git rev-parse -q --verify "refs/tags/$VERSION_TAG^{commit}" > /dev/null; then
+            git -c user.name=github-actions[bot] -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+              tag -a "$VERSION_TAG" -m "$VERSION_TAG" "$CANDIDATE"
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/$VERSION_TAG"
+          fi
           python3 tools/release/candidate.py
-          python3 tools/release/publish.py --directory "$RUNNER_TEMP/packages" --commit "$CANDIDATE" --tag "$VERSION_TAG" --notes docs/changelog.md --publish
+          python3 tools/release/publish.py --directory "$RUNNER_TEMP/packages" --commit "$CANDIDATE" --tag "$VERSION_TAG" --notes "$RUNNER_TEMP/plan/notes.md" --publish

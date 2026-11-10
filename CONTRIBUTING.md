@@ -30,6 +30,16 @@ in the PR. Runtime, mock and compile-only results are different evidence. Automa
 runs one Linux check; native platform/package checks are manual and required before
 tagging a release. See [CI policy](docs/ci.md).
 
+## Commit messages and releases
+
+Write commit subjects as [Conventional Commits](https://www.conventionalcommits.org/):
+`type(scope)!: description`, at most 100 characters. Use `feat`, `fix`, `perf` or
+`revert` for changes users see; `docs`, `test`, `refactor`, `build`, `ci`, `style`
+and `chore` for the rest. Mark a breaking change with `!` or a `BREAKING CHANGE:`
+footer. CI rejects other subjects. The release workflow derives the next version and
+the release notes from these subjects, so write each one for a reader of the
+release notes. See [release tooling](tools/release/README.md#publication).
+
 ## Documentation and licensing
 
 Write public documentation in English and use NextCloud as the project brand. Keep

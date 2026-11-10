@@ -5,7 +5,7 @@ Build from a clean committed checkout using the repository toolchain and lockfil
 ```sh
 python3 tools/release/toolchain.py --target x86_64-unknown-linux-gnu
 python3 tools/release/build.py --target x86_64-unknown-linux-gnu \
-  --version 0.0.16 --output /absolute/new/package-directory
+  --version <version> --output /absolute/new/package-directory
 ```
 
 Use `aarch64-apple-darwin` on Apple Silicon. Prepare native prerequisites as described in [CI](../../docs/ci.md). Output belongs outside the checkout. The builder records source/toolchain/dependency identities and collects license notices. The assembler checks the closed file inventory, executable architecture and checksums, then writes Linux `.deb`/`.tar.gz` or a self-contained macOS app ZIP and styled DMG, plus source and provenance.
@@ -20,21 +20,30 @@ The macOS builder embeds the required libraries, plugins and scanner from the ch
 python3 tools/release/check_workflows.py --actionlint
 python3 tools/release/tests.py
 python3 tools/release/publication_tests.py
+python3 tools/release/conventional_tests.py
 ```
 
 Python 3.11+ and `dpkg-deb` are needed for the Linux packaging fixtures. These tests use synthetic executables and fake publication commands; they do not contact GitHub or qualify application behavior.
 
 ## Publication
 
-The [manual workflow](../../.github/workflows/release.yml) binds an existing version tag to its exact mainline commit. Its publisher uses the official `gh` CLI. Packages are verified before a draft is created, then uploaded and downloaded to verify the served bytes before publication. Failures leave a draft; inspect it before a manual retry. Do not overwrite an existing release or move a published tag.
+Run the [release workflow](../../.github/workflows/release.yml) on `main`; it takes no version or commit.
 
-The release body comes from [the current changelog](../../docs/changelog.md).
-Describe only changes since the previous release, followed by version-bound
-links to [installation](../../docs/install.md) and
-[known limitations](../../docs/limitations.md). Keep setup instructions,
-full feature inventories and outstanding work on those separate pages.
+```sh
+gh workflow run release.yml --ref main            # release
+gh workflow run release.yml --ref main -f publish=false   # trial: build only
+```
 
-[actions.json](actions.json) contains action pins. [package-policy.json](package-policy.json) records the composition included by the package. Keep this policy aligned with the actual shipping source; it is not a substitute for runtime tests. [candidate.py](candidate.py) checks local tag/commit/origin identity. Evidence and intermediate reports stay outside contributor documentation.
+1. [plan.py](plan.py) reads the Conventional Commits since the newest `vX.Y.Z` tag, picks the next version and writes the release notes. It stops if the checks have not passed for the commit or if only `docs`, `ci`, `test`, `refactor`, `build`, `style` or `chore` commits are pending.
+2. [bump.py](bump.py) writes the version into `Cargo.toml`/`Cargo.lock` and the section into [the changelog](../../docs/changelog.md); the workflow commits it as `chore(release): vX.Y.Z`.
+3. Linux and macOS build that exact commit.
+4. The publisher tags it, verifies the packages, creates a draft, uploads, downloads and compares the bytes, then publishes the prerelease with the generated notes.
+
+A failure before publication can be fixed and the workflow run again: the version commit and tag are reused, never duplicated. A failed publication leaves a draft; inspect it before retrying. Do not overwrite an existing release or move a published tag. The official `gh` CLI performs every GitHub mutation.
+
+The bump follows [Conventional Commits](https://www.conventionalcommits.org/): a `!` after the type or a `BREAKING CHANGE:` footer is a major release (minor below 1.0); `feat` is a minor release (a patch below 1.0, where every release so far is a preview); `fix`, `perf`, `revert` and any commit outside the format are patches. CI rejects new commits outside the format. The notes group commits as breaking changes, features, fixes, performance and other changes, followed by version-bound links to [installation](../../docs/install.md) and [known limitations](../../docs/limitations.md).
+
+[actions.json](actions.json) contains action pins. [package-policy.json](package-policy.json) records the composition included by the package. Keep this policy aligned with the actual shipping source; it is not a substitute for runtime tests. [candidate.py](candidate.py) checks local commit/origin identity, and the tag once publication creates it. Evidence and intermediate reports stay outside contributor documentation.
 
 ## In-app updates
 

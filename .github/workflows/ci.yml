@@ -31,7 +31,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Commit subjects follow Conventional Commits
+        env:
+          START: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # A new branch or a rewritten history has no usable start: check the last commit.
+          if ! git merge-base --is-ancestor "${START:-HEAD}" HEAD 2> /dev/null || [ "$START" = 0000000000000000000000000000000000000000 ]; then
+            START=HEAD~1
+          fi
+          python3 tools/release/plan.py lint "$START"
       - run: sudo bash tools/ui/prepare-linux.sh --build-only
       - run: python3 tools/release/toolchain.py --target x86_64-unknown-linux-gnu
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

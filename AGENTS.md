@@ -24,6 +24,9 @@ assigned task. Product and security contract changes must be deliberate and visi
 
 ## Verification and documentation
 
+Write commit subjects as Conventional Commits (`type(scope): description`); CI rejects
+others and releases are planned from them. See [Contributing](CONTRIBUTING.md#commit-messages-and-releases).
+
 Use the pinned toolchain, exact dependencies and lockfile. Choose checks that exercise
 changed behavior and failure/lifetime invariants. Linux runtime checks and Windows/macOS
 compilation prove different things; neither synthetic fixtures nor compilation establish

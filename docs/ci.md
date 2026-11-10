@@ -11,7 +11,7 @@ push cancels the obsolete run for that PR or branch.
 | `task verify` | Local host; automatic CI on `ubuntu-26.04` | The same standard checks, with no UI capture or packaging |
 | `task verify:full` | Local development host with the required fixture tools | Also run tooling/package regressions, actionlint, backend-feature checks, permission callback lifetimes and isolated architecture fixtures |
 | [Native release checks](../.github/workflows/native.yml) | Manual `windows-2025` and `macos-26` jobs | Compile workspace/test targets; on macOS also check the Swift helper, disposable signing identity and app/DMG assembly |
-| [Release](../.github/workflows/release.yml) | Manual Linux/macOS jobs | Build and verify the actual distributable packages, then optionally publish |
+| [Release](../.github/workflows/release.yml) | Manual; plan, version commit, Linux/macOS builds, publisher | Derive the version and notes from Conventional Commits, build and verify the distributable packages, tag and publish |
 
 Run `task verify` before pushing and choose the additional suites relevant to a
 change. `python3 tools/check.py --full` runs the extended suites without Task;
@@ -50,9 +50,9 @@ explicitly. Packaging retains the separate pinned-runtime builder.
 
 ## Releases
 
-The manual [release workflow](../.github/workflows/release.yml) accepts an exact commit on `main`, an existing version tag and an optional publish flag. It builds Linux `.deb`/`.tar.gz` and an Apple Silicon app ZIP plus a styled DMG. Linux installs and launches its packaged binary; macOS compiles and inspects the bundle, library paths, signatures and disk-image structure. The manual native check also assembles the macOS packages so packaging failures can be fixed before a release tag is created.
+The manual [release workflow](../.github/workflows/release.yml) runs on `main` and takes only a publish flag (off for a trial build). It first plans the next version and the release notes from the Conventional Commits since the last tag and refuses to continue unless the standard checks passed for the commit. A `chore(release)` commit then writes the version and changelog. It builds Linux `.deb`/`.tar.gz` and an Apple Silicon app ZIP plus a styled DMG. Linux installs and launches its packaged binary; macOS compiles and inspects the bundle, library paths, signatures and disk-image structure. The manual native check also assembles the macOS packages so packaging failures can be fixed before a release tag is created.
 
-The separate publisher uses `ubuntu-26.04` and is the only job with `contents: write`. It checks package receipts and the existing tag, creates a draft using GitHub CLI, uploads files, downloads and compares their bytes, rechecks the tag, then marks the release as a prerelease. An error leaves the draft for inspection. It never replaces existing release assets or creates/moves a tag. Maintainers must serialize publication of a version; tag checks do not prevent an administrator from changing GitHub state concurrently.
+Only two release jobs have `contents: write`: the version commit, which can push nothing but that commit to `main` (a fast-forward from the planned head), and the publisher on `ubuntu-26.04`. The publisher tags the commit that was built, checks package receipts and the tag, creates a draft using GitHub CLI, uploads files, downloads and compares their bytes, rechecks the tag, then marks the release as a prerelease. An error leaves the draft for inspection and a rerun reuses the version commit and tag. It never replaces existing release assets or moves a tag. Maintainers must serialize publication of a version; tag checks do not prevent an administrator from changing GitHub state concurrently.
 
 macOS packages include the required GStreamer runtime, plugins, notices and source information. Publication requires a persistent identity in the Actions secrets `MACOS_CERTIFICATE_P12_BASE64` and `MACOS_CERTIFICATE_PASSWORD`. Configure one signing mode with public repository variables:
 

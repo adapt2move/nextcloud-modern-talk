@@ -57,8 +57,8 @@ def check(root, actionlint=False):
                 raise ValueError("Unexpected runner in " + name)
             if not re.search(r"(?m)^    timeout-minutes: [1-9][0-9]*$", job):
                 raise ValueError("Missing timeout in " + name)
-            if "contents: write" in job and (file.name, name) != ("release.yml", "publish"):
-                raise ValueError("Only release publication may write contents")
+            if "contents: write" in job and (file.name, name) not in {("release.yml", "prepare"), ("release.yml", "publish")}:
+                raise ValueError("Only the release version commit and publication may write contents")
             conditions = re.findall(r"(?m)^    if: (.*)$", job)
             if file.name == "ci.yml":
                 if runner[1] not in LINUX or conditions or "python3 tools/check.py" not in job:

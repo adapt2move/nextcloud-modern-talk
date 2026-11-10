@@ -51,6 +51,7 @@ def main(argv=None):
                 "tools/release/internal_identity_tests.py",
                 "tools/release/tests.py",
                 "tools/release/publication_tests.py",
+                "tools/release/conventional_tests.py",
             ):
                 python(script)
             cargo("clippy", "--locked", "-p", "talk-adapters", "--features", "backend-test", "--all-targets", "--", "-D", "warnings")

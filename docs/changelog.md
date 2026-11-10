@@ -1,4 +1,8 @@
-# v0.0.16 alpha
+# Changelog
+
+Changes per release, newest first. Generated from Conventional Commits.
+
+## v0.0.16 alpha
 
 - Fix notifications on macOS: the notification helper now carries the app's
   identity, so macOS applies the permission you granted and banners arrive.
