@@ -73,7 +73,6 @@ pub(crate) enum Action {
     ToggleScheduled,
     CancelTime,
     ToggleCustomTime,
-    CancelReactionCapture,
     Remind { message: u128, thread: Option<u128> },
     SubmitTime,
     SubmitRepeatedTime(talk_core::preferences::time::RepeatedTime),
@@ -1938,7 +1937,6 @@ impl Desktop {
                     self.submit_message(MessageAction::Scheduled);
                 }
             }
-            Action::CancelReactionCapture => self.close_reaction_capture(window, cx),
             Action::ToggleCustomTime => {
                 self.message_ui.custom_time = !self.message_ui.custom_time;
                 if self.message_ui.custom_time {
@@ -2937,11 +2935,7 @@ impl Desktop {
         {
             body = body.child(self.hint(self.l("Keine Dateien geladen")));
         }
-        body.child(self.hint(&format!(
-            "{} {}",
-            self.l("Maximale Dateigröße:"),
-            super::localization::file_size(self.locale, Some(panel.file_limit))
-        )))
+        body
     }
     fn message_text(
         &self,
@@ -3279,8 +3273,6 @@ impl Desktop {
             }
         }
         rows.extend(self.message_deadline_card_on(false, cx));
-        rows.extend(self.reaction_capture_card_on(false, cx));
-        rows.extend(self.composer_emoji_card_on(false, cx));
         rows
     }
     fn quote_marker(&self) -> Div {

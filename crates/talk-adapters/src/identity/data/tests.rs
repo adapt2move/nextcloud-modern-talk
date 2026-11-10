@@ -195,6 +195,7 @@ fn history(key: &NavigationRoomKey, saved_at: u64) -> CacheHistory {
         messages: page([message(7)]),
         pins: page([7]),
         pin_messages: Page::empty(),
+        shared_messages: Page::empty(),
         threads: Page::empty(),
         pins_loaded: true,
         older: Some(7),

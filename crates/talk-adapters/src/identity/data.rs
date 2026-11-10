@@ -239,6 +239,9 @@ pub struct CacheHistory {
     pub pins: Page<u64, 50>,
     #[serde(default = "Page::empty", with = "codec::page")]
     pub pin_messages: Page<CachedMessage, 50>,
+    /// The room's latest shared files and media, so their overview opens at once.
+    #[serde(default = "Page::empty", with = "codec::page")]
+    pub shared_messages: Page<CachedMessage, 50>,
     /// Four recently opened thread windows, subject to the same room policy.
     #[serde(default = "Page::empty", with = "codec::page")]
     pub threads: Page<CachedThread, 4>,
@@ -1115,6 +1118,7 @@ fn clean_history(history: &CacheHistory, now: u64) -> Result<CacheHistory> {
         .as_slice()
         .iter()
         .chain(history.pin_messages.as_slice())
+        .chain(history.shared_messages.as_slice())
         .chain(
             history
                 .threads
@@ -1169,6 +1173,17 @@ fn clean_history(history: &CacheHistory, now: u64) -> Result<CacheHistory> {
         {
             result
                 .pin_messages
+                .try_push(message)
+                .map_err(|_| DataError::Capacity)?;
+        }
+    }
+    result.shared_messages = Page::empty();
+    for message in history.shared_messages.as_slice() {
+        if !message.deleted
+            && let Some(message) = clean_message(message)?
+        {
+            result
+                .shared_messages
                 .try_push(message)
                 .map_err(|_| DataError::Capacity)?;
         }

@@ -471,6 +471,7 @@ fn thumbnail_history_matches(history: &CacheHistory, thumbnail: &CacheThumbnail,
         .as_slice()
         .iter()
         .chain(history.pin_messages.as_slice())
+        .chain(history.shared_messages.as_slice())
         .find(|m| m.id == thumbnail.message)
         .is_none_or(|message| {
             !message.deleted
@@ -1995,6 +1996,7 @@ mod tests {
             }]),
             pins: Page::empty(),
             pin_messages: Page::empty(),
+            shared_messages: Page::empty(),
             threads: Page::empty(),
             pins_loaded: false,
             older: None,

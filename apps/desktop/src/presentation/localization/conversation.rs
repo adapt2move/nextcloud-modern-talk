@@ -434,11 +434,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Confirm deletion",
         "Confirmar eliminación",
     ),
-    (
-        "Maximale Dateigröße:",
-        "Maximum file size:",
-        "Tamaño máximo de archivo:",
-    ),
     ("Meeting", "Meeting", "Reunión"),
     ("Meeting beitreten", "Join meeting", "Unirse a la reunión"),
     ("Meeting starten", "Start meeting", "Iniciar reunión"),

@@ -122,6 +122,7 @@ fn message_expiry(db: &Connection, thumbnail: &CacheThumbnail, now: u64) -> Resu
         .as_slice()
         .iter()
         .chain(history.pin_messages.as_slice())
+        .chain(history.shared_messages.as_slice())
         .find(|m| m.id == thumbnail.message)
     else {
         return Ok(thumbnail.expires_at);
@@ -159,6 +160,7 @@ pub(super) fn remove_unavailable(db: &Connection, history: &CacheHistory, now: u
         .as_slice()
         .iter()
         .chain(history.pin_messages.as_slice())
+        .chain(history.shared_messages.as_slice())
     {
         if message.deleted || message.expires_at.is_some_and(|at| at > 0 && at <= now) {
             sql(db.execute(

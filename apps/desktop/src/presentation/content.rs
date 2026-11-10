@@ -860,7 +860,8 @@ impl Desktop {
             if self.overlay == Some(Overlay::Files)
                 && let Some(panel) = &self.snapshot.message_panel
             {
-                for message in panel.shared_files.as_slice().iter().take(16) {
+                // Every tile of the overview needs its thumbnail, not only the first rows.
+                for message in panel.shared_files.as_slice() {
                     for object in message
                         .metadata
                         .rich

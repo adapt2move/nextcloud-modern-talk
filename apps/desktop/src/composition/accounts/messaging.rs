@@ -1331,7 +1331,17 @@ impl Accounts {
                             })
                     })
             }
-            Work::Files | Work::Search | Work::Reminders | Work::Scheduled => {
+            // The room's shared files are one list: any admitted read of the open
+            // room is a valid observation, whichever request the panel shows now.
+            Work::Files => {
+                self.snapshot.selected == Some(context)
+                    && self
+                        .snapshot
+                        .message_panel
+                        .as_ref()
+                        .is_some_and(|p| p.context == context)
+            }
+            Work::Search | Work::Reminders | Work::Scheduled => {
                 self.snapshot.selected == Some(context)
                     && self
                         .queued_read

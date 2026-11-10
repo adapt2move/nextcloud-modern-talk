@@ -104,6 +104,9 @@ pub(super) struct History {
     pins_state: RemoteState,
     pins_loaded: bool,
     pins_read_at: Option<Instant>,
+    /// The latest shared files and media read for this room. The overview shows
+    /// them at once and a fresh read replaces them.
+    shared: Page<MessageView, 50>,
     schedules: Page<talk_core::ui::messaging::Scheduled, 100>,
     schedules_version: Version,
     translation_targets: Option<(Instant, Page<Text<64>, 64>)>,
@@ -146,6 +149,7 @@ impl History {
             pins_state: RemoteState::Idle,
             pins_loaded: false,
             pins_read_at: None,
+            shared: Page::empty(),
             schedules: Page::empty(),
             schedules_version: Version(0, false),
             translation_targets: None,
@@ -182,6 +186,9 @@ impl History {
         panel.pinned_messages = self.pins.clone();
         panel.pins_state = self.pins_state;
         panel.pins_loaded = self.pins_loaded;
+        if panel.shared_files.as_slice().is_empty() {
+            panel.shared_files = self.shared.clone();
+        }
         let now = now_unix();
         let mut activities = self.thread_activity.as_slice().to_vec();
         for (root, rows, cached_root) in &self.threads {
@@ -612,6 +619,7 @@ impl History {
             .as_slice()
             .iter()
             .chain(self.pins.as_slice())
+            .chain(self.shared.as_slice())
             .chain(
                 self.threads
                     .iter()
@@ -646,6 +654,7 @@ impl History {
         };
         self.messages = page(self.messages.as_slice().iter().filter_map(retain));
         self.pins = page(self.pins.as_slice().iter().filter_map(retain));
+        self.shared = page(self.shared.as_slice().iter().filter_map(retain));
         for (_, rows, root) in &mut self.threads {
             *rows = page(rows.as_slice().iter().filter_map(retain));
             *root = root.as_ref().and_then(retain);
@@ -967,6 +976,7 @@ impl Cache {
                     .filter(|id| *id > 0),
             ),
             pin_messages: page(room.pins.as_slice().iter().filter_map(cached_message)),
+            shared_messages: page(room.shared.as_slice().iter().filter_map(cached_message)),
             threads: page(
                 room.threads
                     .iter()
@@ -1051,6 +1061,15 @@ impl Cache {
             }));
             room.pins_loaded =
                 cached.pins_loaded && room.pins.as_slice().len() == cached.pins.as_slice().len();
+        }
+        if room.shared.as_slice().is_empty() {
+            room.shared = page(
+                cached
+                    .shared_messages
+                    .as_slice()
+                    .iter()
+                    .map(restored_message),
+            );
         }
         room.older = cached.older.map(u128::from);
         room.latest = cached.latest.map(u128::from);
@@ -1208,6 +1227,26 @@ impl Cache {
         .map(|message| u128::from(message.message.id.sequence))
         .collect::<Vec<_>>();
         room.redact_threads(&deleted);
+        if !deleted.is_empty() {
+            room.shared = page(
+                room.shared
+                    .as_slice()
+                    .iter()
+                    .filter(|message| !deleted.contains(&message.local_id))
+                    .cloned(),
+            );
+        }
+        if work == Work::Files
+            && let Ok(MessagingResult::Messages { messages, .. }) = result
+        {
+            room.shared = page(
+                messages
+                    .as_slice()
+                    .iter()
+                    .map(message_view)
+                    .filter(|message| !message.metadata.pin_notice),
+            );
+        }
         if work == Work::Metadata
             && let Some((_, at)) = room.metadata_probe.as_mut()
         {
