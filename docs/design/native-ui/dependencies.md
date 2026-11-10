@@ -1,7 +1,8 @@
 # Native UI dependency provenance
 
 The desktop uses **GPUI 0.2.2** with source-bound local backdrop-renderer,
-native file-list clipboard and macOS text-input range output-pointer patches,
+native file-list clipboard, macOS text-input range output-pointer, Finder file-promise
+drag, main-process permission callback and X11 first-refresh patches,
 default features disabled, `font-kit` and `x11`, plus
 **unicode-segmentation 1.13.3**. Exact versions and
 features live in the workspace manifests and `Cargo.lock`; the toolchain is
@@ -23,12 +24,21 @@ base; it must not be described as an identical clean Git commit.
 [UPSTREAM.json](../../../vendor/gpui/UPSTREAM.json) records the unchanged original
 inventory and exact local delta; the architecture and packaging checks verify both.
 The native input delta respects AppKit's nullable `actualRange` output pointer
-and reports the actual returned range when the caller supplies it. Linux tests
-cannot execute that macOS callback.
+and reports the actual returned range when the caller supplies it. This is part of
+GPUI's private Cocoa text-input callback, below the application's safe
+`EntityInputHandler` interface. Returning a normalized range from the composer
+cannot guard the native pointer or fill an exact-match output omitted by the
+platform callback. A dependency replacement must preserve both behaviors;
+compilation cannot establish them. Linux tests cannot execute that macOS callback.
 The clipboard delta preserves native file-list types instead of treating file paths
 as text. The Linux URI-list reader bounds file count and payload size; macOS and
 Windows retain native path lists for explicit paste. Native platform qualification
 is separate from compilation and the Linux X11 fixture.
+The permission delta observes and requests AVFoundation, CoreGraphics and
+UserNotifications authorization in the running app, retaining admission until each
+native callback is released. Notification delivery or screen-source enumeration
+alone cannot replace that authorization contract. The Finder delta exports files
+only after an external drop, through the application-owned bounded download path.
 Unpinned Zed main is not substituted. GPUI's source/build manifest selects Metal on macOS and Blade/
 Vulkan for the exercised Linux X11 path. Wayland, `macos-blade`, runtime shader
 switches and GPUI test-support are not enabled by the desktop manifest.
