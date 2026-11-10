@@ -15,6 +15,8 @@ use talk_core::ui::conversation::{Availability, RemoteState};
 
 #[derive(Clone)]
 struct Job {
+    /// When the request was handed to the runtime, for the diagnostic duration.
+    started: Instant,
     request: RequestId,
     account: AccountScope,
     context: Option<ConversationRef>,
@@ -434,6 +436,7 @@ impl Accounts {
                 let message = mid(&attachment)?;
                 self.start_content(
                     Job {
+                        started: Instant::now(),
                         request,
                         account,
                         context: Some(attachment.context),
@@ -692,6 +695,7 @@ impl Accounts {
         };
         self.start_content(
             Job {
+                started: Instant::now(),
                 request,
                 account,
                 context: local_context(&target),
@@ -895,6 +899,7 @@ impl Accounts {
         }
         self.start_content(
             Job {
+                started: Instant::now(),
                 request,
                 account: context.account,
                 context: Some(context),
@@ -1055,6 +1060,19 @@ impl Accounts {
             Ok(_) => Err(IdentityError::Request(ErrorKind::Malformed)),
             Err(e) => Err(e),
         };
+        if let Some(target) = &job.target {
+            let (outcome, error) = match &result {
+                Ok(_) => ("ready", None),
+                Err(error) => ("failed", Some(diagnostic_error(*error))),
+            };
+            let mut note = crate::diagnostics::Note::debug("asset", outcome)
+                .detail(asset_kind(target))
+                .elapsed(job.started.elapsed());
+            if let Some(error) = error {
+                note = note.error(error);
+            }
+            crate::diagnostics::note(note);
+        }
         match result {
             Ok(wire::ContentResult::SelfProfile {
                 name,
@@ -2062,6 +2080,7 @@ impl Accounts {
                 .any(|j| j.context.is_none() && j.target.is_none() && !j.cloud)
         {
             let job = Job {
+                started: Instant::now(),
                 request: RequestId(0),
                 account,
                 context: None,
@@ -2209,6 +2228,20 @@ fn mid(a: &view::AttachmentRef) -> Result<protocol::MessageId, SubmitError> {
         conversation: a.context.conversation,
         sequence: u64::try_from(a.message).map_err(|_| SubmitError::StaleScope)?,
     })
+}
+/// A fixed name for the kind of picture, never the picture's identity.
+fn asset_kind(target: &view::AssetTarget) -> &'static str {
+    use view::AssetTarget as V;
+    match target {
+        V::SelfAvatar => "self_avatar",
+        V::ConversationAvatar(_) => "conversation_avatar",
+        V::MessageAvatar { .. } => "message_avatar",
+        V::ParticipantAvatar { .. } | V::PersonAvatar(_) => "person_avatar",
+        V::Thumbnail(_) => "thumbnail",
+        V::Image(_) => "detail_view",
+        V::CloudFile { .. } => "cloud_file",
+        V::Reference { .. } => "reference",
+    }
 }
 fn asset_request(target: &view::AssetTarget) -> Result<wire::AssetRequest, SubmitError> {
     use view::AssetTarget as V;
@@ -2413,6 +2446,7 @@ mod tests {
             let (mut model, reference) = attachment_model();
             let target = view::AssetTarget::Thumbnail(reference.clone());
             let job = Job {
+                started: Instant::now(),
                 request: RequestId(1),
                 account: reference.context.account,
                 context: Some(reference.context),
@@ -2511,6 +2545,7 @@ mod tests {
                 model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
                 let context = model.snapshot.selected.unwrap();
                 let job = Job {
+                    started: Instant::now(),
                     request: RequestId(0),
                     account: context.account,
                     context: Some(context),
@@ -2564,6 +2599,7 @@ mod tests {
                 model.snapshot.content_panel.poll_state = RemoteState::Idle;
                 let context = model.snapshot.selected.unwrap();
                 let job = Job {
+                    started: Instant::now(),
                     request: RequestId(88),
                     account: context.account,
                     context: Some(context),
@@ -2967,6 +3003,7 @@ mod tests {
     fn busy_content_jobs(model: &mut Accounts, account: AccountScope) {
         for serial in 1..=2 {
             model.content_owner.jobs.push(Job {
+                started: Instant::now(),
                 request: RequestId(serial),
                 account,
                 context: None,

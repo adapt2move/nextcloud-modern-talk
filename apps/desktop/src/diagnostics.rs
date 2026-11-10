@@ -175,6 +175,11 @@ struct Record {
     at: u128,
     event: Event,
 }
+/// One queued line: a typed event or a free-form but fixed-text note.
+enum Item {
+    Event(Record),
+    Note { at: u128, note: Note },
+}
 #[derive(Default)]
 struct State {
     shutdown: AtomicBool,
@@ -183,7 +188,7 @@ struct State {
 }
 #[derive(Clone)]
 struct Handle {
-    sender: SyncSender<Option<Record>>,
+    sender: SyncSender<Option<Item>>,
     state: Arc<State>,
 }
 impl Handle {
@@ -193,14 +198,17 @@ impl Handle {
         let _ = self.sender.try_send(None);
     }
     fn record(&self, event: Event) {
+        self.send(Item::Event(Record {
+            at: timestamp(),
+            event,
+        }));
+    }
+    fn send(&self, item: Item) {
         if self.state.shutdown.load(Ordering::Acquire) || self.state.stopped.load(Ordering::Acquire)
         {
             return;
         }
-        match self.sender.try_send(Some(Record {
-            at: timestamp(),
-            event,
-        })) {
+        match self.sender.try_send(Some(item)) {
             Ok(()) | Err(TrySendError::Disconnected(_)) => (),
             Err(TrySendError::Full(_)) => {
                 let _ = self
@@ -212,6 +220,143 @@ impl Handle {
             }
         }
     }
+}
+
+/// How much detail this process records. Standard keeps the typed outcomes every
+/// build writes. Verbose adds timings and the fixed-text notes tagged `debug`, and is
+/// on for development builds, for pre-1.0 releases (every release so far is a
+/// preview) and when `NEXTCLOUD_MODERN_TALK_LOG=debug`. `=info` turns it off again.
+pub(crate) fn verbose() -> bool {
+    static VERBOSE: OnceLock<bool> = OnceLock::new();
+    *VERBOSE.get_or_init(|| {
+        match std::env::var("NEXTCLOUD_MODERN_TALK_LOG")
+            .ok()
+            .as_deref()
+            .map(str::trim)
+        {
+            Some("debug") => true,
+            Some("info") => false,
+            _ => cfg!(debug_assertions) || env!("CARGO_PKG_VERSION_MAJOR") == "0",
+        }
+    })
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Level {
+    Info,
+    Debug,
+}
+/// A line of fixed text. Topic, outcome and detail are `'static` literals, so no
+/// message, name, address, path or server value can reach the file through it.
+#[derive(Clone, Copy)]
+pub(crate) struct Note {
+    level: Level,
+    topic: &'static str,
+    outcome: &'static str,
+    detail: Option<&'static str>,
+    count: u64,
+    elapsed_ms: Option<u64>,
+    error: Option<ErrorKind>,
+}
+impl Note {
+    /// Written in every build.
+    pub(crate) fn info(topic: &'static str, outcome: &'static str) -> Self {
+        Self::new(Level::Info, topic, outcome)
+    }
+    /// Written only in verbose runs; see [`verbose`].
+    pub(crate) fn debug(topic: &'static str, outcome: &'static str) -> Self {
+        Self::new(Level::Debug, topic, outcome)
+    }
+    fn new(level: Level, topic: &'static str, outcome: &'static str) -> Self {
+        Self {
+            level,
+            topic,
+            outcome,
+            detail: None,
+            count: 0,
+            elapsed_ms: None,
+            error: None,
+        }
+    }
+    pub(crate) fn detail(mut self, detail: &'static str) -> Self {
+        self.detail = Some(detail);
+        self
+    }
+    pub(crate) fn count(mut self, count: u64) -> Self {
+        self.count = count;
+        self
+    }
+    pub(crate) fn elapsed(mut self, elapsed: Duration) -> Self {
+        self.elapsed_ms = Some(u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX));
+        self
+    }
+    pub(crate) fn error(mut self, error: ErrorKind) -> Self {
+        self.error = Some(error);
+        self
+    }
+}
+pub(crate) fn note(note: Note) {
+    if note.level == Level::Debug && !verbose() {
+        return;
+    }
+    if let Some(logger) = LOGGER.get() {
+        logger.send(Item::Note {
+            at: timestamp(),
+            note,
+        });
+    }
+}
+fn environment() -> Note {
+    Note::info(
+        "environment",
+        if verbose() { "verbose" } else { "standard" },
+    )
+    .detail(std::env::consts::OS)
+}
+/// A panic is the one failure a later report cannot reconstruct. Only the source
+/// location is kept (a static path inside this repository or a dependency, and a
+/// line); the message may carry data and is never written.
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(location) = info.location() {
+            let file = location.file();
+            let file = file.rfind("/src/").map_or(file, |at| &file[at + 1..]);
+            // Leaked once per panic; the process is going down.
+            let file: &'static str = Box::leak(file.to_owned().into_boxed_str());
+            note(
+                Note::info("panic", "crashed")
+                    .detail(file)
+                    .count(u64::from(location.line())),
+            );
+            // Give the writer a moment: the queue is drained by another thread.
+            thread::sleep(Duration::from_millis(60));
+        }
+        previous(info);
+    }));
+}
+fn encode_note(session: u128, at: u128, note: Note) -> String {
+    let Note {
+        level,
+        topic,
+        outcome,
+        detail,
+        count,
+        elapsed_ms,
+        error,
+    } = note;
+    let detail = detail.map_or_else(String::new, |d| format!(",\"detail\":\"{d}\""));
+    let elapsed = elapsed_ms.map_or_else(String::new, |ms| format!(",\"elapsed_ms\":{ms}"));
+    let error = error.map_or("none", error_name);
+    let level = if level == Level::Debug {
+        "debug"
+    } else {
+        "info"
+    };
+    format!(
+        "{{\"timestamp_unix_ms\":{at},\"session\":{session},\"pid\":{},\"version\":\"{}\",\"level\":\"{level}\",\"request\":0,\"operation\":\"{topic}\",\"outcome\":\"{outcome}\",\"count\":{count},\"error\":\"{error}\"{detail}{elapsed}}}\n",
+        std::process::id(),
+        env!("CARGO_PKG_VERSION"),
+    )
 }
 pub(crate) fn record(event: Event) {
     if let Some(logger) = LOGGER.get() {
@@ -262,6 +407,8 @@ pub(crate) fn start() -> Session {
         }) {
         Ok(worker) => {
             let _ = LOGGER.set(handle.clone());
+            install_panic_hook();
+            note(environment());
             Session {
                 handle: Some(handle),
                 worker: Some(worker),
@@ -276,7 +423,7 @@ pub(crate) fn start() -> Session {
         }
     }
 }
-fn channel() -> (Handle, Receiver<Option<Record>>) {
+fn channel() -> (Handle, Receiver<Option<Item>>) {
     let (sender, receiver) = mpsc::sync_channel(CAPACITY);
     (
         Handle {
@@ -314,12 +461,7 @@ fn timestamp() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |t| t.as_millis())
 }
-fn run(
-    path: io::Result<PathBuf>,
-    receiver: Receiver<Option<Record>>,
-    state: Arc<State>,
-    limit: u64,
-) {
+fn run(path: io::Result<PathBuf>, receiver: Receiver<Option<Item>>, state: Arc<State>, limit: u64) {
     let result = (|| -> io::Result<()> {
         let mut sink = Sink::open(&path?, limit)?;
         let session = timestamp();
@@ -348,10 +490,13 @@ fn run(
                     },
                 ))?;
             }
-            let Some(record) = next else {
+            let Some(item) = next else {
                 break;
             };
-            sink.write(&encode(session, record))?;
+            match item {
+                Item::Event(record) => sink.write(&encode(session, record))?,
+                Item::Note { at, note } => sink.write(&encode_note(session, at, note))?,
+            }
         }
         sink.write(&encode(
             session,

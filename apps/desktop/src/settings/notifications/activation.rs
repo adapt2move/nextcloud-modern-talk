@@ -99,7 +99,22 @@ pub(super) fn deliver(
     {
         return None;
     }
-    match ack_receive.recv_timeout(Duration::from_secs(4)) {
+    let asked = Instant::now();
+    let answer = ack_receive.recv_timeout(Duration::from_secs(4));
+    crate::diagnostics::note(
+        crate::diagnostics::Note::info(
+            "notification",
+            match &answer {
+                Ok(Ok((true, _))) => "submitted",
+                Ok(Ok((false, _))) => "permission_denied",
+                Ok(Err(_)) => "helper_failed",
+                Err(_) => "helper_timed_out",
+            },
+        )
+        .detail("message_with_action")
+        .elapsed(asked.elapsed()),
+    );
+    match answer {
         Ok(Ok((banner, sound_ok))) => Some((
             if banner {
                 DeliveryOutcome::SubmittedToSystem

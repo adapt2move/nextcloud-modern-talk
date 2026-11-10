@@ -166,6 +166,7 @@ impl Accounts {
         let generation = self.content_owner.voice.generation;
         self.start_content(
             Job {
+                started: Instant::now(),
                 request,
                 account: reference.context.account,
                 context: Some(reference.context),

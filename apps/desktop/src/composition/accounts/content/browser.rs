@@ -179,6 +179,7 @@ impl Accounts {
         let progress = wire::TransferProgress::default();
         self.start_content(
             Job {
+                started: Instant::now(),
                 request,
                 account,
                 context: None,
@@ -283,6 +284,17 @@ impl Accounts {
                     _ => view::DownloadState::Failed(UnavailableReason::PolicyStale),
                 }
             };
+            crate::diagnostics::note(
+                crate::diagnostics::Note::info(
+                    "download",
+                    match view.state {
+                        view::DownloadState::Saved => "saved",
+                        view::DownloadState::Cancelled => "cancelled",
+                        _ => "failed",
+                    },
+                )
+                .count(view.received),
+            );
         }
         self.touch();
     }
@@ -318,6 +330,7 @@ impl Accounts {
             .ok_or(SubmitError::StaleScope)?;
         self.start_content(
             Job {
+                started: Instant::now(),
                 request,
                 account,
                 context: None,
@@ -455,6 +468,7 @@ impl Accounts {
             return Ok(());
         }
         let job = Job {
+            started: Instant::now(),
             request,
             account,
             context: None,

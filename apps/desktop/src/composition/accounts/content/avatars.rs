@@ -742,6 +742,7 @@ impl Accounts {
             return;
         };
         let job = Job {
+            started: Instant::now(),
             request: RequestId(0),
             account,
             context: local_context(&binding.target),

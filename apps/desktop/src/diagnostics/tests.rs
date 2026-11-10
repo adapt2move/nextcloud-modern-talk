@@ -279,3 +279,37 @@ fn call_gate_records_only_allowlisted_reason_and_evidence() {
         assert!(!encoded.contains("canary-password"));
     }
 }
+
+#[test]
+fn notes_are_fixed_text_with_a_level_and_an_optional_duration() {
+    let line = encode_note(
+        3,
+        9,
+        Note::debug("asset", "failed")
+            .detail("detail_view")
+            .elapsed(Duration::from_millis(1234))
+            .error(ErrorKind::Transport),
+    );
+    assert!(line.ends_with('\n'));
+    for part in [
+        "\"level\":\"debug\"",
+        "\"operation\":\"asset\"",
+        "\"outcome\":\"failed\"",
+        "\"detail\":\"detail_view\"",
+        "\"elapsed_ms\":1234",
+        "\"error\":\"transport\"",
+    ] {
+        assert!(line.contains(part), "{part} in {line}");
+    }
+    let plain = encode_note(3, 9, Note::info("notification", "submitted"));
+    assert!(plain.contains("\"level\":\"info\""));
+    assert!(!plain.contains("detail") && !plain.contains("elapsed_ms"));
+}
+
+#[test]
+fn the_environment_line_names_the_detail_level_and_platform() {
+    let line = encode_note(1, 1, environment());
+    assert!(line.contains("\"operation\":\"environment\""));
+    assert!(line.contains(&format!("\"detail\":\"{}\"", std::env::consts::OS)));
+    assert!(line.contains("\"outcome\":\"verbose\"") || line.contains("\"outcome\":\"standard\""));
+}

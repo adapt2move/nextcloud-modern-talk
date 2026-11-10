@@ -1084,6 +1084,7 @@ impl Accounts {
                     crate::diagnostics::record(event);
                 }
                 ui.last_gate = next_gate;
+                note_call_phase(&value.phase);
                 self.snapshot.call = Some(view);
                 self.snapshot.conversations =
                     page(self.snapshot.conversations.as_slice().iter().map(|row| {
@@ -1373,6 +1374,26 @@ fn project(
                         }),
                 ),
         ),
+    }
+}
+
+/// Logs each change of the call's phase once, as a fixed name. Calls do not overlap,
+/// so one process-wide marker is enough.
+fn note_call_phase(phase: &Phase) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static LAST: AtomicU8 = AtomicU8::new(u8::MAX);
+    let (number, name) = match phase {
+        Phase::Ringing => (0, "ringing"),
+        Phase::Preparing => (1, "preparing"),
+        Phase::Connecting => (2, "connecting"),
+        Phase::Active => (3, "active"),
+        Phase::Waiting(_) => (4, "waiting"),
+        Phase::Reconnecting => (5, "reconnecting"),
+        Phase::Ending => (6, "ending"),
+        Phase::Ended => (7, "ended"),
+    };
+    if LAST.swap(number, Ordering::Relaxed) != number {
+        crate::diagnostics::note(crate::diagnostics::Note::info("call_phase", name));
     }
 }
 

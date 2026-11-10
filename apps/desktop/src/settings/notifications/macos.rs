@@ -33,6 +33,22 @@ fn sound_argument(enabled: bool, kind: NotificationKind) -> &'static str {
         "message"
     }
 }
+fn failure_name(error: NotificationError) -> &'static str {
+    match error {
+        NotificationError::Unavailable => "unavailable",
+        NotificationError::PermissionDenied => "permission_denied",
+        NotificationError::Failed => "failed",
+        NotificationError::TimedOut => "timed_out",
+        NotificationError::Busy => "busy",
+        NotificationError::Closed => "closed",
+        NotificationError::InvalidContent => "invalid_content",
+        NotificationError::SourceUnavailable => "source_unavailable",
+        NotificationError::Stale => "stale",
+        NotificationError::Duplicate => "duplicate",
+        NotificationError::Coalesced => "coalesced",
+        NotificationError::Cancelled => "cancelled",
+    }
+}
 pub(super) fn deliver(
     shared: &Shared,
     event: &NotificationEvent,
@@ -40,7 +56,28 @@ pub(super) fn deliver(
     sound: bool,
     dispatcher: Option<&dyn NotificationCallDispatcher>,
 ) -> (DeliveryOutcome, DeliveryOutcome) {
+    let started = Instant::now();
     let result = perform(shared, event, banner, sound, dispatcher);
+    // The one line that tells a missing banner from a missing permission: what the
+    // system helper answered, how long it took, and nothing about the content.
+    crate::diagnostics::note(
+        crate::diagnostics::Note::info(
+            "notification",
+            match &result {
+                Ok((true, _)) => "submitted",
+                Ok((false, _)) => "banner_not_submitted",
+                Err(error) => failure_name(*error),
+            },
+        )
+        .detail(
+            if event.kind.category() == NotificationCategory::IncomingCalls {
+                "incoming_call"
+            } else {
+                "message"
+            },
+        )
+        .elapsed(started.elapsed()),
+    );
     match result {
         Ok((banner_ok, sound_ok)) => (
             if !banner {

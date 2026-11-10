@@ -138,6 +138,15 @@ Process-local request numbers connect an operation to its result.
 Message text, account and conversation names, server addresses, credentials and
 raw backend responses are excluded. Nothing is uploaded automatically.
 
+Every run writes an `environment` line first (platform and detail level), records a
+`panic` line with only the source file and line if the app crashes, logs call phase
+changes, download results and the outcome of each desktop notification
+(`submitted`, `permission_denied`, `helper_timed_out`, ...). Development builds and
+every pre-1.0 release also log verbose lines (`"level":"debug"`), for example how long
+each picture took to load (`asset`, with a fixed kind such as `detail_view` and
+`elapsed_ms`). Set `NEXTCLOUD_MODERN_TALK_LOG=debug` to force this on or `=info` to
+force it off. All of it is fixed text, never content.
+
 | Platform | Log directory |
 | --- | --- |
 | macOS | `~/Library/Logs/NextCloud Modern Talk/` |
