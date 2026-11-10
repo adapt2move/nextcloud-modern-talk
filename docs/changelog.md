@@ -2,6 +2,14 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.20 alpha (2026-11-10)
+
+### Fixes
+
+- **calls:** Keep the call when a participant offers an unusable address (`c652eca`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.20/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.20/docs/limitations.md)
+
 ## v0.0.19 alpha (2026-11-10)
 
 ### Fixes
