@@ -371,26 +371,21 @@ impl Desktop {
         }
     }
 
-    pub(super) fn call_speaking_bars(&self, id: ElementId, color: gpui::Hsla) -> AnyElement {
-        let bars = div().flex().items_end().gap_1().h(gpui::px(12.)).children(
-            [5., 10., 7.].into_iter().map(|height| {
+    /// Static bars beside the speaking ring. Someone speaks for most of a call,
+    /// so a repeating pulse here redrew the whole window at display rate.
+    pub(super) fn call_speaking_bars(&self, color: gpui::Hsla) -> Div {
+        div()
+            .flex()
+            .items_end()
+            .gap_1()
+            .h(gpui::px(12.))
+            .children([5., 10., 7.].into_iter().map(|height| {
                 div()
                     .w(gpui::px(2.))
                     .h(gpui::px(height))
                     .rounded_full()
                     .bg(color)
-            }),
-        );
-        if self.reduced_motion {
-            bars.into_any_element()
-        } else {
-            bars.with_animation(
-                id,
-                Animation::new(Duration::from_millis(900)).repeat(),
-                |bars, progress| bars.opacity(0.65 + 0.35 * (1. - (2. * progress - 1.).abs())),
-            )
-            .into_any_element()
-        }
+            }))
     }
 
     /// All application dialog panels share the same finite entrance. Relative

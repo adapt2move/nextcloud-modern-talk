@@ -243,6 +243,14 @@ impl Desktop {
             && self.overlay.is_none()
             && !self.incoming_visible()
     }
+    /// The current feedback for the dark call stage, which draws its own
+    /// notice: the text and whether it is a warning or an error.
+    pub(super) fn stage_feedback(&self) -> Option<(&'static str, bool)> {
+        let feedback = self
+            .feedback
+            .filter(|f| f.visible_in(self.snapshot.selected, self.overlay))?;
+        Some((feedback.text, !matches!(feedback.tone, Tone::Info)))
+    }
     pub(super) fn feedback_view(&self, cx: &Context<Self>) -> AnyElement {
         self.feedback_view_on(self.overlay, cx)
     }

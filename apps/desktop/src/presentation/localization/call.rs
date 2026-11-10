@@ -271,11 +271,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Finalizar para todas las personas",
     ),
     (
-        "Gerätewechsel stoppt die Übertragung.",
-        "Changing devices stops the stream.",
-        "Cambiar de dispositivo detiene la transmisión.",
-    ),
-    (
         "Gästelink kopiert.",
         "Guest link copied.",
         "Enlace para invitados copiado.",

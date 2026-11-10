@@ -1,7 +1,7 @@
 pub(super) mod consent;
 mod dock;
 pub(super) mod recovery;
-use super::controls::{Availability, BannerRole};
+use super::controls::Availability;
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, ImageSource, Window, div, img, prelude::*, px};
@@ -13,6 +13,8 @@ use talk_core::ui::presentation::{
 
 // Sixteen remote cameras, the local camera, and one screen stage may coexist.
 const MAX_CALL_TILES: usize = 18;
+/// Amber mark for warnings on the dark stage, readable in both app appearances.
+const STAGE_WARNING: u32 = 0xf0b840;
 
 impl Desktop {
     pub(super) fn waiting_in_lobby(&self) -> bool {
@@ -327,11 +329,9 @@ impl Desktop {
                         )
                         .can_open_settings,
                     |d| {
-                        d.child(self.button(
+                        d.child(self.stage_action(
                             "share-permission",
                             "Systemeinstellungen öffnen",
-                            ButtonStyle::Secondary,
-                            true,
                             LocalAction::Permission(
                                 talk_core::preferences::permissions::PermissionKind::ScreenSharing,
                                 talk_core::preferences::permissions::PermissionAction::OpenSystemSettings,
@@ -341,11 +341,9 @@ impl Desktop {
                     },
                 )
                 .when(retry, |d| {
-                    d.child(self.button(
+                    d.child(self.stage_action(
                         "share-again",
                         "Neu auswählen",
-                        ButtonStyle::Secondary,
-                        true,
                         LocalAction::Intent(UiIntent::ShareScreen(call.scope)),
                         cx,
                     ))
@@ -358,48 +356,34 @@ impl Desktop {
             .visible(call.scope, std::time::Instant::now())
         {
             notices.push(
-                self.banner_with_icon(
-                    BannerRole::Warning,
-                    self.l("Ton oder Bild fehlen?"),
-                    Some("info"),
-                )
-                .flex_none()
-                .py_0()
-                .gap_3()
-                .child(self.button(
-                    "recover-call-media",
-                    "Neu beitreten",
-                    ButtonStyle::Secondary,
-                    true,
-                    LocalAction::Intent(UiIntent::RecoverCallMedia(call.scope)),
-                    cx,
-                ))
-                .into_any_element(),
+                self.stage_notice("info", true, self.l("Ton oder Bild fehlen?"))
+                    .child(self.stage_action(
+                        "recover-call-media",
+                        "Neu beitreten",
+                        LocalAction::Intent(UiIntent::RecoverCallMedia(call.scope)),
+                        cx,
+                    ))
+                    .into_any_element(),
             );
         }
         if call.stage == CallStage::Reconnecting {
             notices.push(
-                self.banner_with_leading(
-                    BannerRole::Warning,
-                    self.l("Verbindung wird wiederhergestellt …"),
+                self.stage_notice_with(
                     self.call_spinner(
                         "call-reconnecting-spinner".into(),
                         16.,
-                        BannerRole::Warning.foreground(self.theme),
+                        gpui::rgb(STAGE_WARNING).into(),
                     ),
+                    self.l("Verbindung wird wiederhergestellt …"),
                 )
-                .flex_none()
-                .py_0()
                 .when(
                     self.call_reconnecting_since.is_some_and(|(scope, at)| {
                         scope == call.scope && at.elapsed() >= std::time::Duration::from_secs(15)
                     }),
                     |d| {
-                        d.child(self.button(
+                        d.child(self.stage_action(
                             "reconnect-call",
                             "Erneut verbinden",
-                            ButtonStyle::Secondary,
-                            true,
                             LocalAction::Intent(UiIntent::ReconnectCall(call.scope)),
                             cx,
                         ))
@@ -431,11 +415,9 @@ impl Desktop {
                 notices.push(
                     self.stage_notice(icon, true, self.l(text))
                         .when(can_open, |d| {
-                            d.child(self.button(
+                            d.child(self.stage_action(
                                 ("call-permission", kind as usize),
                                 "Systemeinstellungen öffnen",
-                                ButtonStyle::Secondary,
-                                true,
                                 LocalAction::Permission(kind, PermissionAction::OpenSystemSettings),
                                 cx,
                             ))
@@ -444,8 +426,41 @@ impl Desktop {
                 );
             }
         }
-        if self.local_feedback_visible() {
-            notices.push(self.feedback_view(cx));
+        if call.recording == talk_core::ui::presentation::CallRecordingState::Failed
+            && self.dismissed_recording_failure != Some(call.scope)
+        {
+            notices.push(
+                self.stage_notice(
+                    "info",
+                    true,
+                    self.l("Aufzeichnung fehlgeschlagen. Bitte die moderierende Person, sie zu prüfen."),
+                )
+                .child(self.icon_button(
+                    "dismiss-recording-failure",
+                    ("x", "Schließen"),
+                    ButtonStyle::Stage,
+                    Availability::available().hinted(),
+                    LocalAction::DismissRecordingFailure(call.scope),
+                    cx,
+                ))
+                .into_any_element(),
+            );
+        }
+        if self.local_feedback_visible()
+            && let Some((text, warning)) = self.stage_feedback()
+        {
+            notices.push(
+                self.stage_notice("info", warning, self.l(text))
+                    .child(self.icon_button(
+                        "dismiss-feedback",
+                        ("x", "Meldung schließen"),
+                        ButtonStyle::Stage,
+                        Availability::available().hinted(),
+                        LocalAction::DismissFeedback,
+                        cx,
+                    ))
+                    .into_any_element(),
+            );
         }
         if let CallStage::Required(gate) = call.stage
             && self.overlay != Some(Overlay::RecordingConsent)
@@ -481,11 +496,12 @@ impl Desktop {
                     .items_center()
                     .justify_center()
                     .child({
-                        // Actions get their own full-width row under the text. In
-                        // the same wrapping row as the text they overlapped it.
+                        // Notes and actions get their own lines under the text. A
+                        // wrapping row reserved a second line it did not use.
+                        let mut notes: Vec<gpui::AnyElement> = Vec::new();
                         let mut actions: Vec<gpui::AnyElement> = Vec::new();
                         if matches!(gate, RequiredGate::CallPolicy(_)) {
-                            actions.push(self.button("retry-call-policy", "Erneut verbinden", ButtonStyle::Secondary, true,
+                            actions.push(self.stage_action("retry-call-policy", "Erneut verbinden",
                                 LocalAction::Intent(UiIntent::ReconnectCall(call.scope)), cx).into_any_element());
                         }
                         if gate == RequiredGate::Lobby {
@@ -495,7 +511,8 @@ impl Desktop {
                                 .and_then(|at| self.settings_port.local_datetime(at))
                                 .and_then(|time| super::localization::local_datetime(self.locale, time.as_str()));
                             if let Some(time) = timer {
-                                actions.push(self.hint(&self.lf("Beginn: {time}", &[("time", time.as_str())])).into_any_element());
+                                notes.push(div().text_size(self.sp(12.)).text_color(t.stage_muted)
+                                    .child(self.lf("Beginn: {time}", &[("time", time.as_str())])).into_any_element());
                             }
                         }
                         if let Some(kind) = match gate {
@@ -503,24 +520,39 @@ impl Desktop {
                             RequiredGate::CameraPermission => Some(talk_core::preferences::permissions::PermissionKind::Camera),
                             _ => None,
                         } {
-                            actions.push(if self.observation(kind).can_open_settings {
-                                self.button("gate-system-settings", "Systemeinstellungen öffnen", ButtonStyle::Secondary, true,
-                                    LocalAction::Permission(kind, talk_core::preferences::permissions::PermissionAction::OpenSystemSettings), cx).into_any_element()
+                            if self.observation(kind).can_open_settings {
+                                actions.push(self.stage_action("gate-system-settings", "Systemeinstellungen öffnen",
+                                    LocalAction::Permission(kind, talk_core::preferences::permissions::PermissionAction::OpenSystemSettings), cx).into_any_element());
                             } else {
-                                div().text_size(self.sp(12.)).text_color(if t.dark { t.stage_text } else { t.muted })
-                                    .child(self.l("Systemeinstellungen sind auf diesem System nicht verfügbar.")).into_any_element()
-                            });
+                                notes.push(div().text_size(self.sp(12.)).text_color(t.stage_muted)
+                                    .child(self.l("Systemeinstellungen sind auf diesem System nicht verfügbar.")).into_any_element());
+                            }
                         }
                         if gate == RequiredGate::RecordingConsent {
-                            actions.push(self.button("required-gate", "Zustimmung prüfen", ButtonStyle::Secondary, true,
+                            actions.push(self.stage_action("required-gate", "Zustimmung prüfen",
                                 LocalAction::Open(Overlay::RecordingConsent), cx).into_any_element());
                         }
-                        actions.push(self.button("gate-leave", "Anruf verlassen", ButtonStyle::Quiet, true,
+                        actions.push(self.stage_action("gate-leave", "Anruf verlassen",
                             LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))), cx).into_any_element());
-                        self.notice(BannerRole::Warning, self.l(title), Some(self.l(description)), Some("lock"))
-                            .w_full()
-                            .max_w(px(480.))
-                            .child(div().w_full().flex().flex_wrap().items_center().gap_2().children(actions))
+                        // The stage's own card. The app's light warning banner
+                        // clipped its text here and read as a foreign element.
+                        // A definite width, so the wrapped description is measured
+                        // at the width it is painted with.
+                        self.stage_popover(div())
+                            .w(px((f32::from(window.viewport_size().width) - 88.).clamp(200., 480.)))
+                            .flex_none()
+                            .p_5()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(
+                                div().flex().items_center().gap_3()
+                                    .child(self.scaled_icon("lock", 18., gpui::rgb(STAGE_WARNING).into()))
+                                    .child(div().flex_1().min_w_0().text_size(self.sp(16.)).font_weight(FontWeight::MEDIUM).child(self.l(title).to_owned())),
+                            )
+                            .child(div().text_size(self.sp(14.)).text_color(t.stage_muted).child(self.l(description).to_owned()))
+                            .children(notes)
+                            .child(div().pt_1().flex().items_center().gap_2().children(actions))
                     }),
             );
         }
@@ -578,13 +610,16 @@ impl Desktop {
                     .iter()
                     .find(|(scope, tile, _, _)| *scope == call.scope && *tile == screen.tile)
                     .map(|(_, _, _, image)| image);
+                // The frame sits above the surface texture and fills the card
+                // absolutely, so it never adds an intrinsic size to the layout.
                 let visual = if let Some(image) = image {
-                    div().w_full().h_full().child(
-                        img(image.clone())
-                            .w_full()
-                            .h_full()
-                            .object_fit(gpui::ObjectFit::Contain),
-                    )
+                    img(image.clone())
+                        .absolute()
+                        .inset_0()
+                        .size_full()
+                        .rounded(px(11.))
+                        .object_fit(gpui::ObjectFit::Contain)
+                        .into_any_element()
                 } else {
                     div()
                         .w_full()
@@ -602,6 +637,7 @@ impl Desktop {
                             "{name} teilt den Bildschirm",
                             &[("name", screen.name.as_str())],
                         ))
+                        .into_any_element()
                 };
                 let width = (f32::from(window.viewport_size().width)
                     - if show_chat || show_people { 332. } else { 32. })
@@ -614,11 +650,11 @@ impl Desktop {
                             .h(px(width * 9. / 16.))
                             .flex_none()
                             .bg(t.stage_panel)
-                            .child(visual)
                             .children(
                                 self.materials
                                     .layer(super::controls::Texture::Tile, t.reduced_transparency),
                             )
+                            .child(visual)
                             .child(super::controls::inner_highlight(
                                 super::Theme { dark: true, ..t },
                                 12.,
@@ -632,6 +668,9 @@ impl Desktop {
                 - if show_chat || show_people { 300. } else { 0. }
                 - 56.)
                 .max(160.);
+            // The featured tile keeps the camera's 16:9 inside the stage. At full
+            // width it ran past the right edge and letterboxed the picture.
+            let feature_width = stage_width.min(feature_height * 16. / 9.);
             let columns =
                 gallery_columns(stage_width, self.scale, call.participants.as_slice().len());
             let focused = pinned.or_else(|| {
@@ -700,13 +739,17 @@ impl Desktop {
                             && Some(*local) == call.camera_tile(participant.local_id)
                     })
                     .map(|(_, _, _, image)| image);
+                // Camera frames fill the tile inside its border, above the grain,
+                // with the tile's own corners. In the padded flow the frame kept
+                // its intrinsic size and spilled over the card.
                 let visual = if let Some(image) = image {
-                    div().w_full().flex_1().min_h_0().child(
-                        img(image.clone())
-                            .w_full()
-                            .h_full()
-                            .object_fit(gpui::ObjectFit::Contain),
-                    )
+                    img(image.clone())
+                        .absolute()
+                        .inset_0()
+                        .size_full()
+                        .rounded(px(if participant.speaking { 9. } else { 11. }))
+                        .object_fit(gpui::ObjectFit::Contain)
+                        .into_any_element()
                 } else {
                     div()
                         .flex_1()
@@ -727,6 +770,7 @@ impl Desktop {
                                 (tile_height * 0.4).clamp(56., 128.)
                             },
                         ))
+                        .into_any_element()
                 };
                 let tile_base = if pip && participant.self_user {
                     t.stage
@@ -737,16 +781,16 @@ impl Desktop {
                 let tile = div()
                     .relative()
                     .min_w_0()
-                    .when(focused == Some(participant.local_id), |tile| tile.w_full())
-                    .when(focused != Some(participant.local_id), |tile| {
-                        tile.w(px(if pip && participant.self_user {
-                            pip_width
-                        } else {
-                            tile_width
-                        }))
-                    })
+                    .flex_none()
+                    .w(px(if focused == Some(participant.local_id) {
+                        feature_width
+                    } else if pip && participant.self_user {
+                        pip_width
+                    } else {
+                        tile_width
+                    }))
                     .h(px(if focused == Some(participant.local_id) {
-                        feature_height
+                        feature_width * 9. / 16.
                     } else if pip && participant.self_user {
                         pip_width * 9. / 16.
                     } else {
@@ -782,11 +826,11 @@ impl Desktop {
                     .justify_center()
                     .gap_2()
                     .p_4()
-                    .child(visual)
                     .children(
                         self.materials
                             .layer(super::controls::Texture::Tile, t.reduced_transparency),
                     )
+                    .child(visual)
                     .child(super::controls::inner_highlight(dark_stage, 12.))
                     .when(call.stage == CallStage::Reconnecting, |d| {
                         d.child(
@@ -827,7 +871,7 @@ impl Desktop {
                             .bottom(px(8.))
                             .left(px(8.))
                             .max_w(px((if focused == Some(participant.local_id) {
-                                stage_width
+                                feature_width
                             } else if pip && participant.self_user {
                                 pip_width
                             } else {
@@ -868,17 +912,7 @@ impl Desktop {
                                     ),
                             )
                             .when(participant.speaking, |row| {
-                                row.child(
-                                    self.call_speaking_bars(
-                                        gpui::SharedString::from(format!(
-                                            "speaking-bars-{}-{}",
-                                            call.scope.call.as_local(),
-                                            participant.local_id
-                                        ))
-                                        .into(),
-                                        stage_speaking_color(t),
-                                    ),
-                                )
+                                row.child(self.call_speaking_bars(stage_speaking_color(t)))
                             })
                             .when(participant.call_microphone == Some(false), |row| {
                                 row.child(self.scaled_icon("mic-off", 14., t.stage_muted))
@@ -980,7 +1014,7 @@ impl Desktop {
                 }
             }
             if let Some(tile) = feature {
-                stage = stage.child(tile);
+                stage = stage.child(div().w_full().flex().justify_center().child(tile));
             }
             if call.participants.as_slice().is_empty() {
                 tiles = tiles.child(
@@ -1012,10 +1046,12 @@ impl Desktop {
                 )
             } else if filmstrip {
                 stage.child(
+                    // A fixed width: sized by its tiles, the strip widened the
+                    // whole column and pushed the stage above it off centre.
                     div()
                         .id("call-filmstrip")
-                        .w_full()
-                        .min_w_0()
+                        .w(px(stage_width))
+                        .flex_none()
                         .overflow_x_scroll()
                         .child(tiles),
                 )
@@ -1206,13 +1242,15 @@ impl Desktop {
                 });
             // No permission or no device: the whole control is greyed out and
             // explains itself in its tooltip and in the notice above the stage.
+            // The dimming stays on the buttons: on the group it also faded the
+            // popover that opens from it.
             let blocked = matches!(state, MediaState::Denied | MediaState::Unavailable);
+            let control = control.when(blocked, |d| d.opacity(0.45));
             let mut group = div()
                 .relative()
                 .flex()
                 .items_center()
                 .rounded_full()
-                .when(blocked, |g| g.opacity(0.45))
                 .bg(if id != "screen-share" && state == MediaState::Off {
                     gpui::rgb(0x9e3e32).into()
                 } else {
@@ -1236,7 +1274,10 @@ impl Desktop {
                             },
                         ),
                         ButtonStyle::Stage,
-                        Availability::when(!blocked, media_reason(state)).hinted(),
+                        // A failed device is exactly when another one must be
+                        // selectable; only a missing permission blocks the list.
+                        Availability::when(state != MediaState::Denied, media_reason(state))
+                            .hinted(),
                         LocalAction::CallDevicePicker(call.scope, kind),
                         cx,
                     )
@@ -1250,18 +1291,11 @@ impl Desktop {
                     .border_color(t.stage)
                     .rounded(px(0.))
                     .rounded_r(px(22.))
-                    .when(state == MediaState::Off, |d| d.bg(gpui::rgb(0x9e3e32))),
+                    .when(state == MediaState::Off, |d| d.bg(gpui::rgb(0x9e3e32)))
+                    .when(state == MediaState::Denied, |d| d.opacity(0.45)),
                 );
                 if self.call_device_picker == Some((call.scope, kind)) {
-                    group = group
-                        .children(self.call_device_popover(call.scope, cx))
-                        .child(
-                            div()
-                                .absolute()
-                                .bottom(px(42.))
-                                .left(px(16.))
-                                .child(self.scaled_icon("chevron-down", 14., t.surface)),
-                        );
+                    group = group.children(self.call_device_popover(call.scope, cx));
                 }
             }
             primary_controls = primary_controls.child(group);
@@ -1334,24 +1368,20 @@ impl Desktop {
             );
             if !call.reactions.as_slice().is_empty() && self.call_reactions_open == Some(call.scope)
             {
+                // As wide as its reactions, centred above the button.
+                let shown = call.reactions.as_slice().len().min(6) as f32;
+                let width = shown * 44. + (shown - 1.) * 4. + 18.;
                 let mut menu = self
-                    .style_floating_surface(
+                    .stage_popover(
                         div()
                             .id("call-reaction-menu")
                             .absolute()
                             .bottom(px(54.))
-                            .left(px(-72.))
-                            .w(px(320.)),
-                        t.stage_panel,
-                        true,
-                        12.,
-                        super::theme::Elevation::Popover,
+                            .left(px(22. - width / 2.))
+                            .w(px(width)),
                     )
-                    .max_h(px(200.))
-                    .overflow_y_scroll()
                     .p_2()
                     .flex()
-                    .flex_wrap()
                     .gap_1();
                 for (index, emoji) in call.reactions.as_slice().iter().take(6).enumerate() {
                     menu = menu.child(
@@ -1366,10 +1396,11 @@ impl Desktop {
                             }),
                             cx,
                         )
-                        .min_w(px(44.))
+                        .size(px(44.))
                         .min_h(px(44.))
-                        .text_size(self.sp(28.))
-                        .p_1(),
+                        .border_0()
+                        .text_size(self.sp(26.))
+                        .p_0(),
                     );
                 }
                 reaction_control = reaction_control.child(menu);
@@ -1457,49 +1488,43 @@ impl Desktop {
         if narrow_controls {
             if self.call_secondary_open {
                 more = more.child(
-                    self.style_floating_surface(
-                        div().absolute().bottom(px(54.)).right(px(0.)),
-                        t.stage_panel,
-                        true,
-                        12.,
-                        super::theme::Elevation::Popover,
-                    )
-                    .p_2()
-                    .occlude()
-                    .child(interaction_controls.child(navigation_controls)),
+                    self.stage_popover(div().absolute().bottom(px(54.)).right(px(0.)))
+                        .p_2()
+                        .child(interaction_controls.child(navigation_controls)),
                 );
             }
             primary_controls = primary_controls.child(more);
         } else {
             if self.call_secondary_open {
-                more = more.child(
-                    self.style_floating_surface(
-                        div().absolute().bottom(px(54.)).right(px(0.)).w(px(240.)),
-                        t.stage_panel,
-                        true,
-                        12.,
-                        super::theme::Elevation::Popover,
+                let row = |id: &'static str, label, action| {
+                    self.button_with_leading_icon(
+                        id,
+                        label,
+                        ButtonStyle::Stage,
+                        Availability::available(),
+                        action,
+                        cx,
                     )
-                    .p_2()
-                    .occlude()
-                    .flex()
-                    .flex_col()
-                    .child(self.button_with_leading_icon(
-                        "call-more-minimize",
-                        ("Anruf minimieren", "chevron-down"),
-                        ButtonStyle::Stage,
-                        Availability::available(),
-                        LocalAction::MinimizeCall(call.scope),
-                        cx,
-                    ))
-                    .child(self.button_with_leading_icon(
-                        "call-more-fullscreen",
-                        ("Vollbild umschalten", "maximize-2"),
-                        ButtonStyle::Stage,
-                        Availability::available(),
-                        LocalAction::ToggleCallFullscreen(call.scope),
-                        cx,
-                    )),
+                    .w_full()
+                    .border_0()
+                    .justify_start()
+                };
+                more = more.child(
+                    self.stage_popover(div().absolute().bottom(px(54.)).right(px(0.)).w(px(240.)))
+                        .p_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .child(row(
+                            "call-more-minimize",
+                            ("Anruf minimieren", "chevron-down"),
+                            LocalAction::MinimizeCall(call.scope),
+                        ))
+                        .child(row(
+                            "call-more-fullscreen",
+                            ("Vollbild umschalten", "maximize-2"),
+                            LocalAction::ToggleCallFullscreen(call.scope),
+                        )),
                 );
             }
             primary_controls = primary_controls
@@ -1698,18 +1723,50 @@ impl Desktop {
                             .children(notice_layer),
                     )
                     .when(!matches!(call.stage, CallStage::Outgoing | CallStage::Required(_)), |d| d.child(controls))
-                    .when(call.recording == talk_core::ui::presentation::CallRecordingState::Failed && self.dismissed_recording_failure != Some(call.scope), |d| d.child(
-                        div().absolute().top(px(68.)).left(px(16.)).right(px(16.)).min_h(px(36.)).px_3().rounded(px(8.))
-                            .bg(t.danger_bg).text_color(t.danger).flex().items_center().gap_3()
-                            .child(div().flex_1().min_w_0().text_size(self.sp(12.)).child(self.l("Aufzeichnung fehlgeschlagen. Bitte die moderierende Person, sie zu prüfen.")))
-                            .child(self.icon_button("dismiss-recording-failure", ("x", "Schließen"), ButtonStyle::Quiet, Availability::available().hinted(), LocalAction::DismissRecordingFailure(call.scope), cx)))),
             )
             .bg(t.stage),
         )
     }
+    /// One surface for everything that opens from the call controls: opaque
+    /// stage colour, a light hairline and the stage's own shadow, in both app
+    /// appearances. The app's light popover and border looked foreign here.
+    pub(super) fn stage_popover<T: Styled + InteractiveElement>(&self, surface: T) -> T {
+        let t = self.theme;
+        let dark_stage = super::Theme { dark: true, ..t };
+        surface
+            .rounded(px(12.))
+            .bg(t.stage_panel)
+            .border_1()
+            .border_color(gpui::rgba(0xffffff24))
+            .shadow(dark_stage.elevation(super::theme::Elevation::Popover))
+            .text_color(t.stage_text)
+            .occlude()
+    }
     /// A readable status line on the dark call stage. Failures use a light amber
     /// mark; the text keeps the stage's own foreground for contrast.
     fn stage_notice(&self, icon: &'static str, warning: bool, text: &str) -> Div {
+        let color = if warning {
+            gpui::rgb(STAGE_WARNING).into()
+        } else {
+            self.theme.stage_text
+        };
+        self.stage_notice_with(self.scaled_icon(icon, 16., color), text)
+    }
+    /// An action inside a stage notice or card: a quiet light fill that reads
+    /// as a button on the dark panel in both app appearances.
+    fn stage_action(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        label: &'static str,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> gpui::Stateful<Div> {
+        self.button(id, label, ButtonStyle::Stage, true, action, cx)
+            .flex_none()
+            .bg(gpui::rgba(0xffffff1f))
+            .border_color(gpui::rgba(0xffffff29))
+    }
+    fn stage_notice_with(&self, leading: impl IntoElement, text: &str) -> Div {
         let t = self.theme;
         let dark_stage = super::Theme { dark: true, ..t };
         div()
@@ -1725,15 +1782,7 @@ impl Desktop {
             .border_color(gpui::rgba(0xffffff24))
             .shadow(dark_stage.elevation(super::theme::Elevation::Popover))
             .text_color(t.stage_text)
-            .child(self.scaled_icon(
-                icon,
-                16.,
-                if warning {
-                    gpui::rgb(0xf0b840).into()
-                } else {
-                    t.stage_text
-                },
-            ))
+            .child(div().flex_none().child(leading))
             .child(div().flex_1().min_w_0().child(text.to_owned()))
     }
     fn call_reaction(

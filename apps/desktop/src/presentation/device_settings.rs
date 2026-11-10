@@ -416,18 +416,22 @@ impl Desktop {
         } else {
             &[DeviceKind::Camera]
         };
+        let t = self.theme;
         let mut list = self
-            .context_menu_surface()
-            .id("call-device-popover")
-            .absolute()
-            .left(px(-32.))
-            .bottom(px(54.))
-            .w(px(300.))
+            .stage_popover(
+                div()
+                    .id("call-device-popover")
+                    .absolute()
+                    .left(px(-12.))
+                    .bottom(px(54.))
+                    .w(px(300.)),
+            )
             .max_h(px(360.))
             .overflow_y_scroll()
-            .occlude()
-            .text_color(self.theme.text)
-            .p_3();
+            .p_1()
+            .flex()
+            .flex_col()
+            .gap(px(2.));
         for (index, &section) in kinds.iter().enumerate() {
             let chosen = match section {
                 DeviceKind::Microphone => &self.preferences.active.devices.microphone,
@@ -437,10 +441,14 @@ impl Desktop {
             list = list.child(
                 div()
                     .when(index > 0, |d| {
-                        d.mt_2().pt_2().border_t_1().border_color(self.theme.border)
+                        d.mt_1().border_t_1().border_color(gpui::rgba(0xffffff1f))
                     })
+                    .px_3()
+                    .pt_2()
+                    .pb_1()
                     .text_size(self.sp(12.))
                     .font_weight(FontWeight::MEDIUM)
+                    .text_color(t.stage_muted)
                     .child(self.l(match section {
                         DeviceKind::Microphone => "Mikrofon",
                         DeviceKind::Speaker => "Lautsprecher",
@@ -451,7 +459,7 @@ impl Desktop {
                 let selected = *chosen == selection;
                 self.control(
                     id,
-                    ButtonStyle::Quiet,
+                    ButtonStyle::Stage,
                     self.settings_availability(),
                     LocalAction::SelectDevice(section, selection),
                     cx,
@@ -459,10 +467,12 @@ impl Desktop {
                 .h(px(36.))
                 .min_h(px(36.))
                 .w_full()
+                .border_0()
                 .justify_between()
+                .when(selected, |d| d.bg(gpui::rgba(0xffffff14)))
                 .child(div().min_w_0().flex_1().text_ellipsis().child(label))
-                .child(div().w(px(16.)).when(selected, |d| {
-                    d.child(self.scaled_icon("check", 16., self.theme.accent))
+                .child(div().flex_none().w(px(16.)).when(selected, |d| {
+                    d.child(self.scaled_icon("check", 16., t.stage_text))
                 }))
             };
             list = list.child(option(
@@ -485,22 +495,26 @@ impl Desktop {
                 }
             }
         }
-        list = list
-            .child(
-                self.hint(self.l("Gerätewechsel stoppt die Übertragung."))
-                    .text_ellipsis(),
-            )
-            .child(
-                self.button(
-                    "call-device-settings",
-                    "Geräteeinstellungen öffnen",
-                    ButtonStyle::Quiet,
-                    true,
-                    LocalAction::OpenDeviceSettings,
-                    cx,
-                )
-                .w_full(),
-            );
+        list = list.child(
+            div()
+                .mt_1()
+                .pt_1()
+                .border_t_1()
+                .border_color(gpui::rgba(0xffffff1f))
+                .child(
+                    self.button_with_leading_icon(
+                        "call-device-settings",
+                        ("Geräteeinstellungen öffnen", "settings"),
+                        ButtonStyle::Stage,
+                        Availability::available(),
+                        LocalAction::OpenDeviceSettings,
+                        cx,
+                    )
+                    .w_full()
+                    .border_0()
+                    .justify_start(),
+                ),
+        );
         Some(list)
     }
 
