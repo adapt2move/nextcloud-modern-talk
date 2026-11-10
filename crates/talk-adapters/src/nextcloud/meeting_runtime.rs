@@ -10,7 +10,9 @@ use super::{
     call_policy::{Bundle, Sources},
     transport::NetworkRuntime,
 };
-use crate::media::engine::{IceServer, PeerConnectionState, Role, RtcConfiguration};
+use crate::media::engine::{
+    Error as EngineError, IceServer, PeerConnectionState, Role, RtcConfiguration,
+};
 use crate::media::{
     MediaService,
     engine::{Event as EngineEvent, NativePeer},
@@ -540,6 +542,7 @@ async fn write_loop(
                 }
             };
             if let Err(_error) = result {
+                crate::media::note_call_stop("signaling write failed");
                 #[cfg(feature = "backend-test")]
                 eprintln!("normal write stopped: {:?}", _error.kind);
                 session.close();
@@ -594,6 +597,7 @@ async fn write_loop(
                             Phase::Waiting(calls::Gate::PolicyUnavailable(error.evidence));
                     }
                     if action == RefreshFailure::Stop {
+                        crate::media::note_call_stop(error.evidence.name());
                         break;
                     }
                     refresh_failures += 1;
@@ -639,6 +643,16 @@ fn requires_e2ee(bundle: &Bundle) -> bool {
         bundle.inputs.host_configuration,
         Observed::Known { value, .. } if value.encryption_required
     )
+}
+/// One address a peer offers that this engine cannot use (unresolvable,
+/// unsupported or surplus) is skipped, as browsers do. Ending the call for it
+/// removed everyone because of one candidate; the remaining candidates or the
+/// bounded connection recovery decide whether the peer connects.
+fn remote_candidate(applied: Result<(), EngineError>) -> Result<(), &'static str> {
+    match applied {
+        Err(EngineError::Closed) => Err("peer engine closed"),
+        _ => Ok(()),
+    }
 }
 fn sid() -> Result<Negotiation, ()> {
     let mut value = [0; 16];
@@ -1089,30 +1103,34 @@ async fn media_loop(
                                 peer.negotiation = Some(negotiation.clone());
                                 send(&writes, Write::Select(from.clone(), negotiation.clone(), stream))?;
                             }
-                            let applied: Result<(), ()> = async {
+                            let applied: Result<(), &'static str> = async {
                             match signal {
                                 Signal::StopScreen | Signal::SendOffer => return Ok(()),
                                 Signal::Description(sdp) => {
-                                    if let Some(answer) = peer.engine.remote(&sdp).await.map_err(|_| ())? {
-                                        send(&writes, Write::Signal(from, negotiation, Signal::Description(answer), stream))?;
+                                    if let Some(answer) = peer.engine.remote(&sdp).await.map_err(|error| match error {
+                                        EngineError::Unsupported => "remote description unsupported",
+                                        EngineError::Malformed => "remote description malformed",
+                                        _ => "remote description rejected",
+                                    })? {
+                                        send(&writes, Write::Signal(from, negotiation, Signal::Description(answer), stream)).map_err(|_| "signaling queue full")?;
                                     }
                                     peer.remote = true;
                                     for candidate in peer.candidates.drain(..) {
-                                        peer.engine.candidate(&candidate).await.map_err(|_| ())?;
+                                        remote_candidate(peer.engine.candidate(&candidate).await)?;
                                     }
                                 }
                                 Signal::Candidate(candidate) => {
                                     if peer.remote {
-                                        peer.engine.candidate(&candidate).await.map_err(|_| ())?;
+                                        remote_candidate(peer.engine.candidate(&candidate).await)?;
                                     } else if peer.candidates.len() < 64 {
                                         peer.candidates.push(candidate);
-                                    } else { return Err(()); }
+                                    } else { return Err("remote candidates before description overflowed"); }
                                 }
                             }
                             Ok(()) }.await;
-                            if applied.is_err() {
+                            if let Err(reason) = applied {
                                 if stream == StreamKind::Screen { peer.engine.close(); }
-                                else { return Err(()); }
+                                else { stage = reason; return Err(()); }
                             }
 
                         }
@@ -1127,8 +1145,8 @@ async fn media_loop(
                             }
                         }
                         SignalEvent::Membership(members) => {
-                            if topology != Topology::Direct { return Err(()); }
-                            if !members.iter().any(|m| m.session == own && m.in_call.is_some_and(|f| f & 1 != 0)) { return Err(()); }
+                            if topology != Topology::Direct { stage = "membership event on a routed call"; return Err(()); }
+                            if !members.iter().any(|m| m.session == own && m.in_call.is_some_and(|f| f & 1 != 0)) { stage = "membership without own call session"; return Err(()); }
                             let mut index = 0;
                             while index < peers.len() {
                                 if !members.iter().any(|m| m.session == peers[index].session && m.in_call.is_some_and(|f| f & 1 != 0)) {
@@ -1140,7 +1158,7 @@ async fn media_loop(
                             refresh_needed = true;
                         }
                         SignalEvent::SfuMembership(members) => {
-                            if topology != Topology::Sfu { return Err(()); }
+                            if topology != Topology::Sfu { stage = "routed membership on a direct call"; return Err(()); }
                             // Routing facts can retire an absent route, but may
                             // add no media peer without fresh REST membership.
                             sfu_members = members;
@@ -1164,7 +1182,7 @@ async fn media_loop(
                             refresh_needed = true;
                         }
                         SignalEvent::SubscriptionRejected { from, stream } => {
-                            if topology != Topology::Sfu { return Err(()); }
+                            if topology != Topology::Sfu { stage = "subscription rejection on a direct call"; return Err(()); }
                             if let Some(peer) = peers.iter_mut().find(|p| p.session == from && p.stream == stream && p.role == Role::Subscriber) {
                                 peer.connected = false;
                                 peer.recovery.get_or_insert_with(Instant::now);
@@ -1227,7 +1245,8 @@ async fn media_loop(
                     bundle = next.bundle;
                     // A call that became encrypted while we were not keyed cannot
                     // continue; a new admission starts the exchange from the beginning.
-                    if e2ee.is_none() && requires_e2ee(&bundle) { return Err(()); }
+                    if e2ee.is_none() && requires_e2ee(&bundle) { stage = "call became encrypted"; return Err(()); }
+                    stage = "participant reconciliation";
                     reconcile_participants(&mut participants, &bundle, &invitee_ids)?;
                 }
             }
@@ -1271,7 +1290,7 @@ async fn media_loop(
             if clear_hand { let _ = hand_tx.send(None); }
             stage = "policy grant";
             let video_limit = if policy_ready {
-                let grant = call.advance(&bundle.inputs, bundle.exists, SUPPORT, DEVICES, network.now()).map_err(|_| ())?;
+                let grant = call.advance(&bundle.inputs, bundle.exists, SUPPORT, DEVICES, network.now()).map_err(|gate| { stage = gate.diagnostic(); })?;
                 let limit = usize::from(grant.remote_video_limit());
                 session.grant(grant, network.now());
                 // A receive-only HPB rejoin must advertise explicit unmute
@@ -1281,6 +1300,7 @@ async fn media_loop(
                     send(&writes, Write::Flags(publication))?;
                     last_flags = publication;
                 }
+                stage = "peer setup";
                 reconcile(&mut peers, &bundle, &own, &writes,
                     &session,
                     topology, &sfu_members, &participants, e2ee.as_mut()).await?;
@@ -1378,6 +1398,7 @@ async fn media_loop(
                             if peer.role != Role::Subscriber { session.fail_screen(calls::ShareFailure::TimedOut); }
                             peer.engine.close(); continue;
                         }
+                        stage = "peer connection not recovered in 15 s";
                         return Err(());
                     }
                     if peer.restart_pending && policy_ready && peer.restarts < 3
@@ -1386,12 +1407,12 @@ async fn media_loop(
                         if peer.role == Role::Subscriber {
                             let mut config = configuration(&bundle, e2ee.as_mut(), &peer.session); config.role = Role::Subscriber;
                             peer.engine.close();
-                            peer.engine = NativePeer::new(config).await.map_err(|_| ())?;
+                            peer.engine = NativePeer::new(config).await.map_err(|_| { stage = "subscriber restart"; })?;
                             if peer.stream == StreamKind::Screen { peer.engine.screen_profile(); }
                             peer.negotiation = None; peer.remote = false; peer.candidates.clear();
                             send(&writes, Write::RestartSubscription(peer.session.clone(), peer.stream))?;
                         } else if let Some(negotiation) = &peer.negotiation {
-                            let offer = peer.engine.restart().await.map_err(|_| ())?;
+                            let offer = peer.engine.restart().await.map_err(|_| { stage = "ice restart offer"; })?;
                             send(&writes, Write::Signal(peer.session.clone(), negotiation.clone(), Signal::Description(offer), peer.stream))?;
                         }
                     }
@@ -1407,12 +1428,12 @@ async fn media_loop(
                 {
                     let negotiation = sid()?;
                     send(&writes, Write::Select(peer.session.clone(), negotiation.clone(), peer.stream))?;
-                    let sdp = peer.engine.offer().await.map_err(|_| ())?;
+                    let sdp = peer.engine.offer().await.map_err(|_| { stage = "direct offer"; })?;
                     send(&writes, Write::Signal(peer.session.clone(), negotiation.clone(), Signal::Description(sdp), peer.stream))?;
                     peer.negotiation = Some(negotiation);
                 }
                 peer.engine.publish(publishes && peer.stream == StreamKind::Camera && wishes.microphone,
-                    publishes && if peer.stream == StreamKind::Screen { wishes.screen } else { wishes.camera }).map_err(|_| ())?;
+                    publishes && if peer.stream == StreamKind::Screen { wishes.screen } else { wishes.camera }).map_err(|_| { stage = "publication switch"; })?;
                 loop {
                     let event = match peer.engine.event().await {
                         Ok(Some(event)) => event,
@@ -1427,7 +1448,14 @@ async fn media_loop(
                         Err(error) => {
                             #[cfg(feature = "backend-test")]
                             eprintln!("camera engine stopped: role={:?} error={error:?}", peer.role);
-                            let _ = error;
+                            stage = match (peer.role, error) {
+                                (Role::Publisher, EngineError::Closed) => "publisher engine closed",
+                                (Role::Publisher, EngineError::Overloaded) => "publisher engine overloaded",
+                                (Role::Publisher, _) => "publisher engine failed",
+                                (_, EngineError::Closed) => "peer engine closed",
+                                (_, EngineError::Overloaded) => "peer engine overloaded",
+                                _ => "peer engine failed",
+                            };
                             return Err(());
                         }
                     };
@@ -1455,6 +1483,7 @@ async fn media_loop(
                             if state == PeerConnectionState::Connected { peer.recovery = None; peer.restart_pending = false; }
                             if state == PeerConnectionState::Closed {
                                 if peer.stream == StreamKind::Screen { peer.engine.close(); break; }
+                                stage = "peer connection closed";
                                 return Err(());
                             }
                         }
@@ -1482,10 +1511,11 @@ async fn media_loop(
                             }
                         }
                     }
-                    if peer.stream == StreamKind::Camera && let Some(samples) = &audio { peer.engine.audio(samples).await.map_err(|_| ())?; }
+                    if peer.stream == StreamKind::Camera && let Some(samples) = &audio { peer.engine.audio(samples).await.map_err(|_| { stage = "audio send"; })?; }
                     if let Some(frame) = if peer.stream == StreamKind::Screen { screen.map(|(_, frame)| frame) } else { video.as_ref() } {
                         if peer.engine.video(frame.clone(), started.elapsed().as_micros() as i64).is_err() {
                             if peer.stream == StreamKind::Screen { session.fail_screen(calls::ShareFailure::Unavailable); peer.engine.close(); continue; }
+                            stage = "video send";
                             return Err(());
                         }
                         if peer.stream == StreamKind::Screen && peer.engine.counters().video_transmitted > 0 {
@@ -1602,7 +1632,7 @@ async fn media_loop(
                 last_flags = wishes;
             }
             let recovering = peers.iter().any(|p| p.stream == StreamKind::Camera && p.recovery.is_some());
-            if policy_ready && any_connected && !recovering { call.connected(scope, network.now()).map_err(|_| ())?; }
+            if policy_ready && any_connected && !recovering { call.connected(scope, network.now()).map_err(|_| { stage = "connected without a fresh grant"; })?; }
             if let Ok(mut snapshot) = session.snapshot.lock() {
                 let (mic, camera) = session.actual();
                 let (mic_failed, camera_failed) = session.failed();
@@ -1642,8 +1672,11 @@ async fn media_loop(
         }
         Ok(())
     }.await;
-    #[cfg(feature = "backend-test")]
     if result.is_err() {
+        // The gate shown for a stopped owner is generic; keep the step that
+        // stopped it for the local diagnostic log. A fixed label, no payload.
+        crate::media::note_call_stop(stage);
+        #[cfg(feature = "backend-test")]
         eprintln!("normal actor stopped: {stage}");
     }
     // Publish a policy rejection before closing the latch. Composition may
@@ -1728,6 +1761,19 @@ mod policy_gate_tests {
                     talk_core::policy::MAX_SOURCE_AGE_MS - talk_core::policy::SOURCE_ALLOWANCE_MS
                 )
         );
+    }
+    #[test]
+    fn one_unusable_remote_candidate_does_not_end_the_call() {
+        for error in [
+            EngineError::Engine,
+            EngineError::Malformed,
+            EngineError::Overloaded,
+            EngineError::Unsupported,
+        ] {
+            assert_eq!(remote_candidate(Err(error)), Ok(()));
+        }
+        assert_eq!(remote_candidate(Ok(())), Ok(()));
+        assert!(remote_candidate(Err(EngineError::Closed)).is_err());
     }
     #[test]
     fn shutdown_preserves_policy_evidence_and_new_restrictive_decisions() {

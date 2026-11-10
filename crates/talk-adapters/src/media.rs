@@ -14,6 +14,19 @@ pub(crate) mod supervisor;
 #[allow(dead_code)]
 pub(crate) mod wire;
 
+static CALL_STOP: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+/// Remember the step at which a call owner stopped, for the local diagnostic
+/// log only. It is a fixed label and never a decision input.
+pub(crate) fn note_call_stop(step: &'static str) {
+    if let Ok(mut slot) = CALL_STOP.lock() {
+        slot.get_or_insert(step);
+    }
+}
+/// Take the step recorded by the most recently stopped call owner.
+pub fn take_call_stop() -> Option<&'static str> {
+    CALL_STOP.lock().ok()?.take()
+}
+
 use talk_core::ids::{AccountScope, CallScope};
 use talk_core::policy::Moment;
 use talk_core::ports::{Availability, MediaPort, PortError, StopReason, StopReport, Task};

@@ -1412,6 +1412,10 @@ fn note_call_phase(phase: &Phase) {
     if LAST.swap(number, Ordering::Relaxed) != number {
         crate::diagnostics::note(crate::diagnostics::Note::info("call_phase", name));
     }
+    // The gate of a stopped call is generic; the owner's last step names the cause.
+    if let Some(step) = talk_adapters::media::take_call_stop() {
+        crate::diagnostics::note(crate::diagnostics::Note::info("call_stop", step));
+    }
 }
 
 #[cfg(test)]
