@@ -8,6 +8,8 @@ pub(super) struct Calls {
     camera: Option<(camera::Capture, Arc<Signal>)>,
     frames: frames::FramePool,
     speaker_failed: bool,
+    /// The saved choice per kind, to tell the user's new choice from a failure.
+    chosen: [Option<DeviceSelection>; 3],
     screen: Option<(u64, screen::Capture)>,
 }
 impl Calls {
@@ -26,6 +28,7 @@ impl Calls {
         self.frames.clear_released();
         self.scope = None;
         self.speaker_failed = false;
+        self.chosen = [None, None, None];
         Ok(())
     }
     pub(super) fn active(&self) -> bool {
@@ -46,6 +49,26 @@ impl Calls {
         let Some(handle) = handle else {
             return Ok(());
         };
+        // The user choosing another device is not a device failure: the stream
+        // moves to the chosen device, and a device blocked by an earlier failure
+        // gets a fresh attempt. A system default that moves on its own keeps the
+        // stricter path below: the stream stops instead of migrating silently.
+        let mut changed = [false; 3];
+        for (index, changed) in changed.iter_mut().enumerate() {
+            let choice = selection(preferences, index);
+            *changed = self.chosen[index]
+                .as_ref()
+                .is_some_and(|previous| previous != choice);
+            if *changed || self.chosen[index].is_none() {
+                self.chosen[index] = Some(choice.clone());
+            }
+        }
+        if changed[0] || changed[2] {
+            handle.device_retry(changed[0], changed[2]);
+        }
+        if changed[1] {
+            self.speaker_failed = false;
+        }
         let wishes = handle.requested();
         let screen_generation = handle.screen_generation();
         if self.screen.as_ref().is_some_and(|(generation, capture)| {
@@ -78,12 +101,19 @@ impl Calls {
                     || s.error.load(Ordering::Acquire) != 0
                     || s.stalled()
             });
+            let switched = self.audio[index].as_ref().is_some_and(|(c, s)| {
+                changed[index]
+                    && s.valid()
+                    && s.error.load(Ordering::Acquire) == 0
+                    && !s.stalled()
+                    && resolved.as_ref().is_ok_and(|id| id != c.id())
+            });
             if invalid {
                 if let Some((_, s)) = self.audio[index].as_ref() {
                     s.revoke();
                 }
                 self.audio[index] = None;
-                if requested {
+                if requested && !switched {
                     if index == 0 {
                         handle.device_failed(true, false);
                     } else {
@@ -118,6 +148,12 @@ impl Calls {
             }
         }
         let resolved = inventory.effective(&preferences.camera, DeviceKind::Camera);
+        let switched = self.camera.as_ref().is_some_and(|(c, s)| {
+            changed[2]
+                && s.error.load(Ordering::Acquire) == 0
+                && !s.stalled()
+                && resolved.as_ref().is_ok_and(|id| id != c.id())
+        });
         if self.camera.as_ref().is_some_and(|(c, s)| {
             !wishes.camera
                 || resolved.as_ref() != Ok(c.id())
@@ -129,7 +165,7 @@ impl Calls {
                 c.stop()?;
             }
             self.frames.clear_released();
-            if wishes.camera {
+            if wishes.camera && !switched {
                 handle.device_failed(false, true);
             }
         }

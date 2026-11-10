@@ -31,7 +31,7 @@ suspends affected publication/subscriptions; unresolved membership/consent/encry
 
 ## CALL-007
 
-Device loss stops the affected stream. Device changes require approved selection and explicit enablement, never silent unmute or source migration. Expose audio processing, output routing or camera effects only when implemented; missing blur must not be represented by a decorative toggle or leak unintended video.
+Device loss stops the affected stream. A device the user selects during a call replaces the current one and keeps that medium's on/off state; a previously failed medium is tried again with the new device. Without such a selection, a changed system default or a lost device stops the stream and never migrates the source or unmutes silently. Expose audio processing, output routing or camera effects only when implemented; missing blur must not be represented by a decorative toggle or leak unintended video.
 
 ## CALL-008
 

@@ -453,6 +453,14 @@ impl CaptureHandle {
             s.publish.fetch_and(!bits, Ordering::AcqRel);
         }
     }
+    /// Lift a device failure after the selected device changed. Publication
+    /// resumes with the next grant, if the call still wishes for that medium.
+    pub fn device_retry(&self, microphone: bool, camera: bool) {
+        if let Some(s) = self.session.upgrade() {
+            let bits = u8::from(microphone) | (u8::from(camera) * 2);
+            s.blocked.fetch_and(!bits, Ordering::AcqRel);
+        }
+    }
     pub fn requested(&self) -> MediaWishes {
         self.session
             .upgrade()
@@ -694,6 +702,17 @@ mod screen_tests {
         assert!(handle.take_video().is_none());
         session.show_local(2, 2, &pixels);
         assert!(handle.take_video().is_some());
+    }
+    #[test]
+    fn a_changed_device_lifts_the_failure_of_the_previous_one() {
+        let (_service, session, handle) = admitted();
+        handle.device_failed(true, true);
+        assert_eq!(session.failed(), (true, true));
+        // Only the medium whose device changed is tried again.
+        handle.device_retry(true, false);
+        assert_eq!(session.failed(), (false, true));
+        handle.device_retry(false, true);
+        assert_eq!(session.failed(), (false, false));
     }
     #[test]
     fn synchronous_stop_retires_starts_queued_before_control_overload() {
