@@ -1561,6 +1561,14 @@ impl Accounts {
             .leases
             .retain(|(target, _)| assets.as_slice().iter().any(|a| &a.target == target));
     }
+    /// Pictures are being fetched or wait to be decoded. The window loop then runs
+    /// at frame cadence so a screen of cached thumbnails fills in at once instead
+    /// of one per idle tick.
+    pub(crate) fn content_pending(&self) -> bool {
+        !self.content_owner.images.is_empty()
+            || !self.content_owner.jobs.is_empty()
+            || !self.content_owner.pending_assets.is_empty()
+    }
     pub(crate) fn take_content_image(&mut self) -> Option<ImageJob> {
         while !self.content_owner.images.is_empty() {
             let job = self.content_owner.images.remove(0);

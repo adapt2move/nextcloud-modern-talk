@@ -408,7 +408,17 @@ impl Desktop {
                         .as_slice()
                         .iter()
                         .any(|asset| {
-                            matches!(asset.target, AssetTarget::Thumbnail(_))
+                            // Only a thumbnail of a row in the timeline changes that
+                            // row's height. The shared-content grid loads many more;
+                            // re-measuring the whole timeline for each of those made
+                            // its scrolling stutter.
+                            matches!(&asset.target, AssetTarget::Thumbnail(reference)
+                                if self
+                                    .snapshot
+                                    .messages
+                                    .as_slice()
+                                    .iter()
+                                    .any(|message| message.local_id == reference.message))
                                 && asset.state == (AssetState::Ready { key })
                         });
                     self.content_ui.images.push((key, image));

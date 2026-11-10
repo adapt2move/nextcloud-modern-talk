@@ -487,12 +487,15 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                             let prepared = cx.background_executor().spawn(async move { accounts::markup::prepare(job) }).await;
                             accounts.borrow_mut().finish_markup(context, prepared);
                         }
+                        // Both queued pictures decode in this pass; the queue holds two.
+                        for _ in 0..2 {
                         let job=accounts.borrow_mut().take_content_image();
-                        if let Some(job)=job {
+                        let Some(job)=job else { break };
+                        {
                             let copy=job.clone();
                             let decoded=cx.background_executor().spawn(async move {
                                 let (image,bytes)=content_images::decode(&copy)?;
-                                let thumbnail=(copy.local.is_none() && matches!(copy.target,talk_core::ui::content::AssetTarget::Thumbnail(_))).then(||content_images::thumbnail_bytes(&image)).flatten();
+                                let thumbnail=(copy.local.is_none() && !copy.cached && matches!(copy.target,talk_core::ui::content::AssetTarget::Thumbnail(_))).then(||content_images::thumbnail_bytes(&image)).flatten();
                                 Some((image,bytes,thumbnail))
                             }).await;
                             let accepted=accounts.borrow_mut().finish_content_image(&job,decoded.as_ref().map(|(_,bytes,_)|*bytes));
@@ -503,6 +506,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                                     view.set_content_images(Some(job.account),vec![(job.key,gpui::ImageSource::Render(image))],cx);
                                 });
                             }
+                        }
                         }
                         let video_job={accounts.borrow_mut().take_video_frame()};
                         if let Some(job)=video_job {
@@ -603,7 +607,8 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                         }
                     }
                     let restoring_cache = warming.elapsed() < Duration::from_secs(3) && preview_services.accounts.as_ref().is_some_and(|a|a.borrow().awaiting_cached_content());
-                    interval = Duration::from_millis(if restoring_cache { 16 } else if devices_open || preview_services.accounts.as_ref().is_some_and(|a|a.borrow().video_active()) { 33 } else { 100 });
+                    let loading_pictures = preview_services.accounts.as_ref().is_some_and(|a|a.borrow().content_pending());
+                    interval = Duration::from_millis(if restoring_cache || loading_pictures { 16 } else if devices_open || preview_services.accounts.as_ref().is_some_and(|a|a.borrow().video_active()) { 33 } else { 100 });
                     if requested != surface {
                         surface = requested;
                         sequence = 0;
