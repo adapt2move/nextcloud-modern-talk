@@ -23,10 +23,20 @@ pub(crate) trait AvatarStore: Send + Sync {
     fn put_profile(&mut self, _profile: &Profile) -> Result<(), ()> {
         Ok(())
     }
+    /// The stored image and when it was saved, whatever its age: callers decide
+    /// whether to trust it as fresh or to keep it as the last known picture.
     fn get(&mut self, key: &str, now: u64) -> Result<Option<(Vec<u8>, u64)>, ()>;
     fn put(&mut self, key: &str, bytes: &[u8], now: u64) -> Result<(), ()>;
     fn remove(&mut self, key: &str) -> Result<(), ()>;
     fn retain_rooms(&mut self, allowed: &[String]) -> Result<(), ()>;
+    /// The avatar key of the author of a message, recorded when the author was
+    /// last resolved, so a restart can show the picture before any server answer.
+    fn actor(&mut self, _message: &str) -> Result<Option<String>, ()> {
+        Ok(None)
+    }
+    fn put_actor(&mut self, _message: &str, _avatar: &str, _now: u64) -> Result<(), ()> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -41,6 +51,27 @@ pub(super) fn key(kind: &str, identity: &str) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     format!("{}-{digest}", if kind == "room" { "r" } else { "u" })
+}
+/// Index key of one message's author. Messages are immutable, so the author never
+/// changes; the room prefix lets a fresh room list retire a room's entries.
+pub(super) fn message_key(room: &str, sequence: u64) -> String {
+    let mut hash = Sha256::new();
+    hash.update(b"message-author\0");
+    hash.update(room.as_bytes());
+    hash.update([0]);
+    hash.update(sequence.to_le_bytes());
+    let digest: String = hash.finalize()[..24]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("m-{}-{digest}", room_prefix(room))
+}
+/// Sixteen hex digits that name a room in cache file names without its token.
+pub(super) fn room_prefix(room: &str) -> String {
+    canonical_identity("room", room)[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 pub(super) fn canonical_identity(kind: &str, identity: &str) -> [u8; 32] {
     let mut hash = Sha256::new();
@@ -88,7 +119,9 @@ impl Avatars {
             self.disable_disk();
         }
     }
-    pub(super) fn get(&mut self, key: &str, now: u64, durable: bool) -> Option<(Vec<u8>, u64)> {
+    /// A cached image of any age, so the last known picture survives an offline start.
+    /// `get` below is the fresh-only view the display path trusts without the server.
+    pub(super) fn lookup(&mut self, key: &str, now: u64, durable: bool) -> Option<(Vec<u8>, u64)> {
         // A newly observed restriction also retires an older unrestricted disk
         // entry. It must not survive merely because this lookup uses memory.
         if !durable
@@ -97,7 +130,7 @@ impl Avatars {
         {
             self.disable_disk();
         }
-        self.entries.retain(|(_, _, at)| fresh(*at, now));
+        self.entries.retain(|(_, _, at)| *at <= now);
         if let Some(index) = self.entries.iter().position(|(k, _, _)| k == key) {
             let entry = self.entries.remove(index);
             let result = (entry.1.clone(), entry.2);
@@ -106,7 +139,7 @@ impl Avatars {
         }
         if durable && let Some(store) = self.store.as_mut() {
             match store.get(key, now) {
-                Ok(Some((bytes, at))) if bytes.len() <= BYTES && fresh(at, now) => {
+                Ok(Some((bytes, at))) if bytes.len() <= BYTES && at <= now => {
                     self.retain(key, &bytes, at);
                     return Some((bytes, at));
                 }
@@ -115,6 +148,29 @@ impl Avatars {
             }
         }
         None
+    }
+    pub(super) fn get(&mut self, key: &str, now: u64, durable: bool) -> Option<(Vec<u8>, u64)> {
+        self.lookup(key, now, durable)
+            .filter(|(_, at)| fresh(*at, now))
+    }
+    /// The avatar key recorded for a message author. Only a durable room records one.
+    pub(super) fn actor(&mut self, message: &str) -> Option<String> {
+        let store = self.store.as_mut()?;
+        match store.actor(message) {
+            Ok(key) => key,
+            Err(()) => {
+                self.disable_disk();
+                None
+            }
+        }
+    }
+    pub(super) fn put_actor(&mut self, message: &str, avatar: &str, now: u64, durable: bool) {
+        if durable
+            && let Some(store) = self.store.as_mut()
+            && store.put_actor(message, avatar, now).is_err()
+        {
+            self.disable_disk();
+        }
     }
     pub(super) fn put(&mut self, key: &str, bytes: &[u8], now: u64, durable: bool) {
         self.retain(key, bytes, now);

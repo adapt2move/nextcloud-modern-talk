@@ -1,214 +1,172 @@
-//! Disposable profile images, separate from restoration metadata and protected
-//! chat/draft/attachment storage. Private account files, never credential files.
-use super::{ledger::Ledger, private_fs::PrivateDir};
-use crate::nextcloud::avatars::{AvatarStore, Profile, fresh};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+//! Disposable profile images as plain files in the account's picture directory,
+//! separate from restoration metadata and protected chat/draft/attachment storage.
+//! Private account files, never credential files.
+use super::{
+    ledger::Ledger,
+    media_files::{Budget, Files},
+};
+use crate::nextcloud::avatars::{AvatarStore, Profile};
 use std::sync::{Arc, Mutex};
 use talk_core::ids::AccountId;
 
-const MAX_IMAGE: usize = 1024 * 1024;
-const MAX_BYTES: usize = 8 * 1024 * 1024;
-const MAX_ENTRIES: usize = 128;
+const IMAGES: Budget = Budget {
+    prefix: "",
+    max_file: 1024 * 1024,
+    max_entries: 128,
+    max_bytes: 8 * 1024 * 1024,
+};
+const USERS: Budget = Budget {
+    prefix: "u-",
+    ..IMAGES
+};
+const ROOMS: Budget = Budget {
+    prefix: "r-",
+    ..IMAGES
+};
+const AUTHORS: Budget = Budget {
+    prefix: "m-",
+    max_file: 80,
+    max_entries: 4096,
+    max_bytes: 4096 * 80,
+};
+const PROFILE: &str = "profile.json";
 
 pub(super) struct Store {
-    ledger: Arc<Mutex<Ledger>>,
-    account: AccountId,
-}
-fn filename(account: AccountId) -> String {
-    format!("avatars-{:032x}.sqlite", account.as_local())
+    files: Files,
 }
 impl Store {
     pub(super) fn new(ledger: Arc<Mutex<Ledger>>, account: AccountId) -> Self {
-        Self { ledger, account }
-    }
-    fn connection(&self) -> Result<(std::sync::MutexGuard<'_, Ledger>, Connection), ()> {
-        let ledger = self.ledger.lock().map_err(|_| ())?;
-        let account = ledger.account(self.account).map_err(|_| ())?;
-        // Recheck durable eligibility on every access. A disconnected client or
-        // session-only save cannot create a durable cache via a stale store.
-        if account.disposition != 2 || account.eligible.is_none() {
-            return Err(());
+        Self {
+            files: Files::new(ledger, account, &["u-", "r-", "m-", PROFILE]),
         }
-        let db = open(&ledger.dir, self.account)?;
-        Ok((ledger, db))
     }
 }
-fn open(dir: &PrivateDir, account: AccountId) -> Result<Connection, ()> {
-    let name = filename(account);
-    dir.prepare_database(&name).map_err(|_| ())?;
-    let db = Connection::open_with_flags(
-        dir.path().join(name),
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(|_| ())?;
-    db.busy_timeout(std::time::Duration::ZERO).map_err(|_| ())?;
-    db.set_limit(
-        rusqlite::limits::Limit::SQLITE_LIMIT_LENGTH,
-        (MAX_IMAGE + 1024) as i32,
-    )
-    .map_err(|_| ())?;
-    // At most 16 MiB including SQLite overhead and free pages; logical payload
-    // remains <= 8 MiB. DELETE journaling avoids long-lived WAL copies.
-    db.execute_batch("PRAGMA page_size=4096; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
-        PRAGMA temp_store=MEMORY; PRAGMA max_page_count=4096; PRAGMA trusted_schema=OFF;
-        PRAGMA secure_delete=ON;
-        CREATE TABLE IF NOT EXISTS avatars(key TEXT PRIMARY KEY CHECK(length(key)=66), saved INTEGER NOT NULL, bytes BLOB NOT NULL);
-        CREATE TABLE IF NOT EXISTS profile(id INTEGER PRIMARY KEY CHECK(id=1), saved INTEGER NOT NULL,
-            name TEXT CHECK(length(CAST(name AS BLOB))<=256), organization TEXT CHECK(length(CAST(organization AS BLOB))<=256));
-        DELETE FROM avatars WHERE length(key)<>66 OR substr(key,1,2) NOT IN ('u-','r-');")
-        .map_err(|_| ())?;
-    let page_size: i64 = db
-        .query_row("PRAGMA page_size", [], |r| r.get(0))
-        .map_err(|_| ())?;
-    let page_count: i64 = db
-        .query_row("PRAGMA page_count", [], |r| r.get(0))
-        .map_err(|_| ())?;
-    if page_size != 4096 || page_count > 4096 {
-        return Err(());
+/// `u-` or `r-` plus 64 hex digits.
+fn image_key(key: &str) -> Result<Budget, ()> {
+    let hex = key.get(2..).filter(|h| {
+        h.len() == 64
+            && h.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    });
+    match (key.get(..2), hex) {
+        (Some("u-"), Some(_)) => Ok(USERS),
+        (Some("r-"), Some(_)) => Ok(ROOMS),
+        _ => Err(()),
     }
-    Ok(db)
+}
+/// `m-`, sixteen hex digits of the room, a dash and 48 hex digits.
+fn author_key(key: &str) -> bool {
+    let mut parts = key.splitn(3, '-');
+    let hex = |s: Option<&str>, n: usize| {
+        s.is_some_and(|s| {
+            s.len() == n
+                && s.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+    };
+    parts.next() == Some("m") && hex(parts.next(), 16) && hex(parts.next(), 48)
 }
 impl AvatarStore for Store {
-    fn profile(&mut self, now: u64) -> Result<Option<Profile>, ()> {
-        let (_ledger, db) = self.connection()?;
-        let row: Option<(i64, Option<String>, Option<String>)> = db
-            .query_row(
-                "SELECT saved,name,organization FROM profile WHERE id=1",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .optional()
-            .map_err(|_| ())?;
-        let Some((at, name, organization)) = row else {
-            return Ok(None);
-        };
-        if at < 0 || !fresh(at as u64, now) {
-            db.execute("DELETE FROM profile", []).map_err(|_| ())?;
-            return Ok(None);
-        }
-        Ok(Some(Profile {
-            name: name
-                .as_deref()
-                .map(talk_core::bounded::Text::new)
-                .transpose()
-                .map_err(|_| ())?,
-            organization: organization
-                .as_deref()
-                .map(talk_core::bounded::Text::new)
-                .transpose()
-                .map_err(|_| ())?,
-            saved_at: at as u64,
-        }))
+    fn profile(&mut self, _now: u64) -> Result<Option<Profile>, ()> {
+        self.files.with(|dir| {
+            let Some((bytes, _)) = dir.read(PROFILE, 4096)? else {
+                return Ok(None);
+            };
+            let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+                dir.drop_file(PROFILE);
+                return Ok(None);
+            };
+            let text = |field: &str| match value.get(field) {
+                Some(serde_json::Value::String(s)) => {
+                    talk_core::bounded::Text::new(s).map(Some).map_err(|_| ())
+                }
+                _ => Ok(None),
+            };
+            let Some(saved_at) = value.get("saved").and_then(serde_json::Value::as_u64) else {
+                dir.drop_file(PROFILE);
+                return Ok(None);
+            };
+            Ok(Some(Profile {
+                name: text("name")?,
+                organization: text("organization")?,
+                saved_at,
+            }))
+        })
     }
     fn put_profile(&mut self, profile: &Profile) -> Result<(), ()> {
-        if profile.saved_at > i64::MAX as u64 {
-            return Err(());
-        }
-        let (_ledger, db) = self.connection()?;
-        db.execute(
-            "INSERT OR REPLACE INTO profile VALUES(1,?1,?2,?3)",
-            params![
-                profile.saved_at as i64,
-                profile.name.as_ref().map(|s| s.as_str()),
-                profile.organization.as_ref().map(|s| s.as_str())
-            ],
-        )
-        .map_err(|_| ())?;
-        Ok(())
+        let value = serde_json::json!({
+            "saved": profile.saved_at,
+            "name": profile.name.as_ref().map(|s| s.as_str()),
+            "organization": profile.organization.as_ref().map(|s| s.as_str()),
+        });
+        let bytes = serde_json::to_vec(&value).map_err(|_| ())?;
+        self.files.with(|dir| {
+            dir.write(
+                Budget {
+                    prefix: PROFILE,
+                    max_file: 4096,
+                    max_entries: 1,
+                    max_bytes: 4096,
+                },
+                PROFILE,
+                &bytes,
+                profile.saved_at,
+            )
+        })
     }
     fn retain_rooms(&mut self, allowed: &[String]) -> Result<(), ()> {
         if allowed.len() > super::data::CACHE_ROOM_LIMIT {
             return Err(());
         }
-        let (_ledger, mut db) = self.connection()?;
-        let tx = db.transaction().map_err(|_| ())?;
-        let keys: Vec<String> = {
-            let mut query = tx
-                .prepare("SELECT key FROM avatars WHERE key GLOB 'r-*' LIMIT 129")
-                .map_err(|_| ())?;
-            query
-                .query_map([], |r| r.get(0))
-                .map_err(|_| ())?
-                .collect::<Result<_, _>>()
-                .map_err(|_| ())?
-        };
-        for key in keys {
-            if !allowed.contains(&key) {
-                tx.execute("DELETE FROM avatars WHERE key=?1", [key])
-                    .map_err(|_| ())?;
+        // `r-<64 hex>`: its first sixteen digits are the room prefix of `m-` entries.
+        let prefixes: Vec<&str> = allowed.iter().filter_map(|k| k.get(2..18)).collect();
+        self.files.with(|dir| {
+            for name in dir.names("r-") {
+                if !allowed.contains(&name) {
+                    dir.drop_file(&name);
+                }
             }
-        }
-        tx.commit().map_err(|_| ())
+            for name in dir.names("m-") {
+                if !name.get(2..18).is_some_and(|p| prefixes.contains(&p)) {
+                    dir.drop_file(&name);
+                }
+            }
+            Ok(())
+        })
     }
     fn remove(&mut self, key: &str) -> Result<(), ()> {
-        let (_ledger, db) = self.connection()?;
-        db.execute("DELETE FROM avatars WHERE key=?1", [key])
-            .map_err(|_| ())?;
-        Ok(())
+        image_key(key)?;
+        self.files.with(|dir| {
+            dir.drop_file(key);
+            Ok(())
+        })
     }
-    fn get(&mut self, key: &str, now: u64) -> Result<Option<(Vec<u8>, u64)>, ()> {
-        let (_ledger, db) = self.connection()?;
-        let row: Option<(i64, Vec<u8>)> = db
-            .query_row(
-                "SELECT saved,bytes FROM avatars WHERE key=?1 AND length(bytes)<=?2",
-                params![key, MAX_IMAGE as i64],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()
-            .map_err(|_| ())?;
-        match row {
-            Some((at, bytes)) if at >= 0 && fresh(at as u64, now) => Ok(Some((bytes, at as u64))),
-            Some(_) => {
-                db.execute("DELETE FROM avatars WHERE key=?1", [key])
-                    .map_err(|_| ())?;
-                Ok(None)
-            }
-            None => Ok(None),
-        }
+    fn get(&mut self, key: &str, _now: u64) -> Result<Option<(Vec<u8>, u64)>, ()> {
+        let budget = image_key(key)?;
+        self.files.with(|dir| dir.read(key, budget.max_file))
     }
     fn put(&mut self, key: &str, bytes: &[u8], now: u64) -> Result<(), ()> {
-        if bytes.len() > MAX_IMAGE || key.len() != 66 || now > i64::MAX as u64 {
-            return Ok(());
-        }
-        let (_ledger, mut db) = self.connection()?;
-        let tx = db.transaction().map_err(|_| ())?;
-        tx.execute(
-            "DELETE FROM avatars WHERE key=?1 OR saved>?2 OR saved<=?3",
-            params![
-                key,
-                now as i64,
-                now.saturating_sub(crate::nextcloud::avatars::TTL) as i64
-            ],
-        )
-        .map_err(|_| ())?;
-        loop {
-            let (count, size): (i64, i64) = tx
-                .query_row(
-                    "SELECT count(*),coalesce(sum(length(bytes)),0) FROM avatars",
-                    [],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .map_err(|_| ())?;
-            if count < MAX_ENTRIES as i64 && size + bytes.len() as i64 <= MAX_BYTES as i64 {
-                break;
-            }
-            tx.execute("DELETE FROM avatars WHERE key=(SELECT key FROM avatars ORDER BY saved,rowid LIMIT 1)", [])
-                .map_err(|_| ())?;
-        }
-        tx.execute(
-            "INSERT INTO avatars VALUES(?1,?2,?3)",
-            params![key, now as i64, bytes],
-        )
-        .map_err(|_| ())?;
-        tx.commit().map_err(|_| ())
+        let budget = image_key(key)?;
+        self.files.with(|dir| dir.write(budget, key, bytes, now))
     }
-}
-pub(super) fn remove(dir: &PrivateDir, account: AccountId) -> super::error::Result<()> {
-    let name = filename(account);
-    for suffix in ["-journal", "-wal", "-shm", ""] {
-        dir.remove(&format!("{name}{suffix}"))?;
+    fn actor(&mut self, message: &str) -> Result<Option<String>, ()> {
+        if !author_key(message) {
+            return Err(());
+        }
+        self.files.with(|dir| {
+            let Some((bytes, _)) = dir.read(message, AUTHORS.max_file)? else {
+                return Ok(None);
+            };
+            Ok(String::from_utf8(bytes)
+                .ok()
+                .filter(|key| image_key(key).is_ok()))
+        })
     }
-    Ok(())
+    fn put_actor(&mut self, message: &str, avatar: &str, now: u64) -> Result<(), ()> {
+        if !author_key(message) || image_key(avatar).is_err() {
+            return Err(());
+        }
+        self.files
+            .with(|dir| dir.write(AUTHORS, message, avatar.as_bytes(), now))
+    }
 }

@@ -787,8 +787,7 @@ impl Ledger {
         }
         db(tx.commit()).map_err(|_| IdentityError::SuppressionUnconfirmed)?;
         if cleanup_all || session {
-            super::avatars::remove(&self.dir, account)?;
-            super::previews::remove(&self.dir, account)?;
+            super::media_files::remove(&self.dir, account)?;
         }
         // Ordinary chat content and pending intents belong to this saved-account
         // eligibility lifetime, including a plain logout without credential removal.
@@ -892,8 +891,7 @@ impl Ledger {
             return Err(IdentityError::RecoveryRequired);
         }
         self.dir.check()?;
-        super::avatars::remove(&self.dir, account)?;
-        super::previews::remove(&self.dir, account)?;
+        super::media_files::remove(&self.dir, account)?;
         super::data::remove(&self.dir, account)?;
         let tx = db(self.db.transaction())?;
         db(tx.execute(

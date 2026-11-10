@@ -1583,12 +1583,14 @@ fn connected_history_survives_restart_without_restoring_authority() {
     assert!(ledger.account(account).is_err());
 }
 
-#[test]
-fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
-    use super::avatars::Store;
-    use crate::nextcloud::avatars::{AvatarStore, Profile, TTL};
-    use std::sync::Mutex;
-    let fixture = Fixture::new();
+/// Two durable accounts and one session-only account on one ledger.
+fn picture_fixture(
+    fixture: &Fixture,
+) -> (
+    std::sync::Arc<std::sync::Mutex<super::ledger::Ledger>>,
+    Vec<talk_core::ids::AccountId>,
+    talk_core::ids::AccountId,
+) {
     let mut ledger = fixture.ledger();
     let mut accounts = Vec::new();
     for user in ["synthetic-a", "synthetic-b"] {
@@ -1610,7 +1612,18 @@ fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
         .reserve("https://session.invalid/".into())
         .unwrap()
         .id;
-    let ledger = Arc::new(Mutex::new(ledger));
+    (Arc::new(std::sync::Mutex::new(ledger)), accounts, session)
+}
+
+#[test]
+fn avatar_files_are_account_scoped_durable_bounded_and_removed_on_logout() {
+    use super::avatars::Store;
+    use crate::nextcloud::avatars::{AvatarStore, Profile};
+    let fixture = Fixture::new();
+    let (ledger, accounts, session) = picture_fixture(&fixture);
+    let directory = |account: talk_core::ids::AccountId| {
+        fixture.0.join(format!("media-{:032x}", account.as_local()))
+    };
     let mut a = Store::new(ledger.clone(), accounts[0]);
     let mut b = Store::new(ledger.clone(), accounts[1]);
     let mut temporary = Store::new(ledger.clone(), session);
@@ -1624,13 +1637,25 @@ fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
     a.put_profile(&profile).unwrap();
     assert!(
         b.profile(101).unwrap().is_none(),
-        "profile metadata is account scoped too"
+        "profile is account scoped"
     );
     assert!(temporary.put(&key, b"temporary", 100).is_err());
     a.put(&key, b"account-a", 100).unwrap();
     b.put(&key, b"account-b", 100).unwrap();
-    assert_eq!(a.get(&key, 101).unwrap().unwrap().0, b"account-a");
+    assert_eq!(
+        a.get(&key, 101).unwrap().unwrap(),
+        (b"account-a".to_vec(), 100)
+    );
     assert_eq!(b.get(&key, 101).unwrap().unwrap().0, b"account-b");
+    // The picture is a plain file a viewer can open.
+    assert_eq!(
+        std::fs::read(directory(accounts[0]).join(&key)).unwrap(),
+        b"account-a"
+    );
+    assert!(
+        !directory(session).exists(),
+        "session-only accounts never persist"
+    );
     for n in 0..150 {
         a.put(&format!("u-{n:064x}"), b"x", 101).unwrap();
     }
@@ -1639,44 +1664,45 @@ fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
         "oldest is evicted at 128 entries"
     );
     a.put(&key, b"after-eviction", 102).unwrap();
+    // Everything survives a restart, whatever its age.
     drop((a, b, temporary, ledger));
-    let ledger = Arc::new(Mutex::new(fixture.ledger()));
+    let ledger = Arc::new(std::sync::Mutex::new(fixture.ledger()));
     let mut a = Store::new(ledger.clone(), accounts[0]);
-    let mut b = Store::new(ledger.clone(), accounts[1]);
     assert_eq!(
         a.profile(103).unwrap().unwrap().name.unwrap().as_str(),
         "Synthetic person"
     );
-    assert!(a.profile(100 + TTL).unwrap().is_none());
-    b.put_profile(&profile).unwrap();
-    assert!(
-        b.profile(99).unwrap().is_none(),
-        "clock rollback also expires profile metadata"
+    assert_eq!(
+        a.get(&key, 10_000_000).unwrap().unwrap().0,
+        b"after-eviction"
     );
-    assert_eq!(a.get(&key, 103).unwrap().unwrap().0, b"after-eviction");
+    // Authors of messages are recorded with their room and retired with it.
+    let kept_room = format!("r-{:064x}", 2);
     let lost_room = format!("r-{:064x}", 1);
-    let retained_room = format!("r-{:064x}", 2);
+    let author = |room: &str, n: u8| format!("m-{}-{:048x}", &room[2..18], n);
+    a.put_actor(&author(&kept_room, 1), &key, 103).unwrap();
+    a.put_actor(&author(&lost_room, 2), &key, 103).unwrap();
+    assert_eq!(
+        a.actor(&author(&kept_room, 1)).unwrap().as_deref(),
+        Some(key.as_str())
+    );
+    assert!(a.put_actor("m-not-a-key", &key, 103).is_err());
     a.put(&lost_room, b"removed-room", 103).unwrap();
-    a.put(&retained_room, b"retained-room", 103).unwrap();
+    a.put(&kept_room, b"retained-room", 103).unwrap();
     let allowed: Vec<_> = (2..=257).map(|number| format!("r-{number:064x}")).collect();
     a.retain_rooms(&allowed).unwrap();
     let mut oversized = allowed.clone();
     oversized.push(format!("r-{:064x}", 258));
     assert!(a.retain_rooms(&oversized).is_err());
     assert!(a.get(&lost_room, 104).unwrap().is_none());
-    assert_eq!(
-        a.get(&retained_room, 104).unwrap().unwrap().0,
-        b"retained-room"
-    );
+    assert!(a.actor(&author(&lost_room, 2)).unwrap().is_none());
+    assert_eq!(a.get(&kept_room, 104).unwrap().unwrap().0, b"retained-room");
+    assert!(a.actor(&author(&kept_room, 1)).unwrap().is_some());
     assert!(
         a.get(&key, 104).unwrap().is_some(),
         "room cleanup keeps person avatars"
     );
-    assert!(a.get(&key, 102 + TTL).unwrap().is_none());
-    assert!(
-        b.get(&key, 99).unwrap().is_none(),
-        "clock rollback expires rather than extends"
-    );
+    // Bounded by bytes.
     let full = vec![7; 1024 * 1024];
     for n in 200..220 {
         a.put(&format!("u-{n:064x}"), &full, 150).unwrap();
@@ -1690,20 +1716,14 @@ fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
             .len(),
         full.len()
     );
-    assert!(
-        fixture
-            .0
-            .join(format!("avatars-{:032x}.sqlite", accounts[0].as_local()))
-            .metadata()
-            .unwrap()
-            .len()
-            <= 16 * 1024 * 1024
-    );
     a.put(&key, &vec![0; 1024 * 1024 + 1], 151).unwrap();
     assert!(
         a.get(&key, 152).unwrap().is_none(),
         "oversized images stay out of disk"
     );
+    // Names are validated, never joined from outside.
+    assert!(a.put("../escape", b"x", 160).is_err());
+    assert!(a.get("u-short", 160).is_err());
     a.put(&key, b"before-logout", 200).unwrap();
     ledger
         .lock()
@@ -1712,115 +1732,69 @@ fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
         .unwrap();
     assert!(a.get(&key, 201).is_err());
     assert!(a.put(&key, b"late-write", 201).is_err());
-    assert!(
-        !fixture
-            .0
-            .join(format!("avatars-{:032x}.sqlite", accounts[0].as_local()))
-            .exists()
-    );
-    assert!(
-        fixture
-            .0
-            .join(format!("avatars-{:032x}.sqlite", accounts[1].as_local()))
-            .exists()
-    );
-    assert!(
-        !fixture
-            .0
-            .join(format!("avatars-{:032x}.sqlite", session.as_local()))
-            .exists()
-    );
+    assert!(!directory(accounts[0]).exists());
+    assert!(directory(accounts[1]).exists());
 }
 
 #[test]
-fn preview_disk_cache_is_account_scoped_durable_lru_bounded_and_removed_on_logout() {
+fn preview_files_are_account_scoped_durable_lru_bounded_and_removed_on_logout() {
     use super::previews::Store;
-    use crate::nextcloud::previews::{PreviewStore, TTL};
-    use std::sync::Mutex;
+    use crate::nextcloud::previews::PreviewStore;
     let fixture = Fixture::new();
-    let mut ledger = fixture.ledger();
-    let mut accounts = Vec::new();
-    for user in ["synthetic-a", "synthetic-b"] {
-        let a = ledger.reserve(format!("https://{user}.invalid/")).unwrap();
-        let op = ledger
-            .stage(
-                a.id,
-                LoginAttemptId::from_local(random().unwrap()),
-                StorageBackend::PrivateFile,
-                user,
-            )
-            .unwrap();
-        ledger.settle(op, true).unwrap();
-        let revision = ledger.account(a.id).unwrap().revision;
-        ledger.activate(op, revision).unwrap();
-        accounts.push(a.id);
-    }
-    let session = ledger
-        .reserve("https://session.invalid/".into())
-        .unwrap()
-        .id;
-    let ledger = Arc::new(Mutex::new(ledger));
+    let (ledger, accounts, session) = picture_fixture(&fixture);
+    let directory = |account: talk_core::ids::AccountId| {
+        fixture.0.join(format!("media-{:032x}", account.as_local()))
+    };
     let mut a = Store::new(ledger.clone(), accounts[0]);
     let mut b = Store::new(ledger.clone(), accounts[1]);
     let mut temporary = Store::new(ledger.clone(), session);
-    let key = |n: u64| format!("{n:064x}");
-    let png = (b"first-page".to_vec(), Some(3));
+    let room = |r: u64| format!("{r:016x}");
+    let key = |r: u64, n: u64| format!("p-{}-{n:048x}", room(r));
+    let pdf = (b"first-page".to_vec(), Some(3));
+    let image = (b"image".to_vec(), None);
     assert!(
-        temporary.put(&key(1), &png, 100).is_err(),
+        temporary.put(&key(1, 1), &pdf, 100).is_err(),
         "session-only accounts never persist"
     );
-    a.put(&key(1), &png, 100).unwrap();
-    assert!(b.get(&key(1), 101).unwrap().is_none(), "scoped per account");
-    assert_eq!(a.get(&key(1), 101).unwrap().unwrap(), png);
-    // The cache survives a restart.
-    drop((a, b, temporary, ledger));
-    let ledger = Arc::new(Mutex::new(fixture.ledger()));
-    let mut a = Store::new(ledger.clone(), accounts[0]);
-    assert_eq!(a.get(&key(1), 102).unwrap().unwrap(), png);
-    assert!(a.get(&key(1), 100 + TTL).unwrap().is_none(), "expires");
+    a.put(&key(1, 1), &pdf, 100).unwrap();
+    a.put(&key(1, 2), &image, 100).unwrap();
     assert!(
-        a.get(&key(1), 99).unwrap().is_none(),
-        "clock rollback expires"
+        b.get(&key(1, 1), 101).unwrap().is_none(),
+        "scoped per account"
     );
-    // Bounded by bytes: the least recently opened entry leaves first.
-    let big = (vec![7u8; 4 * 1024 * 1024], None);
-    for n in 10..30 {
-        a.put(&key(n), &big, 200).unwrap();
-    }
-    a.put(&key(50), &big, 201).unwrap();
-    let kept = (10..30)
-        .chain([50])
-        .filter(|n| a.get(&key(*n), 202).unwrap().is_some())
-        .count();
-    assert!(kept * 4 <= 96, "at most 96 MiB of previews, kept {kept}");
-    assert!(a.get(&key(50), 203).unwrap().is_some(), "the newest stays");
-    assert!(
-        fixture
-            .0
-            .join(format!("previews-{:032x}.sqlite", accounts[0].as_local()))
-            .metadata()
-            .unwrap()
-            .len()
-            <= 112 * 1024 * 1024
-    );
-    a.put(&key(60), &(vec![0; 4 * 1024 * 1024 + 1], None), 204)
+    assert_eq!(a.get(&key(1, 1), 101).unwrap().unwrap(), pdf);
+    assert_eq!(a.get(&key(1, 2), 101).unwrap().unwrap(), image);
+    // Replacing a preview with another page count leaves one file.
+    a.put(&key(1, 1), &(b"first-page".to_vec(), Some(4)), 102)
         .unwrap();
+    assert_eq!(a.get(&key(1, 1), 103).unwrap().unwrap().1, Some(4));
+    // The cache survives a restart, however old it is.
+    drop((a, b, temporary, ledger));
+    let ledger = Arc::new(std::sync::Mutex::new(fixture.ledger()));
+    let mut a = Store::new(ledger.clone(), accounts[0]);
+    assert_eq!(a.get(&key(1, 2), 100_000_000).unwrap().unwrap(), image);
+    // A room that is no longer listed loses its previews.
+    a.put(&key(2, 1), &image, 110).unwrap();
+    a.retain_rooms(&[room(2)]).unwrap();
+    assert!(a.get(&key(1, 2), 111).unwrap().is_none());
+    assert!(a.get(&key(2, 1), 111).unwrap().is_some());
+    // Bounded by entries: the least recently opened goes first.
+    for n in 0..520 {
+        a.put(&key(2, 1000 + n), &image, 200 + n).unwrap();
+    }
+    assert!(a.get(&key(2, 1), 900).unwrap().is_none());
     assert!(
-        a.get(&key(60), 205).unwrap().is_none(),
-        "oversized stays out of disk"
+        a.get(&key(2, 1519), 901).unwrap().is_some(),
+        "the newest stays"
     );
+    assert!(a.put("p-short", &image, 902).is_err());
     ledger
         .lock()
         .unwrap()
         .suppress(accounts[0], false, None, true)
         .unwrap();
-    assert!(a.get(&key(1), 206).is_err());
-    assert!(
-        !fixture
-            .0
-            .join(format!("previews-{:032x}.sqlite", accounts[0].as_local()))
-            .exists()
-    );
+    assert!(a.get(&key(2, 1519), 903).is_err());
+    assert!(!directory(accounts[0]).exists());
 }
 
 #[test]

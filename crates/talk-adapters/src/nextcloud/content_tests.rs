@@ -1262,11 +1262,11 @@ async fn emoji_disk_and_memory_hits_keep_original_source_timestamp_and_skip_imag
         .as_array_mut()
         .unwrap()
         .push(json!("avatar"));
+    // A fresh picture on this machine needs no room read: each request costs only
+    // the capability read every request starts with.
     let server = Server::start(vec![
         Reply::data(capabilities.clone()),
-        Reply::data(room()),
         Reply::data(capabilities),
-        Reply::data(room()),
     ])
     .await;
     let runtime = runtime();
@@ -1313,13 +1313,266 @@ async fn emoji_disk_and_memory_hits_keep_original_source_timestamp_and_skip_imag
     );
     assert_eq!(
         server.count(),
-        4,
-        "only fresh capability and room authorization reads"
+        2,
+        "no room or image read while the picture is fresh"
     );
     let seen = server.seen.lock().unwrap();
     assert!(
         seen.iter()
             .all(|request| !String::from_utf8_lossy(request).contains("/avatar/"))
+    );
+}
+
+/// In-memory stand-ins for the file stores, with counters to prove what was asked.
+#[derive(Default)]
+struct Picture {
+    images: std::collections::HashMap<String, (Vec<u8>, u64)>,
+    authors: std::collections::HashMap<String, String>,
+    gets: usize,
+}
+struct SharedPictures(Arc<Mutex<Picture>>);
+impl super::super::avatars::AvatarStore for SharedPictures {
+    fn get(&mut self, key: &str, _: u64) -> Result<Option<(Vec<u8>, u64)>, ()> {
+        let mut inner = self.0.lock().unwrap();
+        inner.gets += 1;
+        Ok(inner.images.get(key).cloned())
+    }
+    fn put(&mut self, key: &str, bytes: &[u8], now: u64) -> Result<(), ()> {
+        self.0
+            .lock()
+            .unwrap()
+            .images
+            .insert(key.to_owned(), (bytes.to_vec(), now));
+        Ok(())
+    }
+    fn remove(&mut self, key: &str) -> Result<(), ()> {
+        self.0.lock().unwrap().images.remove(key);
+        Ok(())
+    }
+    fn retain_rooms(&mut self, _: &[String]) -> Result<(), ()> {
+        Ok(())
+    }
+    fn actor(&mut self, message: &str) -> Result<Option<String>, ()> {
+        Ok(self.0.lock().unwrap().authors.get(message).cloned())
+    }
+    fn put_actor(&mut self, message: &str, avatar: &str, _: u64) -> Result<(), ()> {
+        self.0
+            .lock()
+            .unwrap()
+            .authors
+            .insert(message.to_owned(), avatar.to_owned());
+        Ok(())
+    }
+}
+struct SharedPreviews(
+    Arc<Mutex<std::collections::HashMap<String, super::super::previews::Preview>>>,
+);
+impl super::super::previews::PreviewStore for SharedPreviews {
+    fn get(&mut self, key: &str, _: u64) -> Result<Option<super::super::previews::Preview>, ()> {
+        Ok(self.0.lock().unwrap().get(key).cloned())
+    }
+    fn put(
+        &mut self,
+        key: &str,
+        preview: &super::super::previews::Preview,
+        _: u64,
+    ) -> Result<(), ()> {
+        self.0
+            .lock()
+            .unwrap()
+            .insert(key.to_owned(), preview.clone());
+        Ok(())
+    }
+    fn retain_rooms(&mut self, _: &[String]) -> Result<(), ()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn a_preview_kept_on_this_machine_opens_without_a_room_or_message_read() {
+    use talk_core::protocol::content::AssetRequest;
+    let kept = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    kept.lock().unwrap().insert(
+        super::super::previews::key("testroom", 42, "file", true),
+        (b"kept-pdf-page".to_vec(), Some(3)),
+    );
+    // Only the capability read every request starts with; no room, message or file.
+    let server = Server::start(vec![Reply::data(features())]).await;
+    let r = runtime();
+    let mut c = client(&server.origin, r.clone());
+    let id = bind(&mut c);
+    c.set_preview_store(Box::new(SharedPreviews(kept)));
+    let reply = c
+        .request(
+            context(&r),
+            ProtocolRequest::Content {
+                operation: OperationId::from_local(5),
+                command: C::Asset(AssetRequest::Attachment {
+                    message: MessageId {
+                        conversation: id,
+                        sequence: 42,
+                    },
+                    placeholder: Text::new("file").unwrap(),
+                    large: true,
+                }),
+            },
+        )
+        .await
+        .unwrap();
+    let ProtocolReply::Content {
+        result: R::Image(image),
+        ..
+    } = reply
+    else {
+        panic!("image")
+    };
+    assert_eq!(image.as_slice(), b"kept-pdf-page");
+    assert_eq!(image.document_pages(), Some(3));
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn an_expired_picture_is_replaced_and_survives_a_server_that_cannot_answer() {
+    let pictures = Arc::new(Mutex::new(Picture::default()));
+    let key = super::super::avatars::key("user", "fixture_user");
+    let old = super::super::messaging::now_unix() - super::super::avatars::TTL - 3600;
+    pictures
+        .lock()
+        .unwrap()
+        .images
+        .insert(key.clone(), (b"old-picture".to_vec(), old));
+    let server = Server::start(vec![
+        Reply::data(features()),
+        binary(200, "image/png", b"new-picture"),
+    ])
+    .await;
+    let r = runtime();
+    let mut c = client(&server.origin, r.clone());
+    c.set_avatar_store(Box::new(SharedPictures(pictures.clone())));
+    async fn ask(
+        c: &mut NextcloudClient,
+        r: &NetworkRuntime,
+        n: u128,
+    ) -> Result<ProtocolReply, PortError> {
+        c.request(
+            context(r),
+            ProtocolRequest::Content {
+                operation: OperationId::from_local(n),
+                command: C::Asset(talk_core::protocol::content::AssetRequest::SelfAvatar),
+            },
+        )
+        .await
+    }
+    let reply = ask(&mut c, &r, 1).await.unwrap();
+    let ProtocolReply::Content {
+        result: R::Image(image),
+        ..
+    } = reply
+    else {
+        panic!("image")
+    };
+    assert_eq!(
+        image.as_slice(),
+        b"new-picture",
+        "an expired picture is replaced"
+    );
+    assert_eq!(pictures.lock().unwrap().images[&key].0, b"new-picture");
+    // The server now fails: an expired picture is better than none. Only
+    // unavailability counts; a refusal would not be papered over.
+    let old = super::super::messaging::now_unix() - super::super::avatars::TTL - 3600;
+    pictures
+        .lock()
+        .unwrap()
+        .images
+        .insert(key.clone(), (b"old-picture".to_vec(), old));
+    let server = Server::start(vec![
+        Reply::data(features()),
+        binary(503, "text/plain", b"maintenance"),
+    ])
+    .await;
+    let r = runtime();
+    let mut c = client(&server.origin, r.clone());
+    c.set_avatar_store(Box::new(SharedPictures(pictures.clone())));
+    let reply = ask(&mut c, &r, 2).await.unwrap();
+    let ProtocolReply::Content {
+        result: R::Image(image),
+        ..
+    } = reply
+    else {
+        panic!("image")
+    };
+    assert_eq!(image.as_slice(), b"old-picture");
+    let source = image.avatar_source().unwrap();
+    assert!(
+        super::super::avatars::fresh(source.saved_at, super::super::messaging::now_unix()),
+        "the display path then treats it as current instead of asking again at once"
+    );
+    let server = Server::start(vec![
+        Reply::data(features()),
+        binary(403, "text/plain", b"forbidden"),
+    ])
+    .await;
+    let r = runtime();
+    let mut c = client(&server.origin, r.clone());
+    c.set_avatar_store(Box::new(SharedPictures(pictures.clone())));
+    assert!(
+        ask(&mut c, &r, 3).await.is_err(),
+        "a refusal is not hidden by an old picture"
+    );
+}
+
+#[tokio::test]
+async fn a_message_author_is_recorded_once_and_shows_their_picture_without_reads() {
+    use talk_core::protocol::content::AssetRequest;
+    let pictures = Arc::new(Mutex::new(Picture::default()));
+    let room = "testroom";
+    let author = super::super::avatars::message_key(room, 9);
+    let key = super::super::avatars::key("user", "someone");
+    {
+        let mut inner = pictures.lock().unwrap();
+        inner.authors.insert(author, key.clone());
+        inner.images.insert(
+            key,
+            (
+                b"author-picture".to_vec(),
+                super::super::messaging::now_unix(),
+            ),
+        );
+    }
+    let server = Server::start(vec![Reply::data(features())]).await;
+    let r = runtime();
+    let mut c = client(&server.origin, r.clone());
+    let id = bind(&mut c);
+    c.set_avatar_store(Box::new(SharedPictures(pictures)));
+    let reply = c
+        .request(
+            context(&r),
+            ProtocolRequest::Content {
+                operation: OperationId::from_local(1),
+                command: C::Asset(AssetRequest::MessageAvatar(MessageId {
+                    conversation: id,
+                    sequence: 9,
+                })),
+            },
+        )
+        .await
+        .unwrap();
+    let ProtocolReply::Content {
+        result: R::Image(image),
+        ..
+    } = reply
+    else {
+        panic!("image")
+    };
+    assert_eq!(image.as_slice(), b"author-picture");
+    assert_eq!(
+        image.avatar_source().unwrap().identity,
+        super::super::avatars::canonical_identity("user", "someone")
+    );
+    assert_eq!(
+        server.count(),
+        1,
+        "neither the room nor the message was read"
     );
 }
 

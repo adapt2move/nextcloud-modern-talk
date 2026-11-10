@@ -997,6 +997,15 @@ impl NextcloudClient {
                     })
                     .collect();
                 self.avatars.retain_rooms(&retained_avatars);
+                if let Some(store) = self.previews.as_mut() {
+                    let rooms: Vec<String> = retained_avatars
+                        .iter()
+                        .filter_map(|key| key.get(2..18).map(str::to_owned))
+                        .collect();
+                    if store.retain_rooms(&rooms).is_err() {
+                        self.previews = None;
+                    }
+                }
                 self.creation_uncertain = false;
                 Ok(ProtocolReply::Conversations(ConversationList {
                     scope: context.scope,

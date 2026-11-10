@@ -326,9 +326,17 @@ impl NextcloudClient {
                     return Err(self.error(ErrorKind::Unsupported));
                 }
                 use api::content::ImageRequest as I;
+                // Pictures this machine already holds are shown first. Their keys need
+                // only the signed-in user, a room token or a recorded message author,
+                // so the room and message reads below are skipped while the picture is
+                // fresh, and the last known picture survives a failing network.
+                if !revalidate && let Some(result) = self.local_avatar(c, &request)? {
+                    return Ok(result);
+                }
                 let mut durable = true;
                 let mut room_key = None;
                 let mut room_identity = None;
+                let mut author_of = None;
                 let image = match request {
                     AssetRequest::CloudFile(file) => {
                         if file == 0 {
@@ -363,6 +371,10 @@ impl NextcloudClient {
                     AssetRequest::MessageAvatar(message) => {
                         let room = self.content_room(c, message.conversation, caps).await?;
                         durable = !room.classified && !room.sensitive;
+                        author_of = Some(avatars::message_key(
+                            self.check_room(message.conversation)?,
+                            message.sequence,
+                        ));
                         let message = self.target(c, message).await?;
                         if message.actor_type.as_deref() != Some("users") {
                             return Err(self.error(ErrorKind::Unsupported));
@@ -438,36 +450,47 @@ impl NextcloudClient {
                 };
                 self.transport.validate(c)?;
                 let now = messaging::now_unix();
-                let (bytes, saved_at) = if let Some(cached) =
-                    self.avatars.get(&key, now, durable).filter(|_| !revalidate)
-                {
-                    cached
-                } else {
-                    let bytes = self.transport.image(c, image).await?;
-                    self.transport.validate(c)?;
-                    self.avatars.put(&key, &bytes, now, durable);
-                    (bytes, now)
+                let cached = self.avatars.lookup(&key, now, durable);
+                let (bytes, saved_at) = match cached {
+                    Some((bytes, at)) if avatars::fresh(at, now) && !revalidate => (bytes, at),
+                    kept => match self.transport.image(c, image).await {
+                        Ok(bytes) => {
+                            self.transport.validate(c)?;
+                            self.avatars.put(&key, &bytes, now, durable);
+                            (bytes, now)
+                        }
+                        // An older picture is better than none while the server is
+                        // out of reach. A refusal or cancellation is never papered over.
+                        Err(error)
+                            if !revalidate
+                                && kept.is_some()
+                                && matches!(
+                                    error.kind,
+                                    ErrorKind::Transport
+                                        | ErrorKind::Deadline
+                                        | ErrorKind::Busy
+                                        | ErrorKind::RateLimited
+                                        | ErrorKind::ServerUnavailable
+                                ) =>
+                        {
+                            self.transport.validate(c)?;
+                            kept.map(|(bytes, _)| (bytes, now)).ok_or(error)?
+                        }
+                        Err(error) => return Err(error),
+                    },
                 };
                 self.transport.validate(c)?;
-                let source = AvatarSource {
-                    identity,
-                    saved_at,
-                    restricted: !durable,
-                };
-                if let Some((emoji, color)) = server_emoji(&bytes) {
-                    return Ok(ContentResult::Emoji {
-                        text: Text::new(emoji).map_err(|_| self.error(ErrorKind::TooLarge))?,
-                        color: color
-                            .map(Text::new)
-                            .transpose()
-                            .map_err(|_| self.error(ErrorKind::TooLarge))?,
-                        source,
-                    });
+                if let Some(author) = &author_of {
+                    self.avatars.put_actor(author, &key, now, durable);
                 }
-                Ok(ContentResult::Image(
-                    ImageBytes::avatar(bytes, source)
-                        .map_err(|_| self.error(ErrorKind::TooLarge))?,
-                ))
+                self.avatar_result(
+                    bytes,
+                    AvatarSource {
+                        identity,
+                        saved_at,
+                        restricted: !durable,
+                    },
+                )
             }
             ContentCommand::Poll {
                 conversation,
@@ -478,6 +501,64 @@ impl NextcloudClient {
             }
         }
     }
+    /// A fresh picture from this machine, or `None` to ask the server. Only requests
+    /// whose key is known locally qualify; the rest resolve their author first.
+    fn local_avatar(
+        &mut self,
+        c: &OperationContext,
+        request: &AssetRequest,
+    ) -> Result<Option<ContentResult>, PortError> {
+        let key = match request {
+            AssetRequest::SelfAvatar => avatars::key("user", self.transport.user()),
+            AssetRequest::ConversationAvatar(id) => avatars::key("room", self.check_room(*id)?),
+            AssetRequest::MessageAvatar(message) => {
+                let index =
+                    avatars::message_key(self.check_room(message.conversation)?, message.sequence);
+                match self.avatars.actor(&index) {
+                    Some(key) => key,
+                    None => return Ok(None),
+                }
+            }
+            _ => return Ok(None),
+        };
+        let now = messaging::now_unix();
+        let Some((bytes, saved_at)) = self.avatars.get(&key, now, true) else {
+            return Ok(None);
+        };
+        // The key is the identity's hash in hex behind a two-character kind prefix.
+        let Some(identity) = key.get(2..).and_then(hex_identity) else {
+            return Ok(None);
+        };
+        self.transport.validate(c)?;
+        self.avatar_result(
+            bytes,
+            AvatarSource {
+                identity,
+                saved_at,
+                restricted: false,
+            },
+        )
+        .map(Some)
+    }
+    fn avatar_result(
+        &self,
+        bytes: Vec<u8>,
+        source: AvatarSource,
+    ) -> Result<ContentResult, PortError> {
+        if let Some((emoji, color)) = server_emoji(&bytes) {
+            return Ok(ContentResult::Emoji {
+                text: Text::new(emoji).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                color: color
+                    .map(Text::new)
+                    .transpose()
+                    .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                source,
+            });
+        }
+        Ok(ContentResult::Image(
+            ImageBytes::avatar(bytes, source).map_err(|_| self.error(ErrorKind::TooLarge))?,
+        ))
+    }
     async fn attachment_image(
         &mut self,
         c: &OperationContext,
@@ -486,20 +567,21 @@ impl NextcloudClient {
         large: bool,
         caps: &Capabilities,
     ) -> Result<ContentResult, PortError> {
-        let object = self.attachment(c, message, placeholder, caps).await?;
-        let file = object
-            .id
-            .as_deref()
-            .and_then(|id| id.parse::<u64>().ok())
-            .filter(|id| *id > 0)
-            .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
-        // The message and its room were just read fresh (`attachment` also refuses
-        // classified, sensitive and unknown-policy rooms), so a cached preview is
-        // served only to someone who may see it now.
-        let cache_key = self
-            .previews
-            .is_some()
-            .then(|| super::previews::key(file, large, object.size, object.mime_type.as_deref()));
+        // The key needs only the local room token, so a preview kept on this machine
+        // is shown at once, offline too, without asking the server about the room
+        // or the message. Its entry exists only if the room was unrestricted when
+        // it was stored, and a fresh room list retires it if that changes.
+        let cache_key = if self.previews.is_some() {
+            let room = self.check_room(message.conversation)?.to_owned();
+            Some(super::previews::key(
+                &room,
+                message.sequence,
+                placeholder.as_str(),
+                large,
+            ))
+        } else {
+            None
+        };
         if let Some(key) = &cache_key
             && let Some(store) = self.previews.as_mut()
         {
@@ -519,6 +601,13 @@ impl NextcloudClient {
                 Err(()) => self.previews = None,
             }
         }
+        let object = self.attachment(c, message, placeholder, caps).await?;
+        let file = object
+            .id
+            .as_deref()
+            .and_then(|id| id.parse::<u64>().ok())
+            .filter(|id| *id > 0)
+            .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
         let result = self.fetch_attachment_image(c, &object, file, large).await?;
         if let (Some(key), ContentResult::Image(image), Some(store)) =
             (&cache_key, &result, self.previews.as_mut())
@@ -927,6 +1016,16 @@ impl NextcloudClient {
             close,
         })))
     }
+}
+fn hex_identity(hex: &str) -> Option<[u8; 32]> {
+    if hex.len() != 64 {
+        return None;
+    }
+    let mut out = [0; 32];
+    for (byte, pair) in out.iter_mut().zip(hex.as_bytes().chunks(2)) {
+        *byte = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(out)
 }
 /// Read only the plain text from Talk's tiny emoji avatar response. No SVG is
 /// rendered, no entity is expanded, and no URI/font/image is followed.

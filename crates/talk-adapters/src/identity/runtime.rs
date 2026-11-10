@@ -2395,6 +2395,11 @@ impl Worker {
         )
         .map_err(|e| IdentityError::Request(e.kind))?;
         if a.disposition == 2 && a.eligible.is_some() {
+            // The former SQLite picture caches are disposable; failing to remove one
+            // leaves only unused bytes and must not block the sign-in.
+            if let Ok(ledger) = lock(&self.ledger) {
+                let _ = super::media_files::purge_legacy(&ledger.dir, self.account);
+            }
             client.set_avatar_store(Box::new(super::avatars::Store::new(
                 self.ledger.clone(),
                 self.account,

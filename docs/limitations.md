@@ -147,8 +147,14 @@ of complete parity with the official clients.
   Linux/Windows use Download for outgoing files.
 - macOS PDF preview renders only the first page, up to 4 MiB. Linux/Windows use
   server thumbnails. Raster previews are bounded; GIF/WebP show still frames.
-  Opened previews are kept in a per-account file (up to 96 MiB, thirty days) so the
-  detail view reuses them, also after a restart; restricted rooms stay uncached.
+  Opened previews and profile pictures are kept as plain files in the account's
+  private picture folder (previews up to 256 MiB and 512 files, least recently
+  opened first) and shown from there without asking the server again, also after a
+  restart. This deliberately trusts what this computer already received: a picture
+  you could once see stays visible locally until its room leaves the room list,
+  becomes restricted, or you log out. Restricted rooms stay uncached. After a
+  restart the room list must load once before pictures appear, so a cold start
+  without a connection shows pictures only where the chat cache has a thumbnail.
   Unsupported or larger content offers browser handoff or download. Link cards
   depend on the server's reference providers and fetch no arbitrary embedded web
   content. Locations can open OpenStreetMap deliberately; map tiles are not loaded.

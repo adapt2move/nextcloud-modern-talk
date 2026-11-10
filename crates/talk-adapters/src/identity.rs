@@ -9,6 +9,7 @@ mod error;
 pub mod lab;
 mod ledger;
 mod login;
+mod media_files;
 mod network;
 mod previews;
 mod private_fs;
