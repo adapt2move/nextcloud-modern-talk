@@ -2645,11 +2645,11 @@ fn completion_error(e: IdentityError) -> Completion {
 }
 fn content_error(e: IdentityError) -> ContentState {
     match e {
+        // A cancelled or locally re-routed request says nothing about access. As a
+        // denial it replaced the whole confirmed list with "Kein Zugriff" whenever
+        // a refresh was cut short, for example while a call was connecting.
         IdentityError::Request(
-            ErrorKind::PermissionDenied
-            | ErrorKind::ReauthenticationRequired
-            | ErrorKind::WrongScope
-            | ErrorKind::Cancelled,
+            ErrorKind::PermissionDenied | ErrorKind::ReauthenticationRequired,
         ) => ContentState::Denied,
         IdentityError::Request(
             ErrorKind::Transport

@@ -1791,8 +1791,16 @@ mod tests {
             ErrorKind::TooLarge,
             ErrorKind::Malformed,
             ErrorKind::Transport,
+            // A refresh cut short locally is no evidence of withdrawn access.
+            ErrorKind::Cancelled,
+            ErrorKind::WrongScope,
         ] {
             model.apply_room_refresh(scope(1), Err(IdentityError::Request(failure)));
+            assert_ne!(
+                model.snapshot.conversation_list.content,
+                talk_core::ui::presentation::ContentState::Denied,
+                "{failure:?} must not hide the confirmed list"
+            );
             assert_eq!(model.snapshot.selected, Some(context));
             assert_eq!(model.snapshot.conversations.as_slice().len(), 2);
             assert!(!model.snapshot.conversation_list.complete);
