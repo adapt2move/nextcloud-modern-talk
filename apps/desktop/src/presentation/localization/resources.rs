@@ -3,11 +3,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     (" · Du", " · You", " · Tú"),
     ("Abbrechen", "Cancel", "Cancelar"),
     ("Ablehnen", "Decline", "Rechazar"),
-    (
-        "Abstand der Gesprächszeilen. Der Nachrichtenverlauf bleibt unverändert.",
-        "Conversation row spacing. Message history spacing stays unchanged.",
-        "Espaciado de las conversaciones. El historial de mensajes no cambia.",
-    ),
     ("Abwesend", "Away", "Ausente"),
     ("Alle", "All", "Todas"),
     ("Alles", "All", "Todo"),
@@ -1307,6 +1302,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Klingelton abspielen", "Play ringtone", "Reproducir tono"),
     ("Kompakt", "Compact", "Compacta"),
     (
+        "Kompakt blendet Profilbilder aus und rückt Nachrichten enger zusammen.",
+        "Compact hides profile pictures and sets messages closer together.",
+        "Compacta oculta las fotos de perfil y acerca los mensajes.",
+    ),
+    (
         "Konferenzbeitritte und persönliche Erinnerungen.",
         "Conference joins and personal reminders.",
         "Entradas en conferencias y recordatorios personales.",
@@ -1439,6 +1439,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Los mensajes de esta llamada aún no están abiertos.",
     ),
     ("Nachrichten testen", "Test messages", "Probar mensajes"),
+    ("Nachrichtenansicht", "Message layout", "Vista de mensajes"),
     ("Name", "Name", "Nombre"),
     ("Name der Gruppe", "Group name", "Nombre del grupo"),
     (
@@ -1571,7 +1572,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Step {step} of 3",
         "Paso {step} de 3",
     ),
-    ("Seitenleiste", "Sidebar", "Barra lateral"),
     (
         "Seitenleiste ausblenden",
         "Hide sidebar",

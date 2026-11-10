@@ -402,6 +402,166 @@ impl Desktop {
             );
         self.exportable_card(card, reference, object, cx)
     }
+    /// A square thumbnail in the shared-content grid. Opening goes to the viewer;
+    /// download appears on hover, as on the chat's own cards.
+    pub(in crate::presentation) fn shared_tile(
+        &self,
+        reference: AttachmentRef,
+        object: &RichObject,
+        cx: &Context<Self>,
+    ) -> Div {
+        const TILE_HEIGHT: f32 = 150.;
+        let target = AssetTarget::Thumbnail(reference.clone());
+        let state = self.asset(&target).map(|asset| asset.state);
+        let preview = self.asset_image(&target).or_else(|| {
+            (!matches!(state, Some(AssetState::Missing | AssetState::Unsupported)))
+                .then(|| self.confirmed_upload_image(&reference))
+                .flatten()
+        });
+        let key = placeholder_key(reference.placeholder.as_str());
+        let group: gpui::SharedString = format!(
+            "{:?}",
+            scoped_id("shared-tile", reference.context, reference.message, key)
+        )
+        .into();
+        let loading = !self.media_offline()
+            && matches!(
+                state,
+                None | Some(AssetState::Loading | AssetState::Ready { .. })
+            );
+        let video = kind(object) == Kind::Video;
+        let face = div()
+            .relative()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(if let Some(image) = preview {
+                img(image)
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .rounded(px(10.))
+                    .into_any_element()
+            } else if loading {
+                self.pending_dots(self.theme.muted).into_any_element()
+            } else {
+                self.scaled_icon(if video { "play" } else { "file" }, 26., self.theme.muted)
+                    .into_any_element()
+            })
+            .when(video, |d| {
+                d.child(div().absolute().bottom_2().left_2().child(self.scaled_icon(
+                    "play",
+                    16.,
+                    self.theme.text,
+                )))
+            });
+        let open = self
+            .button(
+                scoped_id("shared-open", reference.context, reference.message, key),
+                "",
+                ButtonStyle::Quiet,
+                Availability::available(),
+                LocalAction::Content(Action::Preview(reference.clone())),
+                cx,
+            )
+            .size_full()
+            .p_0()
+            .rounded(px(10.))
+            .child(face);
+        div()
+            .group(group.clone())
+            .relative()
+            .w_full()
+            .h(px(TILE_HEIGHT))
+            .rounded(px(10.))
+            .overflow_hidden()
+            .border_1()
+            .border_color(self.theme.border)
+            .bg(self.theme.inset())
+            .child(open)
+            .child(
+                self.attachment_download(&reference, group, cx)
+                    .absolute()
+                    .bottom_1()
+                    .right_1(),
+            )
+    }
+    /// A file that has no thumbnail: icon, name and detail, with download on hover.
+    pub(in crate::presentation) fn shared_row(
+        &self,
+        reference: AttachmentRef,
+        object: &RichObject,
+        divider: bool,
+        cx: &Context<Self>,
+    ) -> Div {
+        let key = placeholder_key(reference.placeholder.as_str());
+        let group: gpui::SharedString = format!(
+            "{:?}",
+            scoped_id("shared-row", reference.context, reference.message, key)
+        )
+        .into();
+        let pdf = kind(object) == Kind::Pdf && cfg!(target_os = "macos");
+        let action = if pdf || crate::presentation::attachments::previewable(object) {
+            Action::Preview(reference.clone())
+        } else {
+            Action::Download(reference.clone())
+        };
+        div()
+            .group(group.clone())
+            .flex()
+            .items_center()
+            .pr_2()
+            .when(divider, |d| d.border_t_1().border_color(self.theme.border))
+            .child(
+                self.button(
+                    scoped_id("shared-file", reference.context, reference.message, key),
+                    "",
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::Content(action),
+                    cx,
+                )
+                .min_w_0()
+                .flex_1()
+                .px_3()
+                .py_2()
+                .gap_3()
+                .rounded(px(0.))
+                .child(
+                    div()
+                        .size(px(32.))
+                        .flex_none()
+                        .rounded(px(8.))
+                        .bg(self.theme.inset())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(self.scaled_icon("file", 18., self.theme.muted)),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .child(
+                            div()
+                                .w_full()
+                                .truncate()
+                                .text_size(self.sp(13.))
+                                .text_color(self.theme.text)
+                                .child(object.name.as_str().to_owned()),
+                        )
+                        .child(self.hint(&crate::presentation::attachments::file_detail(
+                            self.locale,
+                            object.name.as_str(),
+                            object.size,
+                        ))),
+                ),
+            )
+            .child(self.attachment_download(&reference, group, cx))
+    }
     pub(in crate::presentation) fn attachment_grid(
         &self,
         entries: &[(AttachmentRef, &RichObject)],

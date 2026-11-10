@@ -64,7 +64,9 @@ impl DisplayScale {
     }
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum SidebarDensity {
+/// Spacing of the message history and composer. (It never changed the sidebar; it
+/// was stored under the `sidebar` key, which is kept so saved choices still load.)
+pub enum MessageDensity {
     Compact,
     #[default]
     Relaxed,
@@ -187,7 +189,7 @@ pub struct LocalPreferences {
     pub palette: Palette,
     pub appearance: Appearance,
     pub scale: DisplayScale,
-    pub sidebar_density: SidebarDensity,
+    pub message_density: MessageDensity,
     pub locale: LocalePreference,
     pub launch_at_login: bool,
     pub start_in_background: bool,
@@ -205,7 +207,7 @@ impl Default for LocalPreferences {
             palette: Palette::default(),
             appearance: Appearance::default(),
             scale: DisplayScale::default(),
-            sidebar_density: SidebarDensity::default(),
+            message_density: MessageDensity::default(),
             locale: LocalePreference::default(),
             launch_at_login: true,
             start_in_background: false,

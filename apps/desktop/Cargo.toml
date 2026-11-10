@@ -35,7 +35,6 @@ async-io.workspace = true
 futures-lite.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-enigo.workspace = true
 windows-permissions.workspace = true
 windows.workspace = true
 

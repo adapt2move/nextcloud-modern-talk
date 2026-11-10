@@ -180,6 +180,7 @@ pub const SCENARIOS: &[&str] = &[
     "details-ready",
     "participants",
     "files",
+    "shared-media",
     "thread",
     "search",
     "search-navigation",
@@ -1334,6 +1335,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 | "voice-recording"
                 | "voice-review"
                 | "chat-attachments"
+                | "shared-media"
                 | "chat-upload"
                 | "chat-upload-preview"
                 | "chat-upload-uncertain"
@@ -1344,6 +1346,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     ) {
         let mut state = snapshot(Some("chat-ux"));
         content::configure(&mut state);
+        if scenario == Some("shared-media") {
+            content::shared_media(&mut state);
+        }
         if matches!(
             scenario,
             Some("chat-cloud-files" | "chat-cloud-files-offline")
@@ -2620,6 +2625,7 @@ pub struct DevelopmentPort {
     chat_motion: bool,
     history_pagination: bool,
     chat_content: bool,
+    shared_media: bool,
     people_fixture: bool,
 }
 impl DevelopmentPort {
@@ -2694,6 +2700,7 @@ impl DevelopmentPort {
             chat_motion: scenario == Some("chat-motion"),
             people_fixture: scenario == Some("people-card"),
             history_pagination: scenario == Some("history-pagination"),
+            shared_media: scenario == Some("shared-media"),
             chat_content: matches!(
                 scenario,
                 Some(
@@ -2709,6 +2716,7 @@ impl DevelopmentPort {
                         | "voice-recording"
                         | "voice-review"
                         | "chat-attachments"
+                        | "shared-media"
                         | "chat-upload"
                         | "chat-upload-preview"
                         | "chat-upload-uncertain"
@@ -3108,6 +3116,9 @@ impl NativeDesktopPort for DevelopmentPort {
                 }
                 if self.chat_content {
                     content::configure(&mut self.snapshot);
+                    if self.shared_media {
+                        content::shared_media(&mut self.snapshot);
+                    }
                 }
             }
             UiIntent::Create {

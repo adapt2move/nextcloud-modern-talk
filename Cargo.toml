@@ -64,7 +64,6 @@ gstreamer-app = { version = "=0.25.2", default-features = false, features = ["v1
 gstreamer-video = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 # Windows' documented native emoji shortcut; OS calls stay behind safe bindings.
-enigo = { version = "=0.6.1", default-features = false }
 windows = { version = "=0.62.2", default-features = false, features = ["UI_ViewManagement"] }
 # Read the OS motion preference in both bundled and cargo-run builds.
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSAccessibility"] }

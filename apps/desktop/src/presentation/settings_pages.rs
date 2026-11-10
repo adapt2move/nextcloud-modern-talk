@@ -123,7 +123,7 @@ impl Desktop {
                             .child(
                                 div()
                                     .rounded(px(5.))
-                                    .bg(self.theme.subtle)
+                                    .bg(self.theme.inset())
                                     .px_2()
                                     .child(format!("{prefix}{}", shortcut.key)),
                             ),

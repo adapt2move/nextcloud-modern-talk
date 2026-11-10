@@ -174,7 +174,7 @@ Use `chat-content`, `chat-content-loading` and `chat-content-failed` to inspect 
 
 Use `chat-upload` and `chat-upload-uncertain` for the immediate outgoing image row, inline progress and missing-confirmation actions. These are fictional projections with no file/server effects.
 
-Use `chat-attachments` for compact JSON/ZIP cards and the selected-file strip.
+Use `chat-attachments` for compact JSON/ZIP cards and the selected-file strip, and `shared-media` for the shared-content dialog with a picture grid and file rows. Set `NMT_UI_EMOJI=1` with a chat scenario to start with the inline emoji picker open.
 Remove chips, hover/focus Download and drop multiple local files into the chat.
 The fixture shows a pending send rather than fabricating upload success. It has
 no file or server I/O. Native Finder promises require a real macOS account-connected
@@ -192,7 +192,7 @@ system integration or accessibility. The screen stage keeps camera and screen
 identities separate; the production media owner supplies scoped screen frames through the same stream metadata.
 Use `search-navigation` for the fictional quick switcher, `account-search` for grouped message results and filters, `discover` for open-conversation browsing, and `search-filter` for the sidebar filters and muted-room indicator. These previews do not query a directory or establish server behavior.
 
-Use `chat-ux` and `chat-ux-call` for the header, search, reply and tooltip fixtures. They use fictional conversations and do not authorize a server send or call. Short transitions respect the observed system Reduce Motion preference; an unknown preference suppresses decorative motion. On Linux, observation uses the desktop's GNOME or KDE settings. The emoji action uses the system character palette on macOS, the Windows emoji picker, or an available Linux desktop picker. Linux picker selection may require an explicit copy and paste.
+Use `chat-ux` and `chat-ux-call` for the header, search, reply and tooltip fixtures. They use fictional conversations and do not authorize a server send or call. Short transitions respect the observed system Reduce Motion preference; an unknown preference suppresses decorative motion. On Linux, observation uses the desktop's GNOME or KDE settings.
 
 Update development builds are not treated as installable packages. For installation checks use the private fixture in [tools/updates](../tools/updates/install_probe.py), which creates a disposable package and never overwrites a system installation. The PackageKit fixture uses a private D-Bus service, not the system package manager. Runtime checks and package-layout fixtures do not qualify native macOS or Windows installation.
 

@@ -682,6 +682,14 @@ impl TextInput {
         self.apply_replacement(None, Insertion::Literal(&replacement), cx);
     }
 
+    /// Insert a picked emoji at the caret, replacing a selection, like typed text.
+    pub(super) fn insert_emoji(&mut self, emoji: &str, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() {
+            return;
+        }
+        self.apply_replacement(None, Insertion::Paste(emoji), cx);
+    }
+
     pub(super) fn insert_mention(&mut self, identifier: &str, cx: &mut Context<Self>) {
         if !self.interactive || self.composing() || !self.selected_range.is_empty() {
             return;

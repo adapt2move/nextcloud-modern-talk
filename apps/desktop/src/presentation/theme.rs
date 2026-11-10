@@ -112,6 +112,17 @@ impl Theme {
         self.surface.into()
     }
 
+    /// Inset fill for panes inside a glass surface. Translucent while the glass is
+    /// on, so the material stays continuous behind headers, navigation and cards
+    /// instead of breaking into opaque rectangles.
+    pub fn inset(self) -> Hsla {
+        if self.reduced_transparency {
+            self.subtle
+        } else {
+            self.subtle.opacity(0.5)
+        }
+    }
+
     pub fn chrome(self) -> gpui::Background {
         if self.reduced_transparency {
             return self.canvas.into();
@@ -172,7 +183,7 @@ impl Theme {
             (false, true) => [
                 0xe9e7bf, 0xe9e7bf, 0xffffff, 0xf6f7f4, 0x252e2e, 0x566358, 0x354f41, 0xffffff,
                 0xd3d5b0, 0x354f41, 0xe0e5dd, 0x66776a, 0x9e3e32, 0xfff0ec, 0x795300, 0xfff4d6,
-                0x286343, 0x202725, 0x303d35, 0xe9eeea, 0xc5d2c9, 0xc6d6df, 0x354f41, 0x4c584e,
+                0x286343, 0x202725, 0x303d35, 0xe9eeea, 0xc5d2c9, 0xd2dec0, 0x354f41, 0x4c584e,
             ],
             (true, false) => [
                 0x172131, 0x172131, 0x1c2633, 0x243140, 0xeaf0f8, 0xb1c1d6, 0x3a75c8, 0xffffff,

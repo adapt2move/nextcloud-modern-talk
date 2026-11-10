@@ -11,6 +11,7 @@ mod conversation_dialog;
 mod creation;
 mod device_settings;
 mod discovery;
+mod emoji_picker;
 mod federation;
 mod feedback;
 mod focus;
@@ -121,6 +122,8 @@ pub enum LocalAction {
     MessageIn(ConversationRef, messaging::Action),
     EmojiPicker(ConversationRef),
     ThreadEmojiPicker(ConversationRef),
+    EmojiCategory(usize),
+    EmojiPick(&'static str),
     Open(Overlay),
     OpenRoomNotifications,
     Close,
@@ -304,6 +307,8 @@ pub struct InitialView {
     pub thread_options_fixture: bool,
     pub room_menu_fixture: bool,
     pub new_thread_fixture: bool,
+    /// Development only: open the inline emoji picker at start.
+    pub emoji_fixture: bool,
     pub private_reply_fixture: bool,
     pub scale: u16,
     pub sidebar_menu_fixture: bool,
@@ -348,9 +353,10 @@ pub struct Desktop {
     toolbar_focus: std::rc::Rc<std::cell::RefCell<Option<gpui::ElementId>>>,
     dialog_motion: motion::DialogMotion,
     motion_frames: std::rc::Rc<std::cell::Cell<u64>>,
-    emoji_picker_pending: Option<(ConversationRef, u64)>,
-    emoji_picker_generation: u64,
-    emoji_picker_context: Option<ConversationRef>,
+    /// The inline emoji picker: which composer opened it, its tab and recent picks.
+    emoji_panel: Option<(ConversationRef, bool)>,
+    emoji_category: usize,
+    emoji_recent: Vec<&'static str>,
     keyboard_navigation: bool,
     highlighted_message: Option<(ConversationRef, u128)>,
     highlight_started: Option<Instant>,
@@ -551,6 +557,7 @@ impl Desktop {
             thread_options_fixture,
             room_menu_fixture,
             new_thread_fixture,
+            emoji_fixture,
             private_reply_fixture,
             scale,
             sidebar_menu_fixture,
@@ -691,7 +698,6 @@ impl Desktop {
                 thread_composer.clone(),
                 thread_title.clone(),
                 message_ui.scheduled_input.clone(),
-                message_ui.reaction_input.clone(),
             ])
             .chain(content_ui.inputs().cloned())
         {
@@ -772,9 +778,9 @@ impl Desktop {
             toolbar_focus: Default::default(),
             dialog_motion: motion::DialogMotion::default(),
             motion_frames: Default::default(),
-            emoji_picker_pending: None,
-            emoji_picker_generation: 0,
-            emoji_picker_context: None,
+            emoji_panel: None,
+            emoji_category: 0,
+            emoji_recent: Vec::new(),
             keyboard_navigation: false,
             highlighted_message: None,
             highlight_started: None,
@@ -786,8 +792,8 @@ impl Desktop {
             palette,
             appearance,
             scale,
-            compact: preferences.active.sidebar_density
-                == talk_core::preferences::SidebarDensity::Compact,
+            compact: preferences.active.message_density
+                == talk_core::preferences::MessageDensity::Compact,
             locale,
             settings_request: preferences.revision.0,
             preferences,
@@ -948,6 +954,12 @@ impl Desktop {
                 );
             }
             desktop.thread_options_open = thread_options_fixture;
+        }
+        if development
+            && emoji_fixture
+            && let Some(context) = desktop.snapshot.selected
+        {
+            desktop.emoji_panel = Some((context, false));
         }
         if development
             && new_thread_fixture
@@ -1523,9 +1535,7 @@ impl Desktop {
         );
         if self.incoming_visible() {
             self.account_removal.dismiss_confirmation();
-            if self.emoji_picker_pending.is_some() || self.emoji_picker_context.is_some() {
-                self.retire_emoji_picker();
-            }
+            self.retire_emoji_picker();
             self.stop_device_preview(cx);
         }
         if previous_account != self.snapshot.active_account {
@@ -1958,14 +1968,16 @@ impl Desktop {
             }
             LocalAction::EmojiPicker(context) => {
                 if Some(context) == self.snapshot.selected {
-                    self.show_composer_emoji(false, window, cx);
+                    self.toggle_inline_emoji(context, false);
                 }
             }
             LocalAction::ThreadEmojiPicker(context) => {
                 if Some(context) == self.snapshot.selected {
-                    self.show_composer_emoji(true, window, cx);
+                    self.toggle_inline_emoji(context, true);
                 }
             }
+            LocalAction::EmojiCategory(index) => self.emoji_category(index),
+            LocalAction::EmojiPick(emoji) => self.pick_emoji(emoji, window, cx),
             LocalAction::OpenRoomNotifications => {
                 self.handle(LocalAction::Open(Overlay::RoomInfo), window, cx);
                 if self.overlay == Some(Overlay::RoomInfo) {
@@ -3283,7 +3295,7 @@ impl Desktop {
                 self.preferences.active.locale,
                 self.palette,
                 self.appearance,
-                self.preferences.active.sidebar_density,
+                self.preferences.active.message_density,
                 self.settings_tab,
                 self.preferences.load,
                 self.preferences.save,
@@ -3605,7 +3617,6 @@ impl Desktop {
             &self.message_ui.search,
             &self.discovery_search,
             &self.message_ui.scheduled_input,
-            &self.message_ui.reaction_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -3631,7 +3642,6 @@ impl Desktop {
             &self.message_ui.search,
             &self.discovery_search,
             &self.message_ui.scheduled_input,
-            &self.message_ui.reaction_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -3655,7 +3665,6 @@ impl Desktop {
             &self.message_ui.search,
             &self.discovery_search,
             &self.message_ui.scheduled_input,
-            &self.message_ui.reaction_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -3931,11 +3940,7 @@ impl Render for Desktop {
                     });
             });
         }
-        for input in [
-            &self.message_ui.search,
-            &self.message_ui.scheduled_input,
-            &self.message_ui.reaction_input,
-        ] {
+        for input in [&self.message_ui.search, &self.message_ui.scheduled_input] {
             input.update(cx, |i, _| {
                 i.theme = t;
                 i.text_scale = f32::from(self.scale) / 100.;
@@ -3956,7 +3961,6 @@ impl Render for Desktop {
             (&self.room_ui.password, "Neues Passwort"),
             (&self.message_ui.search, "Im Gespräch suchen …"),
             (&self.message_ui.scheduled_input, "Nachricht bearbeiten"),
-            (&self.message_ui.reaction_input, "Emoji hier einfügen"),
         ] {
             input.update(cx, |i, _| i.set_placeholder(self.l(key)));
         }
@@ -4094,7 +4098,6 @@ impl Render for Desktop {
             &self.message_ui.search,
             &self.discovery_search,
             &self.message_ui.scheduled_input,
-            &self.message_ui.reaction_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())

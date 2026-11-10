@@ -639,7 +639,7 @@ impl Desktop {
             Choice::MoreReactions => {
                 let thread = self.message_ui.menu.source.is_thread();
                 self.dismiss_message_menu(false, window, cx);
-                self.open_reaction_capture(target.context, target.message, thread, window, cx);
+                self.open_reaction_capture(target.context, target.message, thread, cx);
                 return;
             }
             Choice::Delete => self.message_ui.menu.session.mode = Mode::Delete,

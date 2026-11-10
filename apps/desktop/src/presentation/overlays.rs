@@ -85,7 +85,8 @@ impl Desktop {
                                 .child(
                                     self.thread_body(cx)
                                         .children(self.message_deadline_card_on(true, cx))
-                                        .children(self.reaction_capture_card_on(true, cx)),
+                                        .children(self.reaction_capture_card_on(true, cx))
+                                        .children(self.composer_emoji_card_on(true, cx)),
                                 ),
                         )
                         .child(self.thread_composer_view(cx)),
@@ -835,7 +836,7 @@ impl Desktop {
             div()
                 .size(px(52.))
                 .rounded(px(16.))
-                .bg(t.subtle)
+                .bg(t.inset())
                 .flex()
                 .items_center()
                 .justify_center()

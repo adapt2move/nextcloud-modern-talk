@@ -35,7 +35,7 @@ impl Render for DragLabel {
 pub(super) fn previewable(object: &RichObject) -> bool {
     matches!(object.mime_type.as_ref().map(|mime| mime.as_str()), Some(mime) if mime.starts_with("image/") || mime == "video/mp4" || mime == "video/webm" || mime == "application/pdf")
 }
-pub(super) fn file_detail(
+pub(in crate::presentation) fn file_detail(
     locale: talk_core::preferences::Locale,
     name: &str,
     bytes: Option<u64>,

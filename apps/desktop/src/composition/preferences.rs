@@ -598,29 +598,6 @@ impl ComputerSettingsPort for Bridge {
     fn reduced_transparency(&self) -> bool {
         self.services.preferences.reduced_transparency()
     }
-    fn emoji_picker_available(&self) -> bool {
-        self.services.preferences.emoji_picker_available()
-    }
-    fn show_emoji_picker(&self) -> Result<(), crate::presentation::preferences::EmojiPickerError> {
-        if !self.services.preferences.emoji_picker_available() {
-            return Err(crate::presentation::preferences::EmojiPickerError::Unavailable);
-        }
-        self.services
-            .preferences
-            .show_emoji_picker()
-            .map_err(|_| crate::presentation::preferences::EmojiPickerError::Failed)
-    }
-    fn cancel_emoji_picker(&self) {
-        self.services.preferences.cancel_emoji_picker();
-    }
-    fn take_emoji_picker_error(
-        &mut self,
-    ) -> Option<crate::presentation::preferences::EmojiPickerError> {
-        self.services
-            .preferences
-            .take_emoji_picker_error()
-            .map(|_| crate::presentation::preferences::EmojiPickerError::Failed)
-    }
     fn update_snapshot(&self) -> talk_core::preferences::updates::UpdateSnapshot {
         let mut snapshot = self
             .services

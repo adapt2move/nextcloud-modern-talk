@@ -325,8 +325,13 @@ impl Desktop {
                                 ))
                                 .min_w_0()
                                 .justify_start()
-                                .p_0()
-                                .min_h(px(28.))
+                                // The hover shape gets room around the name, and the
+                                // negative margin keeps the text where it was.
+                                .px(px(8.))
+                                .py(px(2.))
+                                .ml(px(-8.))
+                                .rounded(px(8.))
+                                .min_h(px(32.))
                                 .text_color(h.text)
                                 .child(row.title.as_str().to_owned()),
                             )
@@ -988,107 +993,20 @@ impl Desktop {
             })
     }
     fn emoji_availability_for(&self, thread: bool, cx: &Context<Self>) -> Availability {
-        let supported = cfg!(target_os = "macos") || self.settings_port.emoji_picker_available();
         let composing = self.input_composing(cx);
         Availability::when(
-            supported
-                && self.composer_available()
+            self.composer_available()
                 && !composing
                 && (!thread || self.overlay == Some(super::Overlay::Thread)),
             if composing {
                 "Beende zuerst die laufende Texteingabe."
-            } else if !supported {
-                "Die native Emoji-Auswahl ist auf diesem System nicht verfügbar."
             } else {
                 "Öffne zuerst das Nachrichtenfeld."
             },
         )
-        .help(if cfg!(target_os = "linux") && supported {
-            "Wähle ein Emoji und füge es danach mit Strg+V in die Nachricht ein."
-        } else {
-            ""
-        })
-    }
-    pub(super) fn show_composer_emoji(
-        &mut self,
-        thread: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let editor = if thread {
-            &self.thread_composer
-        } else {
-            &self.composer
-        };
-        if !self.composer_available()
-            || self.input_composing(cx)
-            || !editor.read(cx).interactive
-            || thread && self.overlay != Some(super::Overlay::Thread)
-            || self.emoji_picker_pending.is_some()
-        {
-            return;
-        }
-        let Some(context) = self.snapshot.selected else {
-            return;
-        };
-        if !cfg!(target_os = "macos") && !self.settings_port.emoji_picker_available() {
-            return;
-        }
-        let Some(generation) = self.emoji_picker_generation.checked_add(1) else {
-            return;
-        };
-        self.emoji_picker_generation = generation;
-        // Focus alone leaves the exact selection, marked text, history and draft
-        // untouched. Wait one frame for the native text handler to own focus.
-        editor.focus_handle(cx).focus(window);
-        self.emoji_picker_pending = Some((context, generation));
-        let view = cx.weak_entity();
-        window.on_next_frame(move |window, cx| {
-            let _ = view.update(cx, |this, cx| {
-                if this.emoji_picker_pending != Some((context, generation)) {
-                    return;
-                }
-                this.emoji_picker_pending = None;
-                let editor = if thread { &this.thread_composer } else { &this.composer };
-                if this.snapshot.selected != Some(context)
-                    || this.projection_blocked
-                    || !window.is_window_active()
-                    || !this.composer_available()
-                    || this.snapshot.content == ContentState::Denied
-                    || this.selected().is_none_or(|row| row.send == Decision::Denied)
-                    || this.input_composing(cx)
-                    || thread && this.overlay != Some(super::Overlay::Thread)
-                    || !editor.read(cx).interactive
-                    || !editor.focus_handle(cx).is_focused(window)
-                {
-                    return;
-                }
-                if cfg!(target_os = "macos") {
-                    window.show_character_palette();
-                } else {
-                    this.emoji_picker_context = None;
-                    match this.settings_port.show_emoji_picker() {
-                        Ok(()) if cfg!(target_os = "linux") => {
-                            this.emoji_picker_context = Some(context);
-                            this.feedback = Some(super::feedback::Feedback::info(
-                                "Wähle ein Emoji und füge es danach mit Strg+V in die Nachricht ein.",
-                            ).in_conversation(context));
-                        }
-                        Ok(()) => this.emoji_picker_context = Some(context),
-                        Err(error) => {
-                            this.feedback = Some(super::feedback::Feedback::error(error.label())
-                                .in_conversation(context));
-                        }
-                    }
-                    cx.notify();
-                }
-            });
-        });
     }
     pub(super) fn retire_emoji_picker(&mut self) {
-        self.emoji_picker_pending = None;
-        self.emoji_picker_context = None;
-        self.settings_port.cancel_emoji_picker();
+        self.emoji_panel = None;
     }
     pub(super) fn incoming(&self, cx: &Context<Self>) -> Div {
         let call = self.snapshot.call.as_ref().expect("incoming projection");

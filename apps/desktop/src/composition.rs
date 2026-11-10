@@ -302,7 +302,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("call-participants-raised") => Some(Overlay::CallParticipants),
         Some("call-end-confirm") => Some(Overlay::ConfirmEndCall),
         Some("call-recording-confirm") => Some(Overlay::ConfirmRecording),
-        Some("files") => Some(Overlay::Files),
+        Some("files" | "shared-media") => Some(Overlay::Files),
         Some("chat-cloud-files" | "chat-cloud-files-offline") => Some(Overlay::CloudFiles),
         Some(
             "thread"
@@ -420,7 +420,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             cx.new(|cx|{
                 #[cfg(feature = "dev-probes")]
                 if options.dev_latency { println!("DEV_STAGE desktop"); }
-                let mut desktop=Desktop::new(port,InitialView{probe,development,material_preview,material_images,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),sidebar_fixture:crate::presentation::sidebar::Fixture::for_scenario(options.scenario.as_deref()),thread_options_fixture:matches!(options.scenario.as_deref(),Some("thread-options"|"thread-offline")),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),sidebar_menu_fixture:options.scenario.as_deref()==Some("sidebar-room-menu"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
+                let mut desktop=Desktop::new(port,InitialView{probe,development,material_preview,material_images,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),sidebar_fixture:crate::presentation::sidebar::Fixture::for_scenario(options.scenario.as_deref()),thread_options_fixture:matches!(options.scenario.as_deref(),Some("thread-options"|"thread-offline")),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),emoji_fixture:std::env::var_os("NMT_UI_EMOJI").is_some(),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),sidebar_menu_fixture:options.scenario.as_deref()==Some("sidebar-room-menu"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
                 #[cfg(feature = "dev-probes")]
                 if options.dev_latency { println!("DEV_STAGE constructed"); }
                 #[cfg(feature = "dev-probes")]
@@ -549,8 +549,6 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                     });
                     if was_background && !background {
                         preview_services.preferences.refresh_native_interaction();
-                    } else if !was_background && background {
-                        preview_services.preferences.cancel_emoji_picker();
                     }
                     was_background = background;
                     let update_action = preview_services.install.borrow_mut().poll(&preview_services);

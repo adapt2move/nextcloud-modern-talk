@@ -9,8 +9,8 @@ const TILE: f32 = 128.;
 const TILE_TEXELS: f32 = 128.;
 const PAD_TEXELS: f32 = crate::presentation::MATERIAL_TILE_PAD as f32;
 /// Backdrop blur radius in points for every floating glass surface.
-const BACKDROP_BLUR: f32 = 8.;
-const LIGHT_GLASS_ALPHA: f32 = 0.87;
+const BACKDROP_BLUR: f32 = 18.;
+const LIGHT_GLASS_ALPHA: f32 = 0.86;
 const DARK_GLASS_ALPHA: f32 = 0.88;
 // A window cannot create an unbounded number of retained decorative views.
 const MAX_TILES_PER_AXIS: usize = 64;

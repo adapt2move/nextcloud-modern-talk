@@ -7,8 +7,8 @@ use std::{
 };
 use talk_core::bounded::Text;
 use talk_core::preferences::{
-    Appearance, Locale, LocalePreference, NotificationDelivery, NotificationPreferences, Palette,
-    SidebarDensity,
+    Appearance, Locale, LocalePreference, MessageDensity, NotificationDelivery,
+    NotificationPreferences, Palette,
     devices::{DeviceId, DeviceSelection},
     notifications::{NotificationCategory, NotificationEvent, SourceAvailability, plan},
 };
@@ -108,7 +108,7 @@ fn file_restart_keeps_system_and_independent_sidebar_locale_devices() {
     assert_eq!(ready(&first).load, LoadState::DefaultsBecauseAbsent);
     let mut values = LocalPreferences {
         palette: Palette::Sage,
-        sidebar_density: SidebarDensity::Compact,
+        message_density: MessageDensity::Compact,
         locale: LocalePreference::Spanish,
         notifications: mixed_notifications(),
         ..LocalPreferences::default()
@@ -133,7 +133,7 @@ fn preferences_survive_process_restart() {
     let values = LocalPreferences {
         palette: Palette::Sage,
         appearance: Appearance::System,
-        sidebar_density: SidebarDensity::Compact,
+        message_density: MessageDensity::Compact,
         locale: LocalePreference::German,
         notifications: mixed_notifications(),
         recent_reactions: talk_core::preferences::reactions::RecentReactions::from_ordered(
@@ -428,7 +428,7 @@ fn one_latest_slot_supersedes_intermediate_edit_and_old_failure_does_not_rollbac
     );
     let newest = LocalPreferences {
         locale: LocalePreference::German,
-        sidebar_density: SidebarDensity::Compact,
+        message_density: MessageDensity::Compact,
         ..LocalPreferences::default()
     };
     let revision = set(&runtime, 3, newest.clone());

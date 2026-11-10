@@ -62,7 +62,7 @@ impl Desktop {
             .rounded(px(8.))
             .border_1()
             .border_color(self.theme.input_border)
-            .bg(self.theme.subtle)
+            .bg(self.theme.inset())
             .child(self.field_ring(focus.clone(), 8.))
             .on_mouse_down(
                 gpui::MouseButton::Left,
@@ -140,7 +140,7 @@ impl Desktop {
             .gap_1()
             .p(px(2.))
             .rounded(px(8.))
-            .bg(self.theme.subtle)
+            .bg(self.theme.inset())
     }
 }
 

@@ -35,9 +35,9 @@ impl Desktop {
     pub(in crate::presentation) fn style_card<T: Styled>(&self, card: T, style: CardStyle) -> T {
         let card = card.rounded(px(12.));
         match style {
-            CardStyle::Inset => card.bg(self.theme.subtle),
+            CardStyle::Inset => card.bg(self.theme.inset()),
             CardStyle::InsetRaised => card
-                .bg(self.theme.subtle)
+                .bg(self.theme.inset())
                 .shadow(self.theme.elevation(Elevation::Raised)),
             CardStyle::Raised => card
                 .bg(self.theme.surface)
@@ -132,7 +132,7 @@ impl Desktop {
             .px_4()
             .py_4()
             .rounded_t(px(15.))
-            .bg(self.theme.subtle)
+            .bg(self.theme.inset())
             .border_b_1()
             .border_color(self.theme.border)
     }
@@ -147,7 +147,7 @@ impl Desktop {
             .px_4()
             .py_3()
             .rounded_b(px(15.))
-            .bg(self.theme.subtle)
+            .bg(self.theme.inset())
             .border_t_1()
             .border_color(self.theme.border)
     }

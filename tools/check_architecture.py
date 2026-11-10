@@ -38,7 +38,7 @@ DESKTOP_PLATFORM_EDGES = {
     'cfg(unix)': {'rustix'},
     'cfg(target_os = "macos")': {'exacl', 'objc2-app-kit'},
     'cfg(target_os = "linux")': {'ashpd', 'async-io', 'futures-lite'},
-    'cfg(target_os = "windows")': {'enigo', 'windows', 'windows-permissions'},
+    'cfg(target_os = "windows")': {'windows', 'windows-permissions'},
 }
 failures: list[str] = []
 
@@ -386,7 +386,6 @@ def check() -> None:
         "gstreamer-app": {"default-features": False, "features": ["v1_24"]},
         "gstreamer-video": {"default-features": False, "features": ["v1_24"]},
         "image": {"default-features": False, "features": ["png", "jpeg", "webp", "gif"]},
-        "enigo": {"default-features": False},
         "windows": {"default-features": False, "features": ["UI_ViewManagement"]},
         "objc2-app-kit": {"default-features": False, "features": ["std", "NSWorkspace", "NSAccessibility"]},
         "ashpd": {"default-features": False, "features": ["async-io", "screencast"]},

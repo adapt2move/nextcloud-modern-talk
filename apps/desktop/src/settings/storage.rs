@@ -8,8 +8,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use talk_core::preferences::{
-    Appearance, DisplayScale, LoadState, LocalPreferences, LocalePreference, NotificationDelivery,
-    OnboardingResume, Palette, PreferenceError, QuickSwitcherPreference, SidebarDensity,
+    Appearance, DisplayScale, LoadState, LocalPreferences, LocalePreference, MessageDensity,
+    NotificationDelivery, OnboardingResume, Palette, PreferenceError, QuickSwitcherPreference,
     UpdateChannel,
     devices::{DeviceId, DeviceSelection},
 };
@@ -105,9 +105,9 @@ pub(super) fn encode(values: &LocalPreferences) -> String {
             Appearance::Dark => "dark",
         },
         values.scale.percent(),
-        match values.sidebar_density {
-            SidebarDensity::Compact => "compact",
-            SidebarDensity::Relaxed => "relaxed",
+        match values.message_density {
+            MessageDensity::Compact => "compact",
+            MessageDensity::Relaxed => "relaxed",
         },
         match values.locale {
             LocalePreference::System => "system",
@@ -280,10 +280,10 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
                 2
             }
             "sidebar" => {
-                result.sidebar_density = match value {
-                    "compact" => SidebarDensity::Compact,
-                    "relaxed" => SidebarDensity::Relaxed,
-                    "comfortable" if version == 1 => SidebarDensity::Relaxed,
+                result.message_density = match value {
+                    "compact" => MessageDensity::Compact,
+                    "relaxed" => MessageDensity::Relaxed,
+                    "comfortable" if version == 1 => MessageDensity::Relaxed,
                     _ => return Err(PreferenceError::InvalidData),
                 };
                 3

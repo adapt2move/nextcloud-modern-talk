@@ -24,7 +24,7 @@ Per-message reply and more-actions icons reveal on that message's hover or keybo
 
 Nonessential hover, selection and reveal transitions are finite. Keyboard focus and input changes remain immediate; reduced motion suppresses decoration. Unknown system motion preferences suppress animation until the platform owner provides a value.
 
-The composer opens the native emoji picker only where supported. macOS uses the pinned GPUI character palette and keeps the native input selection. On other systems, availability and launch results come from the platform owner. A Linux system picker that copies a choice explains the explicit paste step and requires admitted clipboard use. No picker action reads or pastes clipboard automatically, changes marked text or crosses a modal/account/room boundary.
+The composer and the reaction card show a built-in emoji picker inline, identical on every platform: category tabs, a recent row and a scrolling grid of single-glyph emojis. A pick inserts at the caret like typed text, or reacts and closes the reaction card. The picker opens no system window, hands over no focus, reads no clipboard and does not cross a modal/account/room boundary; changing room or closing the composer retires it. The system's own character palette remains available through its keyboard shortcut on macOS.
 
 ## Members and bots
 

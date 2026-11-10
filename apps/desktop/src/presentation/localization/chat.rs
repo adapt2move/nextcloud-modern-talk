@@ -102,16 +102,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "La conexión aún no está lista.",
     ),
     (
-        "Die native Emoji-Auswahl ist auf diesem System nicht verfügbar.",
-        "The native emoji picker is unavailable on this system.",
-        "El selector nativo de emojis no está disponible en este sistema.",
-    ),
-    (
-        "Die native Emoji-Auswahl konnte nicht geöffnet werden.",
-        "The native emoji picker could not be opened.",
-        "No se pudo abrir el selector nativo de emojis.",
-    ),
-    (
         "Die vorherige Nachricht ist noch nicht geladen.",
         "The previous message has not been loaded yet.",
         "El mensaje anterior aún no se ha cargado.",
@@ -148,16 +138,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Eigene Zeit …", "Custom time …", "Hora personalizada …"),
     ("Emoji auswählen", "Choose an emoji", "Elegir un emoji"),
-    (
-        "Emoji hier einfügen",
-        "Paste an emoji here",
-        "Pega un emoji aquí",
-    ),
-    (
-        "Emoji-Auswahl öffnen",
-        "Open emoji picker",
-        "Abrir selector de emojis",
-    ),
     ("Erinnern", "Remind me", "Recordarme"),
     ("Erinnerung", "Reminder", "Recordatorio"),
     (
@@ -332,11 +312,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Wird leise gesendet",
         "Sending silently",
         "Envío sin notificación",
-    ),
-    (
-        "Wähle ein Emoji und füge es danach mit Strg+V in die Nachricht ein.",
-        "Choose an emoji, then paste it into the message with Ctrl+V.",
-        "Elige un emoji y pégalo en el mensaje con Ctrl+V.",
     ),
     (
         "Zu Favoriten hinzufügen",

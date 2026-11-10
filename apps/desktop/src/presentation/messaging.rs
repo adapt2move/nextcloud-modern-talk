@@ -74,7 +74,6 @@ pub(crate) enum Action {
     CancelTime,
     ToggleCustomTime,
     CancelReactionCapture,
-    OpenReactionPicker,
     Remind { message: u128, thread: Option<u128> },
     SubmitTime,
     SubmitRepeatedTime(talk_core::preferences::time::RepeatedTime),
@@ -131,8 +130,6 @@ pub(super) struct MessageUi {
     fixture_menu_pending: bool,
     pub scheduled_input: Entity<TextInput>,
     reaction_capture: Option<(ConversationRef, u128, bool)>,
-    reaction_error: Option<&'static str>,
-    pub reaction_input: Entity<TextInput>,
     time_error: Option<talk_core::preferences::time::LocalTimeError>,
     custom_time: bool,
     pub search: Entity<TextInput>,
@@ -361,8 +358,6 @@ impl MessageUi {
             fixture_menu_pending: false,
             scheduled_input: cx.new(|cx| TextInput::new("Nachricht bearbeiten", 4096, theme, cx)),
             reaction_capture: None,
-            reaction_error: None,
-            reaction_input: cx.new(|cx| TextInput::new("Emoji hier einfügen", 64, theme, cx)),
             time_error: None,
             custom_time: false,
             search: cx.new(|cx| TextInput::new("Im Gespräch suchen …", 256, theme, cx)),
@@ -1944,7 +1939,6 @@ impl Desktop {
                 }
             }
             Action::CancelReactionCapture => self.close_reaction_capture(window, cx),
-            Action::OpenReactionPicker => self.show_reaction_picker(window, cx),
             Action::ToggleCustomTime => {
                 self.message_ui.custom_time = !self.message_ui.custom_time;
                 if self.message_ui.custom_time {
@@ -2720,48 +2714,44 @@ impl Desktop {
         };
         let context = row.context;
         let pins = self.message_ui.show_pins;
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(
-                div()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(row.title.as_str().to_owned()),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(self.chip(
-                        "shared-files-tab",
-                        "Dateien und Medien",
-                        (!pins, 0, 2),
-                        LocalAction::MessageIn(context, Action::Files),
-                        cx,
-                    ))
-                    .child(self.chip(
-                        "shared-pins-tab",
-                        "Angeheftete Nachrichten",
-                        (pins, 1, 2),
-                        LocalAction::MessageIn(context, Action::Pins),
-                        cx,
-                    )),
-            );
-        if !pins && self.snapshot.active_account.is_some() {
-            body = body.child(self.button(
-                "browse-cloud-files",
-                "Alle Dateien anzeigen",
-                ButtonStyle::Secondary,
-                Availability::when(
-                    self.snapshot.content_panel.file_browser_supported != Some(false),
-                    "Diese Dateioption ist derzeit nicht verfügbar.",
-                ),
-                LocalAction::Content(super::content::Action::OpenCloudBrowser),
+        let tabs = self
+            .segmented()
+            .child(self.chip(
+                "shared-files-tab",
+                "Dateien und Medien",
+                (!pins, 0, 2),
+                LocalAction::MessageIn(context, Action::Files),
+                cx,
+            ))
+            .child(self.chip(
+                "shared-pins-tab",
+                "Angeheftete Nachrichten",
+                (pins, 1, 2),
+                LocalAction::MessageIn(context, Action::Pins),
                 cx,
             ));
-        }
+        let mut body = div().flex().flex_col().gap_4().child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .flex_wrap()
+                .child(tabs)
+                .when(!pins && self.snapshot.active_account.is_some(), |d| {
+                    d.child(self.button(
+                        "browse-cloud-files",
+                        "Alle Dateien anzeigen",
+                        ButtonStyle::Secondary,
+                        Availability::when(
+                            self.snapshot.content_panel.file_browser_supported != Some(false),
+                            "Diese Dateioption ist derzeit nicht verfügbar.",
+                        ),
+                        LocalAction::Content(super::content::Action::OpenCloudBrowser),
+                        cx,
+                    ))
+                }),
+        );
         let Some(panel) = self
             .snapshot
             .message_panel
@@ -2872,78 +2862,86 @@ impl Desktop {
             cx,
         ))
     }
+    /// Pictures and videos as a grid of tiles, other files as rows. Both open the
+    /// viewer or download in place and share the chat's attachment actions.
     pub(super) fn shared_files(&self, cx: &Context<Self>) -> Div {
-        let mut body = div().flex().flex_col().gap_3();
-        if let Some(panel) = self
+        use super::content::gallery::{Kind, kind};
+        use talk_core::ui::content::AttachmentRef;
+        let mut body = div().flex().flex_col().gap_4();
+        let Some(panel) = self
             .snapshot
             .message_panel
             .as_ref()
             .filter(|p| Some(p.context) == self.snapshot.selected)
-        {
-            let context = panel.context;
-            body = body.child(self.hint(&format!(
-                "{} {}",
-                self.l("Maximale Dateigröße:"),
-                super::localization::file_size(self.locale, Some(panel.file_limit))
-            )));
-            for message in panel.shared_files.as_slice() {
-                for (index, object) in message
-                    .metadata
-                    .rich
-                    .as_slice()
-                    .iter()
-                    .filter(|r| r.kind.as_str() == "file")
-                    .enumerate()
+        else {
+            return body;
+        };
+        let context = panel.context;
+        let mut media = Vec::new();
+        let mut files = Vec::new();
+        for message in panel.shared_files.as_slice() {
+            for object in message
+                .metadata
+                .rich
+                .as_slice()
+                .iter()
+                .filter(|r| r.kind.as_str() == "file")
+            {
+                let reference = AttachmentRef {
+                    context,
+                    message: message.local_id,
+                    placeholder: object.placeholder.clone(),
+                };
+                if matches!(kind(object), Kind::Image | Kind::Video)
+                    && super::attachments::previewable(object)
                 {
-                    body = body.child(
-                        div()
-                            .flex()
-                            .gap_3()
-                            .items_center()
-                            .child(div().flex_1().child(self.attachment_card(
-                                talk_core::ui::content::AttachmentRef {
-                                    context,
-                                    message: message.local_id,
-                                    placeholder: object.placeholder.clone(),
-                                },
-                                object,
-                                cx,
-                            )))
-                            .child(self.button(
-                                scoped_id(
-                                    "download-shared",
-                                    context,
-                                    message.local_id,
-                                    index as u128,
-                                ),
-                                "Herunterladen",
-                                ButtonStyle::Secondary,
-                                self.download_available(),
-                                LocalAction::MessageIn(
-                                    context,
-                                    Action::Command(MessageAction::Download {
-                                        message: message.local_id,
-                                        placeholder: object.placeholder.clone(),
-                                        name: Text::new(object.name.as_str()).unwrap_or_else(
-                                            |_| Text::new("download").expect("constant"),
-                                        ),
-                                    }),
-                                ),
-                                cx,
-                            )),
-                    );
+                    media.push((reference, object));
+                } else {
+                    files.push((reference, object));
                 }
             }
-            if panel.shared_files.as_slice().is_empty()
-                && !matches!(
-                    panel.state,
-                    talk_core::ui::conversation::RemoteState::Loading(_)
-                )
-            {
-                body = body.child(self.hint(self.l("Keine Dateien geladen")));
-            }
         }
-        body
+        if !media.is_empty() {
+            body =
+                body.child(
+                    div().grid().grid_cols(4).gap_2().children(media.iter().map(
+                        |(reference, object)| self.shared_tile(reference.clone(), object, cx),
+                    )),
+                );
+        }
+        if !files.is_empty() {
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .rounded(px(10.))
+                    .border_1()
+                    .border_color(self.theme.border)
+                    .bg(self.theme.inset())
+                    .overflow_hidden()
+                    .children(
+                        files
+                            .iter()
+                            .enumerate()
+                            .map(|(index, (reference, object))| {
+                                self.shared_row(reference.clone(), object, index > 0, cx)
+                            }),
+                    ),
+            );
+        }
+        if panel.shared_files.as_slice().is_empty()
+            && !matches!(
+                panel.state,
+                talk_core::ui::conversation::RemoteState::Loading(_)
+            )
+        {
+            body = body.child(self.hint(self.l("Keine Dateien geladen")));
+        }
+        body.child(self.hint(&format!(
+            "{} {}",
+            self.l("Maximale Dateigröße:"),
+            super::localization::file_size(self.locale, Some(panel.file_limit))
+        )))
     }
     fn message_text(
         &self,
@@ -3282,6 +3280,7 @@ impl Desktop {
         }
         rows.extend(self.message_deadline_card_on(false, cx));
         rows.extend(self.reaction_capture_card_on(false, cx));
+        rows.extend(self.composer_emoji_card_on(false, cx));
         rows
     }
     fn quote_marker(&self) -> Div {
@@ -3422,7 +3421,7 @@ impl Desktop {
                 cx,
             ))
     }
-    fn composer_card(&self) -> Div {
+    pub(super) fn composer_card(&self) -> Div {
         self.style_card(div(), super::controls::CardStyle::Outlined)
             .flex()
             .flex_col()

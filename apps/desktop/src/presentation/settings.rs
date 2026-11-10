@@ -82,7 +82,7 @@ fn miniature(t: Theme, w: f32) -> Div {
                         .rounded(px(4.))
                         .border_1()
                         .border_color(t.border)
-                        .bg(t.subtle)
+                        .bg(t.inset())
                         .children([t.success, t.focus, t.warning].into_iter().enumerate().map(
                             |(i, c)| {
                                 div()
@@ -252,7 +252,7 @@ impl Desktop {
             // frame edge must draw the same inner corner as its parent.
             .rounded_tl(px(12.))
             .rounded_bl(px(12.))
-            .bg(self.theme.subtle)
+            .bg(self.theme.inset())
             .border_r_1()
             .border_color(self.theme.border)
             .child(
@@ -442,7 +442,7 @@ impl Desktop {
                                 .flex_wrap()
                                 .p(px(2.))
                                 .rounded(px(8.))
-                                .bg(t.subtle)
+                                .bg(t.inset())
                                 .children([100u16, 125, 150, 200].into_iter().enumerate().map(
                                     |(i, n)| {
                                         self.chip(
@@ -468,8 +468,8 @@ impl Desktop {
                         .flex_wrap()
                         .child(
                             div()
-                                .child(self.settings_label(self.l("Seitenleiste")))
-                                .child(self.hint(self.l("Abstand der Gesprächszeilen. Der Nachrichtenverlauf bleibt unverändert."))),
+                                .child(self.settings_label(self.l("Nachrichtenansicht")))
+                                .child(self.hint(self.l("Kompakt blendet Profilbilder aus und rückt Nachrichten enger zusammen."))),
                         )
                         .child(
                             div()
@@ -477,7 +477,7 @@ impl Desktop {
                                 .gap_1()
                                 .p(px(2.))
                                 .rounded(px(8.))
-                                .bg(t.subtle)
+                                .bg(t.inset())
                                 .child(self.chip(
                                     "density-compact",
                                     "Kompakt",
@@ -505,7 +505,7 @@ impl Desktop {
                         .rounded(px(9.))
                         .border_1()
                         .border_color(t.border)
-                        .bg(t.subtle)
+                        .bg(t.inset())
                         .when(!self.compact, |d| d.child(self.person_avatar("?", 32.)))
                         .child(
                             div()
@@ -770,7 +770,7 @@ impl Desktop {
             .p(px(6.))
             .border_2()
             .border_color(gpui::transparent_black())
-            .bg(if selected { t.subtle } else { t.surface })
+            .bg(if selected { t.inset() } else { t.surface })
     }
     fn check_badge(&self) -> Div {
         div()

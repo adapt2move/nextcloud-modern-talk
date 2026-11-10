@@ -5,6 +5,61 @@ use talk_core::ui::conversation::Availability;
 use talk_core::ui::messaging::RichObject;
 use talk_core::ui::presentation::FeatureSupport;
 
+/// The shared-content dialog with a mix of pictures, a PDF and plain files.
+pub(super) fn shared_media(snapshot: &mut PresentationSnapshot) {
+    let context = snapshot.selected.unwrap();
+    let Some(panel) = &mut snapshot.message_panel else {
+        return;
+    };
+    let mut shared = panel.shared_files.as_slice().to_vec();
+    let mut assets = snapshot.content_panel.assets.as_slice().to_vec();
+    for (offset, (name, mime, bytes)) in [
+        ("Skizze-Foyer.png", "image/png", 220_000),
+        ("Moodboard.png", "image/png", 410_000),
+        ("Grundriss.png", "image/png", 150_000),
+        ("Lageplan.png", "image/png", 330_000),
+        ("Budget-2027.xlsx", "application/vnd.ms-excel", 48_000),
+        (
+            "Protokoll-Workshop-mit-sehr-langem-Namen-fuer-den-Test.docx",
+            "application/msword",
+            91_000,
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = 110 + offset as u128;
+        let mut row = message(id, "Mara Fischer", "MF", "09:50", "Noch eine Datei.", false);
+        row.metadata.rich = page([RichObject {
+            id: Some(text(&id.to_string())),
+            mime_type: Some(text(mime)),
+            size: Some(bytes),
+            placeholder: text("file"),
+            kind: text("file"),
+            name: text(name),
+            link: None,
+        }]);
+        if mime == "image/png" {
+            let attachment = AttachmentRef {
+                context,
+                message: id,
+                placeholder: text("file"),
+            };
+            assets.push(AssetView {
+                target: AssetTarget::Thumbnail(attachment),
+                state: AssetState::Ready {
+                    key: 2 + (offset as u64 % 2),
+                },
+                emoji: None,
+                color: None,
+                document_pages: None,
+            });
+        }
+        shared.push(row);
+    }
+    panel.shared_files = page(shared);
+    snapshot.content_panel.assets = page(assets);
+}
 pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
     let context = snapshot.selected.unwrap();
     let ready = Availability {
@@ -768,6 +823,7 @@ pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::cont
         Some(
             "chat-content"
                 | "chat-attachments"
+                | "shared-media"
                 | "chat-upload"
                 | "chat-upload-preview"
                 | "chat-upload-uncertain"
