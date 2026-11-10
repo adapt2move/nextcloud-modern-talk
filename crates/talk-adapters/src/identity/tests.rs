@@ -1677,8 +1677,10 @@ fn avatar_files_are_account_scoped_durable_bounded_and_removed_on_logout() {
         b"after-eviction"
     );
     // Authors of messages are recorded with their room and retired with it.
-    let kept_room = format!("r-{:064x}", 2);
-    let lost_room = format!("r-{:064x}", 1);
+    // The room's first sixteen digits name it in author records.
+    let room_key = |n: u64| format!("r-{n:016x}{:048x}", 0);
+    let kept_room = room_key(2);
+    let lost_room = room_key(1);
     let author = |room: &str, n: u8| format!("m-{}-{:048x}", &room[2..18], n);
     a.put_actor(&author(&kept_room, 1), &key, 103).unwrap();
     a.put_actor(&author(&lost_room, 2), &key, 103).unwrap();
@@ -1689,10 +1691,10 @@ fn avatar_files_are_account_scoped_durable_bounded_and_removed_on_logout() {
     assert!(a.put_actor("m-not-a-key", &key, 103).is_err());
     a.put(&lost_room, b"removed-room", 103).unwrap();
     a.put(&kept_room, b"retained-room", 103).unwrap();
-    let allowed: Vec<_> = (2..=257).map(|number| format!("r-{number:064x}")).collect();
+    let allowed: Vec<_> = (2..=257).map(room_key).collect();
     a.retain_rooms(&allowed).unwrap();
     let mut oversized = allowed.clone();
-    oversized.push(format!("r-{:064x}", 258));
+    oversized.push(room_key(258));
     assert!(a.retain_rooms(&oversized).is_err());
     assert!(a.get(&lost_room, 104).unwrap().is_none());
     assert!(a.actor(&author(&lost_room, 2)).unwrap().is_none());
