@@ -604,11 +604,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se ha concedido permiso para los dispositivos.",
     ),
     (
-        "Die Gesprächsliste ist noch nicht vollständig geladen.",
-        "The conversation list is not fully loaded yet.",
-        "La lista de conversaciones aún no se ha cargado por completo.",
-    ),
-    (
         "Die Gruppierung ist für dieses Konto derzeit nicht verfügbar.",
         "Grouping is currently unavailable for this account.",
         "La agrupación no está disponible para esta cuenta.",

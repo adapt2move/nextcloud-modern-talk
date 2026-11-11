@@ -592,13 +592,6 @@ impl Desktop {
         if rooms.iter().any(|r| r.archived.is_none()) {
             list = list.child(self.hint(self.l("Archivstatus noch nicht bekannt.")));
         }
-        if self.snapshot.conversation_list.content == ContentState::Ready
-            && !self.snapshot.conversation_list.complete
-            && self.active_account_connected()
-        {
-            list = list
-                .child(self.hint(self.l("Die Gesprächsliste ist noch nicht vollständig geladen.")));
-        }
         sidebar = if narrow {
             sidebar.child(list)
         } else {
@@ -1281,13 +1274,6 @@ impl Desktop {
                 .any(|r| r.unread_mention.is_none())
         {
             rows = rows.child(self.hint(self.l("Einige Erwähnungen sind noch nicht bekannt.")));
-        }
-        if self.snapshot.conversation_list.content == ContentState::Ready
-            && !self.snapshot.conversation_list.complete
-            && self.active_account_connected()
-        {
-            rows = rows
-                .child(self.hint(self.l("Die Gesprächsliste ist noch nicht vollständig geladen.")));
         }
         rows
     }
