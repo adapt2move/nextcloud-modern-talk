@@ -608,7 +608,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                     }
                     let restoring_cache = warming.elapsed() < Duration::from_secs(3) && preview_services.accounts.as_ref().is_some_and(|a|a.borrow().awaiting_cached_content());
                     let loading_pictures = preview_services.accounts.as_ref().is_some_and(|a|a.borrow().content_pending());
-                    interval = Duration::from_millis(if restoring_cache || loading_pictures { 16 } else if devices_open || preview_services.accounts.as_ref().is_some_and(|a|a.borrow().video_active()) { 33 } else { 100 });
+                    interval = Duration::from_millis(if restoring_cache || loading_pictures { 16 } else if devices_open || preview_services.accounts.as_ref().is_some_and(|a|{let a=a.borrow();a.video_active()||a.call_video_active()}) { 33 } else { 100 });
                     if requested != surface {
                         surface = requested;
                         sequence = 0;

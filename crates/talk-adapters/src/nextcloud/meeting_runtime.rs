@@ -77,6 +77,21 @@ enum Write {
     Signal(PeerSession, Negotiation, Signal, StreamKind),
     Flags(MediaWishes),
 }
+impl Write {
+    /// A fixed label for the local diagnostic log.
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Subscribe(..) => "subscribe",
+            Self::SendStreamOffer(..) => "stream_offer",
+            Self::RestartSubscription(..) => "restart_subscription",
+            Self::Refresh(_) => "refresh",
+            Self::Select(..) => "select",
+            Self::Remove(..) => "remove",
+            Self::Signal(..) => "signal",
+            Self::Flags(_) => "flags",
+        }
+    }
+}
 struct PolicyUpdate {
     bundle: Bundle,
     after: u64,
@@ -388,6 +403,9 @@ pub(super) struct PolicyLoadFailure {
     pub(super) kind: api::ErrorKind,
     evidence: calls::PolicyEvidence,
 }
+/// A whole refresh in one call; the live writer runs the same reads one at a
+/// time between its signaling writes.
+#[cfg(test)]
 pub(super) async fn refresh(
     writer: &mut MeetingWriter,
     scope: CallScope,
@@ -395,53 +413,81 @@ pub(super) async fn refresh(
     cancel: &Cancellation,
     account_rejection: Option<&super::AccountRejection>,
 ) -> Result<Bundle, PolicyLoadFailure> {
+    let mut sources = begin_refresh(writer, scope)?;
+    for observation in OBSERVATIONS {
+        observe(
+            writer,
+            &mut sources,
+            observation,
+            scope,
+            network,
+            cancel,
+            account_rejection,
+        )
+        .await?;
+    }
+    finish_refresh(sources)
+}
+fn begin_refresh(writer: &MeetingWriter, scope: CallScope) -> Result<Sources, PolicyLoadFailure> {
     let own = writer.own_session().map_err(|kind| PolicyLoadFailure {
         kind,
         evidence: calls::PolicyEvidence::Participants,
     })?;
-    let mut sources = Sources::new(scope, own);
-    for observation in OBSERVATIONS {
-        let value = writer
-            .observe(&context(scope, network, cancel, 3000), observation)
-            .await
-            .map_err(|e| {
-                let kind = e.kind();
-                if matches!(observation, Observation::Account)
-                    && (kind == api::ErrorKind::ReauthenticationRequired
-                        || e == ObservationError::CanonicalIdentityMismatch)
-                {
-                    // Only the authoritative user probe can confirm rejection
-                    // or canonical identity loss; other WrongScope errors cannot.
-                    // Close local admission immediately; durable suppression is
-                    // owned by identity and must not depend on another UI poll.
-                    if let Some(report) = account_rejection {
-                        report(scope.account);
-                    }
-                    cancel.cancel();
-                }
-                #[cfg(feature = "backend-test")]
-                {
-                    let source = match observation {
-                        Observation::Account => "account",
-                        Observation::Capabilities => "capabilities",
-                        Observation::Room => "room",
-                        Observation::ConnectedParticipants => "participants",
-                        Observation::CallParticipants => "call participants",
-                        Observation::SignalingSettings => "signaling settings",
-                    };
-                    eprintln!("normal observation stopped: {source} {kind:?}");
-                }
-                PolicyLoadFailure {
-                    kind,
-                    evidence: super::call_policy::evidence(observation),
-                }
-            })?;
-        sources.add(observation, value);
-    }
+    Ok(Sources::new(scope, own))
+}
+fn finish_refresh(sources: Sources) -> Result<Bundle, PolicyLoadFailure> {
     sources.finish(true).map_err(|evidence| PolicyLoadFailure {
         kind: api::ErrorKind::Unsupported,
         evidence,
     })
+}
+/// One of the six reads a policy refresh consists of.
+async fn observe(
+    writer: &mut MeetingWriter,
+    sources: &mut Sources,
+    observation: Observation,
+    scope: CallScope,
+    network: &NetworkRuntime,
+    cancel: &Cancellation,
+    account_rejection: Option<&super::AccountRejection>,
+) -> Result<(), PolicyLoadFailure> {
+    let value = writer
+        .observe(&context(scope, network, cancel, 3000), observation)
+        .await
+        .map_err(|e| {
+            let kind = e.kind();
+            if matches!(observation, Observation::Account)
+                && (kind == api::ErrorKind::ReauthenticationRequired
+                    || e == ObservationError::CanonicalIdentityMismatch)
+            {
+                // Only the authoritative user probe can confirm rejection
+                // or canonical identity loss; other WrongScope errors cannot.
+                // Close local admission immediately; durable suppression is
+                // owned by identity and must not depend on another UI poll.
+                if let Some(report) = account_rejection {
+                    report(scope.account);
+                }
+                cancel.cancel();
+            }
+            #[cfg(feature = "backend-test")]
+            {
+                let source = match observation {
+                    Observation::Account => "account",
+                    Observation::Capabilities => "capabilities",
+                    Observation::Room => "room",
+                    Observation::ConnectedParticipants => "participants",
+                    Observation::CallParticipants => "call participants",
+                    Observation::SignalingSettings => "signaling settings",
+                };
+                eprintln!("normal observation stopped: {source} {kind:?}");
+            }
+            PolicyLoadFailure {
+                kind,
+                evidence: super::call_policy::evidence(observation),
+            }
+        })?;
+    sources.add(observation, value);
+    Ok(())
 }
 /// What a failed policy refresh does to a live call.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -457,7 +503,23 @@ enum RefreshFailure {
 /// The policy lease is valid 13 s from the request start (see `talk_core::policy`).
 /// Staying quiet for 10 s therefore never outlasts the evidence it relies on.
 const QUIET_REFRESH_WINDOW: Duration = Duration::from_secs(10);
-const MAX_REFRESH_FAILURES: u8 = 8;
+const MAX_REFRESH_FAILURES: u8 = 40;
+const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const REFRESH_RETRY: Duration = Duration::from_millis(250);
+/// A burst of membership events asks for one extra refresh, not one each.
+const REFRESH_HINT_SPACING: Duration = Duration::from_millis(500);
+/// Failures that say nothing about the call: the network, a slow server, or
+/// all local request slots in use by other work at that moment.
+fn transient_refresh_error(kind: api::ErrorKind) -> bool {
+    matches!(
+        kind,
+        api::ErrorKind::Transport
+            | api::ErrorKind::Deadline
+            | api::ErrorKind::ServerUnavailable
+            | api::ErrorKind::RateLimited
+            | api::ErrorKind::Busy
+    )
+}
 fn refresh_failure(transient: bool, failures: u8, since_good: Duration) -> RefreshFailure {
     if !transient || failures >= MAX_REFRESH_FAILURES {
         RefreshFailure::Stop
@@ -481,13 +543,21 @@ async fn write_loop(
     let mut requested = 0;
     let mut refresh_failures = 0u8;
     let mut last_good = Instant::now();
+    // A refresh in progress: its reads so far, the next one, when it started
+    // and the request sequence it answers.
+    let mut running: Option<(Sources, usize, Instant, u64)> = None;
     let mut tick = tokio::time::interval(Duration::from_millis(50));
     while session.live() {
-        tick.tick().await;
+        // Signaling writes go out between the reads of a refresh instead of
+        // waiting for all six: candidates and device flags are not held back.
+        if running.is_none() {
+            tick.tick().await;
+        }
         for _ in 0..16 {
             let Ok(command) = commands.try_recv() else {
                 break;
             };
+            let name = command.name();
             let result = match command {
                 Write::Refresh(after) => {
                     requested = requested.max(after);
@@ -542,6 +612,7 @@ async fn write_loop(
                 }
             };
             if let Err(_error) = result {
+                crate::media::note_call_failure(Some((name, super::transport::kind(_error.kind))));
                 crate::media::note_call_stop("signaling write failed");
                 #[cfg(feature = "backend-test")]
                 eprintln!("normal write stopped: {:?}", _error.kind);
@@ -549,65 +620,85 @@ async fn write_loop(
                 break;
             }
         }
-        if Instant::now() >= refresh_at {
-            let refresh_started = Instant::now();
-            match refresh(
-                &mut writer,
-                scope,
-                &network,
-                &cancel,
-                account_rejection.as_ref(),
-            )
-            .await
-            {
-                Ok(bundle) => {
-                    refresh_failures = 0;
-                    last_good = refresh_started;
-                    session.set_control_degraded(false);
-                    if policy
-                        .try_send(PolicyUpdate {
-                            bundle,
-                            after: requested,
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
+        if running.is_none() && Instant::now() >= refresh_at {
+            match begin_refresh(&writer, scope) {
+                Ok(sources) => running = Some((sources, 0, Instant::now(), requested)),
                 Err(error) => {
-                    #[cfg(feature = "backend-test")]
-                    eprintln!(
-                        "normal policy refresh stopped: {:?} {}",
-                        error.kind,
-                        error.evidence.name()
-                    );
-                    session.set_control_degraded(true);
-                    let transient = matches!(
-                        error.kind,
-                        api::ErrorKind::Transport
-                            | api::ErrorKind::Deadline
-                            | api::ErrorKind::ServerUnavailable
-                            | api::ErrorKind::RateLimited
-                    );
-                    let action = refresh_failure(transient, refresh_failures, last_good.elapsed());
-                    if action != RefreshFailure::RetryQuietly
-                        && let Ok(mut snapshot) = session.snapshot.lock()
-                    {
-                        snapshot.phase =
-                            Phase::Waiting(calls::Gate::PolicyUnavailable(error.evidence));
-                    }
-                    if action == RefreshFailure::Stop {
-                        crate::media::note_call_stop(error.evidence.name());
-                        break;
-                    }
-                    refresh_failures += 1;
-                    // No success or sliding grant is emitted on failure.
-                    // Existing publication still expires at its original lease.
-                    refresh_at = Instant::now() + Duration::from_secs(1);
-                    continue;
+                    crate::media::note_call_failure(Some((
+                        error.evidence.name(),
+                        super::transport::kind(error.kind),
+                    )));
+                    crate::media::note_call_stop(error.evidence.name());
+                    break;
                 }
             }
-            refresh_at = Instant::now() + Duration::from_secs(5);
+        }
+        let Some((mut sources, next, refresh_started, after)) = running.take() else {
+            continue;
+        };
+        let step = observe(
+            &mut writer,
+            &mut sources,
+            OBSERVATIONS[next],
+            scope,
+            &network,
+            &cancel,
+            account_rejection.as_ref(),
+        )
+        .await;
+        let result = match step {
+            Ok(()) if next + 1 < OBSERVATIONS.len() => {
+                running = Some((sources, next + 1, refresh_started, after));
+                continue;
+            }
+            Ok(()) => finish_refresh(sources),
+            Err(error) => Err(error),
+        };
+        match result {
+            Ok(bundle) => {
+                refresh_failures = 0;
+                last_good = refresh_started;
+                crate::media::note_call_failure(None);
+                session.set_control_degraded(false);
+                if policy.try_send(PolicyUpdate { bundle, after }).is_err() {
+                    break;
+                }
+                // Measured from the start: a slow round must not also delay the
+                // next one, or a single failed request outlasts the lease. A
+                // refresh asked for meanwhile follows at once.
+                if requested == after && refresh_at <= refresh_started {
+                    refresh_at = (refresh_started + REFRESH_INTERVAL)
+                        .max(Instant::now() + Duration::from_secs(1));
+                }
+            }
+            Err(error) => {
+                #[cfg(feature = "backend-test")]
+                eprintln!(
+                    "normal policy refresh stopped: {:?} {}",
+                    error.kind,
+                    error.evidence.name()
+                );
+                session.set_control_degraded(true);
+                crate::media::note_call_failure(Some((
+                    error.evidence.name(),
+                    super::transport::kind(error.kind),
+                )));
+                let transient = transient_refresh_error(error.kind);
+                let action = refresh_failure(transient, refresh_failures, last_good.elapsed());
+                if action != RefreshFailure::RetryQuietly
+                    && let Ok(mut snapshot) = session.snapshot.lock()
+                {
+                    snapshot.phase = Phase::Waiting(calls::Gate::PolicyUnavailable(error.evidence));
+                }
+                if action == RefreshFailure::Stop {
+                    crate::media::note_call_stop(error.evidence.name());
+                    break;
+                }
+                refresh_failures += 1;
+                // No success or sliding grant is emitted on failure.
+                // Existing publication still expires at its original lease.
+                refresh_at = Instant::now() + REFRESH_RETRY;
+            }
         }
     }
     session.close();
@@ -902,6 +993,8 @@ async fn media_loop(
     let mut next_screen_frame = Instant::now();
     let mut required_policy = 0u64;
     let mut received_policy = 0u64;
+    let mut refresh_hint = false;
+    let mut hinted = Instant::now();
     let mut tick = tokio::time::interval(Duration::from_millis(10));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_flags = call.wishes();
@@ -1070,7 +1163,7 @@ async fn media_loop(
                                 recording_pending = None;
                                 recording_uncertain = true;
                             }
-                            refresh_needed = true;
+                            refresh_hint = true;
                         }
                     }
                 }
@@ -1155,14 +1248,14 @@ async fn media_loop(
                                     send(&writes, Write::Remove(peer.session, peer.stream))?;
                                 } else { index += 1; }
                             }
-                            refresh_needed = true;
+                            refresh_hint = true;
                         }
                         SignalEvent::SfuMembership(members) => {
                             if topology != Topology::Sfu { stage = "routed membership on a direct call"; return Err(()); }
                             // Routing facts can retire an absent route, but may
                             // add no media peer without fresh REST membership.
                             sfu_members = members;
-                            refresh_needed = true;
+                            refresh_hint = true;
                         }
                         SignalEvent::TransportInterrupted => {
                             transport_ready = false;
@@ -1226,7 +1319,7 @@ async fn media_loop(
                                 call.message(Instant::now(), &from, &wire, &payload);
                             }
                         }
-                        SignalEvent::PolicyChanged | SignalEvent::Hint { .. } => { refresh_needed = true; }
+                        SignalEvent::PolicyChanged | SignalEvent::Hint { .. } => { refresh_hint = true; }
                     }
                 }
             }
@@ -1234,6 +1327,17 @@ async fn media_loop(
                 session.suspend();
                 required_policy = required_policy.checked_add(1).ok_or(())?;
                 send(&writes, Write::Refresh(required_policy))?;
+                refresh_hint = false;
+            }
+            // Somebody joined, left or changed a device: something may have
+            // changed, nothing is known to be withdrawn. Read the policy again
+            // at once, but keep publishing on the current grant, which still
+            // ends at its own lease. Only a known restriction or a lost control
+            // connection (above) suspends until fresh evidence arrives.
+            if refresh_hint && hinted.elapsed() >= REFRESH_HINT_SPACING {
+                send(&writes, Write::Refresh(required_policy))?;
+                refresh_hint = false;
+                hinted = Instant::now();
             }
             while let Ok(next) = policies.try_recv() {
                 // The request sequence is assigned before the first HTTP

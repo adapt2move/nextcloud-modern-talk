@@ -335,6 +335,15 @@ impl Accounts {
         }
         .map_err(|e| SubmitError::Unavailable(video_error(e)))
     }
+    /// A call that shows moving pictures: its frames are fetched at frame
+    /// cadence, not at the idle tick, or every tile plays at ten pictures a
+    /// second whatever the camera delivers.
+    pub(crate) fn call_video_active(&self) -> bool {
+        self.snapshot.call.as_ref().is_some_and(|call| {
+            call.stage == talk_core::ui::presentation::CallStage::Active
+                && call.streams.as_slice().iter().any(|stream| stream.flowing)
+        })
+    }
     pub(crate) fn video_active(&self) -> bool {
         self.content_owner.video.active.as_ref().is_some_and(|a| {
             let state = a.player.snapshot();

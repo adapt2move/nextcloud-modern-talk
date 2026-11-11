@@ -1342,7 +1342,14 @@ impl Desktop {
             )
             .size(px(44.))
             .min_h(px(44.))
-            .rounded_full(),
+            .rounded_full()
+            // The raised hand shows on the button itself, like the badge on
+            // the tile; the tooltip alone says nothing at a glance.
+            .when(call.hand_raised, |d| {
+                d.bg(gpui::rgba(0xf0b84047))
+                    .border_1()
+                    .border_color(gpui::rgb(STAGE_WARNING))
+            }),
         );
         {
             let mut reaction_control = div().relative().child(

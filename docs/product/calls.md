@@ -26,7 +26,7 @@ Deliberate direct calling and the Huddle/ordinary-group headphone action enter t
 
 ## CALL-006
 
-Keep mute, camera, devices, participants, layouts, chat, connection state and leave reachable, with preview and transmission distinct. Moderator actions cannot turn on another user's devices. Require fresh scoped membership, permission, consent, encryption and grid evidence during calls, including changes without hash updates. Failed/partial reads, heartbeats and RTP cannot renew grants. Expiry
+Keep mute, camera, devices, participants, layouts, chat, connection state and leave reachable, with preview and transmission distinct. Moderator actions cannot turn on another user's devices. Require fresh scoped membership, permission, consent, encryption and grid evidence during calls, including changes without hash updates. Failed/partial reads, heartbeats and RTP cannot renew grants. A membership or change event that names no restriction starts a refresh at once and leaves publication on its current grant, which still ends at its own expiry; a known restriction, a forced mute or lost control connectivity suspends at once. Expiry
 suspends affected publication/subscriptions; unresolved membership/consent/encryption requires local leave. Enforcement claims require reviewed numeric freshness/stop/release bounds.
 
 ## CALL-007
@@ -62,7 +62,7 @@ Live captions/transcription/translation remain unavailable without a complete na
 ## CALL-014
 
 Bound recovery and cancel on control loss even while RTP flows. Expiry and account revocation stop local media independently of remote leave. Wake checks elapsed expiry before use. Recovery needs fresh call-existence, membership, consent, security and device evidence plus valid continuity/user intent. Retain mute/camera-off; retire screen selection. Account reauthorization or unverified continuity
-requires deliberate rejoin. Never resurrect ended calls or transfer old callbacks/consent; ordinary leave preserves conversation membership. End-for-everyone is separately authorized and confirmed.
+requires deliberate rejoin. A call whose control evidence lapsed or whose control request failed is admitted again without the user asking, at most four times within two minutes and only while the call still exists; after that the user decides. Never resurrect ended calls or transfer old callbacks/consent; ordinary leave preserves conversation membership. End-for-everyone is separately authorized and confirmed.
 
 ## Moderation and conditional call tools
 

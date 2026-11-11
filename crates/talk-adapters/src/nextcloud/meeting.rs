@@ -59,6 +59,61 @@ impl Restart {
         }
     }
 }
+/// Automatic restarts of a call whose owner stopped on its own: the policy
+/// evidence went stale or a control request failed. Each restart is a fresh
+/// admission that requires the call to still exist; the budget keeps a call
+/// that cannot be held from restarting forever.
+#[derive(Default)]
+pub(super) struct CallRecovery {
+    attempts: u8,
+    last: Option<Instant>,
+    retry_at: Option<Instant>,
+}
+impl CallRecovery {
+    const ATTEMPTS: u8 = 4;
+    const EPISODE: Duration = Duration::from_secs(120);
+    fn admit(&mut self, now: Instant) -> bool {
+        if self
+            .last
+            .is_none_or(|last| now.duration_since(last) >= Self::EPISODE)
+        {
+            self.attempts = 0;
+        }
+        if self.attempts >= Self::ATTEMPTS {
+            return false;
+        }
+        self.attempts += 1;
+        self.last = Some(now);
+        true
+    }
+    /// The wait before the next attempt after `attempts` have been used.
+    fn delay(&self) -> Duration {
+        Duration::from_secs(1 << self.attempts.min(3))
+    }
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+/// Whether a stopped owner may be replaced without the user asking: only a
+/// lost connection or lapsed evidence, never a decision about the call
+/// (consent, encryption, removal, call end).
+fn recoverable(phase: Phase) -> bool {
+    matches!(
+        phase,
+        Phase::Reconnecting | Phase::Waiting(Gate::PolicyStale | Gate::PolicyUnavailable(_))
+    )
+}
+/// The network, a slow server or momentarily exhausted local request slots.
+fn transient(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::Transport
+            | ErrorKind::Deadline
+            | ErrorKind::ServerUnavailable
+            | ErrorKind::RateLimited
+            | ErrorKind::Busy
+    )
+}
 fn media_recovery_restart(snapshot: &Snapshot) -> Option<Restart> {
     if snapshot.phase != Phase::Active {
         return None;
@@ -540,7 +595,10 @@ impl NextcloudClient {
             if matches!(snapshot.phase, Phase::Connecting | Phase::Active) {
                 snapshot.phase = Phase::Reconnecting;
             }
-            let restart = if live.session_replaced() {
+            let restart = if live.session_replaced()
+                || recoverable(snapshot.phase) && self.call_recovery.admit(Instant::now())
+            {
+                self.call_recovery.retry_at = None;
                 let mut wishes = snapshot.wishes;
                 wishes.screen = false;
                 Some(Restart {
@@ -606,6 +664,12 @@ impl NextcloudClient {
         }
         if self.media_service.is_none() {
             return Err(self.error(ErrorKind::Unconfigured));
+        }
+        if matches!(
+            command,
+            Command::Start { .. } | Command::Reconnect(_) | Command::Stop(_)
+        ) {
+            self.call_recovery.reset();
         }
         if matches!(command, Command::Start { .. }) {
             let room = RoomToken::parse(self.check_room(scope.conversation)?)
@@ -841,17 +905,50 @@ impl NextcloudClient {
                 restart: Some(_),
                 ..
             })
-        ) {
+        ) && self
+            .call_recovery
+            .retry_at
+            .is_none_or(|at| Instant::now() >= at)
+        {
             // A fresh room session also isolates destructive signaling from
             // messages queued for the previous peer connections.
             if let Some(active) = &self.active {
                 let room = RoomToken::parse(self.check_room(active.id)?)
                     .map_err(|k| self.error(transport::kind(k)))?;
-                self.transport
+                // A signaling session that ran out of reconnects still holds
+                // the room on the server; settle that before the fresh join.
+                let _ = self
+                    .transport
+                    .retire_stopped_external_meeting(context, &room)
+                    .await;
+                match self
+                    .transport
                     .api_request(context, api::Request::DeactivateRoom(room))
-                    .await?;
-                self.active = None;
+                    .await
+                {
+                    Ok(_) => self.active = None,
+                    Err(error) if transient(error.kind) => {
+                        // Still offline: the restart stays pending.
+                        self.call_recovery.retry_at = Some(Instant::now() + Duration::from_secs(2));
+                    }
+                    Err(error) => return Err(error),
+                }
             }
+        }
+        if self.active.is_none()
+            && matches!(
+                self.meeting_owner,
+                Some(CallOwner::Ended {
+                    cleanup: false,
+                    restart: Some(_),
+                    ..
+                })
+            )
+            && self
+                .call_recovery
+                .retry_at
+                .is_none_or(|at| Instant::now() >= at)
+        {
             let restart = match &self.meeting_owner {
                 Some(CallOwner::Ended {
                     restart: Some(restart),
@@ -872,7 +969,23 @@ impl NextcloudClient {
             }
             // install_call retains a scoped, blocked candidate on failure. Its
             // new generation must reach the UI even when fresh admission fails.
-            let _ = self.install_call(context, call).await;
+            self.call_recovery.retry_at = None;
+            if let Err(error) = self.install_call(context, call).await
+                && restart.continuity
+                && transient(error.kind)
+                && self.call_recovery.admit(Instant::now())
+                && let Some(CallOwner::Ended {
+                    snapshot,
+                    restart: again,
+                    ..
+                }) = &mut self.meeting_owner
+            {
+                // The network was not back yet. Keep the restart and try the
+                // admission again after a growing pause.
+                snapshot.phase = Phase::Reconnecting;
+                *again = Some(restart);
+                self.call_recovery.retry_at = Some(Instant::now() + self.call_recovery.delay());
+            }
         }
         let snapshot = match self
             .meeting_owner
@@ -928,6 +1041,44 @@ mod recovery_tests {
     use talk_core::ids::{
         AccountId, AccountScope, CallGeneration, ConversationId, HostId, RuntimeGeneration,
     };
+    #[test]
+    fn a_stopped_call_restarts_by_itself_a_bounded_number_of_times() {
+        let start = Instant::now();
+        let mut recovery = CallRecovery::default();
+        for _ in 0..CallRecovery::ATTEMPTS {
+            assert!(recovery.admit(start));
+        }
+        // A call that cannot be held asks the user instead of looping.
+        assert!(!recovery.admit(start + Duration::from_secs(60)));
+        // A later, unrelated interruption gets a fresh budget.
+        assert!(recovery.admit(start + CallRecovery::EPISODE + Duration::from_secs(1)));
+        recovery.reset();
+        assert!(recovery.admit(start));
+        assert!(recovery.delay() > Duration::ZERO);
+    }
+    #[test]
+    fn only_a_lost_connection_or_lapsed_evidence_restarts_without_the_user() {
+        for phase in [
+            Phase::Reconnecting,
+            Phase::Waiting(Gate::PolicyStale),
+            Phase::Waiting(Gate::PolicyUnavailable(
+                talk_core::calls::PolicyEvidence::CallParticipants,
+            )),
+        ] {
+            assert!(recoverable(phase));
+        }
+        for phase in [
+            Phase::Ended,
+            Phase::Ending,
+            Phase::Waiting(Gate::CallEnded),
+            Phase::Waiting(Gate::RecordingConsent),
+            Phase::Waiting(Gate::RecordingConsentRejoin),
+            Phase::Waiting(Gate::RequiredEncryption),
+            Phase::Waiting(Gate::ClassifiedRecording),
+        ] {
+            assert!(!recoverable(phase));
+        }
+    }
     #[test]
     fn explicit_media_and_consent_rejoins_preserve_only_eligible_intent() {
         let account = AccountId::from_local(1);

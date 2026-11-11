@@ -555,6 +555,7 @@ fn run(shared: &Shared) {
     let mut inventory = Inventory::default();
     let mut frames = frames::FramePool::default();
     let mut refreshed = Instant::now();
+    let mut cameras_refreshed = Instant::now();
     loop {
         let media = shared.lock().media.clone();
         let call_present = media.as_ref().and_then(|m| m.capture()).is_some();
@@ -621,20 +622,31 @@ fn run(shared: &Shared) {
                 }
                 state.changed();
             }
-            let refresh =
-                if (state.snapshot.session.is_some() || call_present || state.voice.is_some())
-                    && refreshed.elapsed() >= REFRESH
-                {
+            let refresh = if (state.snapshot.session.is_some()
+                || call_present
+                || state.voice.is_some())
+                && refreshed.elapsed() >= REFRESH
+            {
+                // Listing cameras restarts a device monitor on this thread,
+                // which also delivers the camera's frames. Outside the
+                // device settings it runs at a fifth of the audio cadence.
+                if state.snapshot.session.is_some() || cameras_refreshed.elapsed() >= REFRESH * 5 {
                     7
                 } else {
-                    state.enumerate
-                };
+                    3
+                }
+            } else {
+                state.enumerate
+            };
             state.enumerate = 0;
             refresh
         };
         if refresh != 0 {
             inventory.refresh(refresh);
             refreshed = Instant::now();
+            if refresh & 4 != 0 {
+                cameras_refreshed = refreshed;
+            }
             let mut state = shared.lock();
             let mut next = state.snapshot.clone();
             next.devices = inventory.page();

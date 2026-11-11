@@ -14,17 +14,42 @@ pub(crate) mod supervisor;
 #[allow(dead_code)]
 pub(crate) mod wire;
 
-static CALL_STOP: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+/// Where a call owner stopped and, if a request failed, which one and how.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallStop {
+    pub step: &'static str,
+    pub source: Option<&'static str>,
+    pub error: Option<talk_core::ports::ErrorKind>,
+}
+type CallFailure = (&'static str, talk_core::ports::ErrorKind);
+static CALL_STOP: std::sync::Mutex<(Option<&'static str>, Option<CallFailure>)> =
+    std::sync::Mutex::new((None, None));
 /// Remember the step at which a call owner stopped, for the local diagnostic
 /// log only. It is a fixed label and never a decision input.
 pub(crate) fn note_call_stop(step: &'static str) {
     if let Ok(mut slot) = CALL_STOP.lock() {
-        slot.get_or_insert(step);
+        slot.0.get_or_insert(step);
+    }
+}
+/// Remember the request whose failure led to a stop; `None` clears it once
+/// that request succeeds again. Fixed labels only.
+pub(crate) fn note_call_failure(failure: Option<CallFailure>) {
+    if let Ok(mut slot) = CALL_STOP.lock()
+        && slot.0.is_none()
+    {
+        slot.1 = failure;
     }
 }
 /// Take the step recorded by the most recently stopped call owner.
-pub fn take_call_stop() -> Option<&'static str> {
-    CALL_STOP.lock().ok()?.take()
+pub fn take_call_stop() -> Option<CallStop> {
+    let mut slot = CALL_STOP.lock().ok()?;
+    let step = slot.0.take()?;
+    let failure = slot.1.take();
+    Some(CallStop {
+        step,
+        source: failure.map(|failure| failure.0),
+        error: failure.map(|failure| failure.1),
+    })
 }
 
 use talk_core::ids::{AccountScope, CallScope};
@@ -55,4 +80,4 @@ impl MediaPort for UnconfiguredMedia {
 
 pub(crate) mod engine;
 pub(crate) mod service;
-pub use service::{CaptureHandle, MediaService, VideoImage};
+pub use service::{CaptureHandle, LOCAL_PARTICIPANT, MediaService, VideoImage};

@@ -502,7 +502,14 @@ impl CaptureHandle {
         let Ok(mut video) = s.video.try_lock() else {
             return false;
         };
+        if !s.publication().camera {
+            return false;
+        }
         if video.is_some() {
+            // The encoder has not taken the previous frame yet. The own
+            // preview does not wait for it.
+            drop(video);
+            s.show_local(width, height, rgba);
             return false;
         }
         let frame = VideoFrame {
@@ -510,9 +517,6 @@ impl CaptureHandle {
             height,
             rgba: rgba.to_vec(),
         };
-        if !s.publication().camera {
-            return false;
-        }
         *video = Some(frame);
         s.camera_seen.store(true, Ordering::Release);
         drop(video);

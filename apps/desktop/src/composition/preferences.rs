@@ -917,10 +917,34 @@ pub fn call_image(
     for pixel in frame.rgba.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
-    let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
+    let mut image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
+    // The own picture fills its 16:9 card. It is cut here because the image
+    // element can only fit a whole picture inside rounded corners; a remote
+    // picture stays whole, so a phone held upright is not cut to a strip.
+    if frame.participant == talk_adapters::media::LOCAL_PARTICIPANT {
+        let (width, height) = wide_crop(frame.width, frame.height);
+        if (width, height) != (frame.width, frame.height) {
+            image = image::imageops::crop_imm(
+                &image,
+                (frame.width - width) / 2,
+                (frame.height - height) / 2,
+                width,
+                height,
+            )
+            .to_image();
+        }
+    }
     Some(std::sync::Arc::new(gpui::RenderImage::new([
         image::Frame::new(image),
     ])))
+}
+/// The largest centred 16:9 part of a picture.
+fn wide_crop(width: u32, height: u32) -> (u32, u32) {
+    if width * 9 > height * 16 {
+        ((height * 16 / 9).max(1), height)
+    } else {
+        (width, (width * 9 / 16).max(1))
+    }
 }
 
 fn shutdown_pending(
@@ -929,6 +953,27 @@ fn shutdown_pending(
     now: std::time::Instant,
 ) -> bool {
     !stopped && deadline.is_none_or(|deadline| now < deadline)
+}
+#[cfg(test)]
+mod call_image_tests {
+    use super::*;
+    #[test]
+    fn the_own_picture_is_cut_to_the_card_and_a_remote_one_stays_whole() {
+        assert_eq!(wide_crop(640, 480), (640, 360));
+        assert_eq!(wide_crop(1280, 720), (1280, 720));
+        assert_eq!(wide_crop(720, 1280), (720, 405));
+        assert_eq!(wide_crop(1920, 800), (1422, 800));
+        let frame = |participant| talk_adapters::media::VideoImage {
+            participant,
+            width: 8,
+            height: 8,
+            rgba: vec![0; 8 * 8 * 4],
+        };
+        let own = call_image(frame(talk_adapters::media::LOCAL_PARTICIPANT)).unwrap();
+        assert_eq!(own.size(0), gpui::size(8.into(), 4.into()));
+        let remote = call_image(frame(7)).unwrap();
+        assert_eq!(remote.size(0), gpui::size(8.into(), 8.into()));
+    }
 }
 #[cfg(test)]
 mod shutdown_tests {
