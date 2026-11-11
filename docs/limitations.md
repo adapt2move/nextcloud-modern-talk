@@ -112,9 +112,9 @@ of complete parity with the official clients.
   50 messages; thread attachments and typing are unavailable. An ordinary message
   cannot be converted into a thread through the implemented API.
 - Message-level mark unread needs a live-proven preceding message; cached gaps
-  do not establish adjacency. Unread navigation searches a bounded number of
-  pages. Account search shows at most two pages in admitted rooms; offline
-  suggestions use cached history.
+  do not establish adjacency. A conversation opens at its newest message; there
+  is no jump to the first unread one. Account search shows at most two pages in
+  admitted rooms; offline suggestions use cached history.
 - Markdown supports basic formatting, lists, quotes, links, code and task markers.
   Tables remain source text; HTML and Markdown images do not execute or load.
   Rich-editor/IME and semantic accessibility behavior need native qualification.

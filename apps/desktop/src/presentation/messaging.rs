@@ -61,7 +61,6 @@ pub(crate) enum Action {
     ToggleSearch,
     CloseSearch,
     Locate(u128),
-    JumpUnread,
     OlderThread(u128),
     OpenLocation(u128, Text<128>, Text<1024>),
     Translate(u128),
@@ -119,7 +118,6 @@ pub(super) struct MessageUi {
     unread_prior: Option<(RequestId, Option<(ConversationRef, u128)>)>,
     unread_marker: Option<(ConversationRef, u128)>,
     first_unread: Option<(ConversationRef, u128)>,
-    unread_jump: Option<(ConversationRef, RequestId)>,
     last_located: Option<RequestId>,
     time_target: Option<Option<u128>>,
     time_thread: Option<u128>,
@@ -218,10 +216,6 @@ struct MessageGeometry {
     // exposes an end sentinel instead of the actual visible first-row offset.
     painted: Vec<(usize, u128, gpui::Bounds<gpui::Pixels>, bool)>,
     visible_read: Option<(ConversationRef, u128)>,
-    unread_visible: Option<bool>,
-    /// The first-unread target that has been on screen (or was jumped past with
-    /// End). Once seen, "jump to unread" has nothing left to offer for it.
-    unread_seen: Option<(ConversationRef, u128)>,
     /// Whether the last layout showed the newest row. Used while the window is
     /// not laid out (hidden, notification received) so new messages still follow.
     last_at_bottom: bool,
@@ -347,7 +341,6 @@ impl MessageUi {
             unread_prior: None,
             unread_marker: None,
             first_unread: None,
-            unread_jump: None,
             last_located: None,
             time_target: None,
             time_thread: None,
@@ -898,7 +891,6 @@ impl Desktop {
                     .and_then(|row| row.last_read_message.map(|marker| (context, marker)))
             });
             self.message_ui.first_unread = None;
-            self.message_ui.unread_jump = None;
             self.message_ui.list.reset(rows.len());
             if let Some((_, anchor, offset)) = self
                 .message_ui
@@ -1038,10 +1030,6 @@ impl Desktop {
             && rows.iter().any(|m| m.local_id == id)
         {
             if let Some(context) = self.snapshot.selected {
-                if self.message_ui.unread_jump == Some((context, request)) {
-                    self.message_ui.first_unread = Some((context, id));
-                    self.message_ui.unread_jump = None;
-                }
                 self.locate_message_smooth(context, id);
             }
             self.message_ui.last_located = Some(request);
@@ -1177,17 +1165,6 @@ impl Desktop {
         self.snapshot.selected
     }
     fn observe_visible_message(&mut self, context: ConversationRef) {
-        if self.message_ui.unread_jump.is_some_and(|(room, request)| {
-            room == context
-                && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
-                    panel.context == context
-                        && panel.context_load.as_ref().is_some_and(|load| {
-                            load.state == talk_core::ui::conversation::RemoteState::Loading(request)
-                        })
-                })
-        }) {
-            return;
-        }
         if self
             .snapshot
             .message_panel
@@ -1499,7 +1476,6 @@ impl Desktop {
             }
             if let Some(message) = unread_from {
                 self.message_ui.first_unread = Some((context, message));
-                self.message_ui.geometry.borrow_mut().unread_visible = None;
             }
             if let Some((source, pin)) = pin_intent {
                 self.admit_pin_intent(context, request, source, pin);
@@ -1747,15 +1723,7 @@ impl Desktop {
                     .and_then(|panel| panel.context_load.as_ref())
                     .is_some_and(|load| current_context_retry(load, request, target))
                 {
-                    if self.message_ui.unread_jump == Some((context, request)) {
-                        if let Some(next) =
-                            self.submit_message(MessageAction::LocateUnreadAfter(target))
-                        {
-                            self.message_ui.unread_jump = Some((context, next));
-                        }
-                    } else {
-                        self.submit_message(MessageAction::Context(target));
-                    }
+                    self.submit_message(MessageAction::Context(target));
                 }
             }
             Action::Reply(id) => {
@@ -1863,7 +1831,6 @@ impl Desktop {
             Action::CyclePin { current, forward } => self.cycle_pin(context, current, forward),
             Action::TogglePinStrip => self.toggle_pin_strip(context),
             Action::Locate(id) => {
-                self.message_ui.unread_jump = None;
                 if self.locate_message_smooth(context, id) {
                     if self.overlay == Some(Overlay::Files) {
                         self.handle(LocalAction::Close, window, cx);
@@ -1875,27 +1842,6 @@ impl Desktop {
                     && self.overlay == Some(Overlay::Files)
                 {
                     self.handle(LocalAction::Close, window, cx);
-                }
-            }
-            Action::JumpUnread => {
-                if let Some((_, first)) = self
-                    .message_ui
-                    .first_unread
-                    .filter(|(room, _)| *room == context)
-                    && self.locate_message_smooth(context, first)
-                {
-                    cx.notify();
-                    return;
-                }
-                if let Some((_, marker)) = self
-                    .message_ui
-                    .unread_marker
-                    .filter(|(room, _)| *room == context)
-                    && self.snapshot.content == ContentState::Ready
-                    && let Some(request) =
-                        self.submit_message(MessageAction::LocateUnreadAfter(marker))
-                {
-                    self.message_ui.unread_jump = Some((context, request));
                 }
             }
             Action::OlderThread(root) => {
@@ -2451,7 +2397,6 @@ impl Desktop {
         let keyboard_history = self.message_ui.history.clone();
         let layout_history = self.message_ui.history.clone();
         let keyboard_arrival = self.message_ui.arrival.clone();
-        let keyboard_geometry = self.message_ui.geometry.clone();
         let layout_list = self.message_ui.list.clone();
         let keyboard_list = self.message_ui.list.clone();
         let keyboard_focus = self.navigation.history_focus();
@@ -2460,18 +2405,6 @@ impl Desktop {
         let reduced = self.reduced_motion;
         let layout_geometry = self.message_ui.geometry.clone();
         let context = self.snapshot.selected;
-        let unread_target = self
-            .message_ui
-            .first_unread
-            .filter(|(room, _)| Some(*room) == context);
-        let unread_marker = self
-            .message_ui
-            .unread_marker
-            .filter(|(room, _)| Some(*room) == context);
-        let show_unread_jump = unread_target.is_some()
-            && self.message_ui.geometry.borrow().unread_visible == Some(false)
-            && self.message_ui.geometry.borrow().unread_seen != unread_target
-            || unread_target.is_none() && unread_marker.is_some();
         self.message_ui.geometry.borrow_mut().painted.clear();
         let inert = self.background_inert;
         div()
@@ -2500,8 +2433,6 @@ impl Desktop {
                         offset_in_item: px(0.),
                     }),
                     "end" => {
-                        // Jumping to the newest message passes every unread one.
-                        keyboard_geometry.borrow_mut().unread_seen = unread_target;
                         keyboard_list.scroll_to(ListOffset {
                             item_ix: keyboard_list.item_count(),
                             offset_in_item: px(0.),
@@ -2528,18 +2459,6 @@ impl Desktop {
                 geometry.visible_read = context.and_then(|context| {
                     visible_read(&geometry.painted, visible).map(|id| (context, group_ends.iter().find(|(_,_,head,_)|*head==id).map_or(id,|(_,_,_,last)|*last)))
                 });
-                let unread_visible = unread_target.is_some_and(|(_, target)| {
-                    geometry.painted.iter().any(|(_, id, bounds, _)| {
-                        *id == target && bounds.bottom() > visible.top() && bounds.top() < visible.bottom()
-                    })
-                });
-                if unread_visible {
-                    geometry.unread_seen = unread_target;
-                }
-                if unread_target.is_some() && geometry.unread_visible != Some(unread_visible) {
-                    geometry.unread_visible = Some(unread_visible);
-                    window.refresh();
-                }
                 let at_bottom = viewport.size.height > px(0.)
                     && geometry.painted.iter().any(|(index, _, bounds, _)| {
                         group_ends.iter().find(|(start,_,_,_)|start==index).map_or_else(||index.checked_add(1),|(_,end,_,_)|Some(*end)) == Some(layout_list.item_count())
@@ -2674,36 +2593,6 @@ impl Desktop {
                 )
                 .size_full(),
             )
-            .when(show_unread_jump, |area| {
-                let Some(context) = context else { return area };
-                let loading = self.message_ui.unread_jump.is_some_and(|(room, request)| {
-                    room == context && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
-                        panel.context_load.as_ref().is_some_and(|load| {
-                            load.state == talk_core::ui::conversation::RemoteState::Loading(request)
-                        })
-                    })
-                });
-                area.child(
-                    div().absolute().right_4().bottom_4().child(
-                        self.button(
-                            "jump-unread",
-                            "Zu ungelesenen springen",
-                            ButtonStyle::Secondary,
-                            if loading {
-                                Availability::pending()
-                            } else {
-                                Availability::when(unread_target.is_some() || self.snapshot.content == ContentState::Ready, "Die Verbindung ist derzeit nicht bereit.")
-                            },
-                            LocalAction::MessageIn(context, Action::JumpUnread),
-                            cx,
-                        )
-                        .rounded_full()
-                        .border_1()
-                        .border_color(self.theme.border)
-                        .shadow(self.theme.elevation(super::theme::Elevation::Popover)),
-                    ),
-                )
-            })
     }
 
     pub(super) fn shared_contents(&self, cx: &Context<Self>) -> Div {
