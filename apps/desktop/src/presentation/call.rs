@@ -2176,7 +2176,9 @@ mod gallery_tests {
     #[test]
     fn a_chat_message_from_somebody_else_is_announced_once_while_the_chat_is_closed() {
         use super::{ChatArrival, ChatNotice};
-        use talk_core::ids::*;
+        use talk_core::ui::{
+            AccountId, AccountScope, CallGeneration, ConversationId, HostId, RuntimeGeneration,
+        };
         let account = AccountId::from_local(1);
         let call = talk_core::ui::CallScope {
             account: AccountScope {
