@@ -129,6 +129,64 @@ async fn explicit_call_admission_replaces_exhausted_transport_without_reviving_o
     server.await.unwrap();
 }
 
+#[tokio::test]
+async fn a_refused_hello_is_tried_again_with_the_token_of_a_new_admission() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/signal/", listener.local_addr().unwrap());
+    let (done, wait) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        let mut socket = accept(&listener).await;
+        hello(&mut socket, false).await;
+        join(&mut socket).await;
+        let _ = wait.await;
+    });
+    let (mut client, binding, runtime) = account();
+    let external = settings(&endpoint);
+    let old = Arc::new(state(binding));
+    *old.settings.lock().unwrap() = external.clone();
+    old.state.lock().unwrap().room = None;
+    old.status(LiveState::Stopped(ErrorKind::PermissionDenied));
+    let (commands, receive) = mpsc::channel(1);
+    drop(receive); // The refused session task has completed.
+    client.hpb = Some(Owner {
+        handle: Handle {
+            shared: old.clone(),
+            commands,
+        },
+    });
+    client.active_room = Some(room());
+    client.room_session = Some(Zeroizing::new("talk-own".into()));
+    let model = SignalingSettings {
+        mode: SignalingMode::External,
+        external: Some(external),
+        ice_servers: Vec::new(),
+    };
+    let ctx = context(&runtime, &old);
+    client
+        .prepare_external_meeting(&ctx, &room(), &model)
+        .await
+        .unwrap();
+    assert!(!Arc::ptr_eq(
+        &client.hpb.as_ref().unwrap().handle.shared,
+        &old
+    ));
+    assert!(old.stop.is_cancelled());
+    // A session that still holds a room is retired first, never replaced.
+    let (_, binding, _) = account();
+    let held = Arc::new(state(binding));
+    held.status(LiveState::Stopped(ErrorKind::PermissionDenied));
+    let (commands, _receive) = mpsc::channel(1);
+    let owner = Owner {
+        handle: Handle {
+            shared: held,
+            commands,
+        },
+    };
+    assert!(owner.hello_refused() && owner.retirement_pending());
+    done.send(()).unwrap();
+    server.await.unwrap();
+}
+
 #[test]
 fn fresh_call_transport_retry_does_not_reinterpret_auth_or_policy_rejection() {
     let (_client, binding, _) = account();

@@ -366,6 +366,16 @@ impl Owner {
             )
         })
     }
+    /// The server refused the hello. Its token lives about a minute, so a hello
+    /// after a longer interruption carries an expired one; that is no verdict
+    /// on the account, and a hello with a fresh token may succeed.
+    fn hello_refused(&self) -> bool {
+        self.handle
+            .shared
+            .state
+            .lock()
+            .is_ok_and(|state| state.status == LiveState::Stopped(ErrorKind::PermissionDenied))
+    }
     fn poll(&self, context: &OperationContext) -> Result<LiveEventBatch, Error> {
         let shared = &self.handle.shared;
         shared.validate(context).map_err(|e| shared.error(e))?;
@@ -1042,6 +1052,17 @@ impl Client {
                 )
                 .await?;
             let settings = SignalingSettings::decode(&response.data).map_err(|e| self.error(e))?;
+            // The settings just read carry a fresh hello token. A session without
+            // a room has nothing to retire, so a new one restores account events
+            // only; it is tried once per settings refresh.
+            if self
+                .hpb
+                .as_ref()
+                .is_some_and(|owner| owner.hello_refused() && !owner.retirement_pending())
+            {
+                self.cancel_prepared_external_meeting();
+                self.hpb = None;
+            }
             self.configure_hpb(context, &settings)?;
             self.live_settings_at = Some(now);
             self.live_internal = settings.mode == SignalingMode::Internal;
@@ -1099,7 +1120,11 @@ impl Client {
             return Err(self.error(ErrorKind::Unsupported));
         }
         let own = self.own_room_session(context, room)?;
-        if self.hpb.as_ref().is_some_and(Owner::transport_stopped) {
+        if self
+            .hpb
+            .as_ref()
+            .is_some_and(|owner| owner.transport_stopped() || owner.hello_refused())
+        {
             // Only fresh, validated room/call admission renews an exhausted
             // transport owner. Routine event polling cannot restore a stopped
             // session, and old route handles remain irreversibly closed.
