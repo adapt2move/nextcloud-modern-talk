@@ -304,7 +304,10 @@ impl Capture {
         frames: &mut FramePool,
         surface: VideoSurfaceId,
     ) -> Result<Option<Arc<VideoFrame>>, DeviceError> {
-        if !self.signal.valid() || self.last_frame.elapsed() < Duration::from_millis(66) {
+        // The sink delivers fifteen frames a second and keeps only the newest.
+        // The gate only prevents pulling twice within one frame; at a full
+        // frame interval it made every second poll miss and wait another tick.
+        if !self.signal.valid() || self.last_frame.elapsed() < Duration::from_millis(50) {
             return Ok(None);
         }
         let Some(sample) = self.sink.try_pull_sample(gst::ClockTime::ZERO) else {

@@ -962,10 +962,15 @@ fn run(shared: &Shared) {
             || active.iter().any(Option::is_some)
             || state.desired.iter().any(Option::is_some)
         {
+            let tick = if calls.camera_active() {
+                TICK / 2
+            } else {
+                TICK
+            };
             drop(
                 shared
                     .wake
-                    .wait_timeout(state, TICK)
+                    .wait_timeout(state, tick)
                     .unwrap_or_else(|e| e.into_inner()),
             );
         } else if state.snapshot.session.is_some() {

@@ -34,6 +34,11 @@ impl Calls {
     pub(super) fn active(&self) -> bool {
         self.scope.is_some()
     }
+    /// A running camera is polled twice as often, so a new frame reaches the
+    /// preview and the encoder within half a display frame.
+    pub(super) fn camera_active(&self) -> bool {
+        self.camera.is_some()
+    }
     pub(super) fn tick(
         &mut self,
         service: &MediaService,

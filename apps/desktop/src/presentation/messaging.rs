@@ -1149,13 +1149,38 @@ impl Desktop {
         };
         self.observe_visible_message(context);
     }
+    /// A call view covers the conversation unless its chat is open beside or
+    /// over it. A covered timeline is not on screen: its messages are not read
+    /// yet, so the chat button keeps counting them.
+    fn call_hides_timeline(&self, window: &Window) -> bool {
+        let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+            call.stage != super::CallStage::Incoming
+                && self.call_minimized != Some(call.scope)
+                && !(matches!(
+                    call.stage,
+                    super::CallStage::Ended | super::CallStage::Failed
+                ) && self.dismissed_terminal_call == Some(call.scope))
+        }) else {
+            return false;
+        };
+        let call_room = self.snapshot.selected.is_some_and(|room| {
+            room.account == call.scope.account && room.conversation == call.scope.conversation
+        });
+        let wide = window.viewport_size().width >= px(900.) && self.scale < 150;
+        let chat = self.overlay == Some(Overlay::CallChat)
+            || super::docked_call_chat(wide, self.call_chat_open, self.overlay);
+        !(call_room && chat)
+    }
     pub(crate) fn visible_message_conversation(&self, window: &Window) -> Option<ConversationRef> {
         if self.update_restart_pending
             || self.projection_blocked
             || self.onboarding_open
             || self.navigation_open
             || !window.is_window_active()
-            || (self.overlay.is_some() && !self.thread_is_docked(window))
+            || (self.overlay.is_some()
+                && self.overlay != Some(Overlay::CallChat)
+                && !self.thread_is_docked(window))
+            || self.call_hides_timeline(window)
             || self.prejoin.is_some()
             || self.incoming_visible()
             || self.snapshot.content != ContentState::Ready

@@ -387,7 +387,10 @@ impl Session {
             return;
         }
         if let Ok(mut images) = self.received.try_lock() {
-            if images.len() >= 16 || images.iter().any(|i| i.participant == LOCAL_PARTICIPANT) {
+            // A picture the view has not fetched yet is replaced, not kept:
+            // the preview shows the newest frame, never an older one.
+            images.retain(|i| i.participant != LOCAL_PARTICIPANT);
+            if images.len() >= 16 {
                 return;
             }
             images.push(VideoImage {
@@ -696,9 +699,10 @@ mod screen_tests {
     fn the_own_camera_reaches_the_self_view_once_and_survives_peer_retention() {
         let (_service, session, handle) = admitted();
         let pixels = [9u8; 16];
-        session.show_local(2, 2, &pixels);
-        // One frame per sender until the consumer has taken it.
         session.show_local(2, 2, &[1u8; 16]);
+        // One frame per sender, and the newest one: a frame the consumer has
+        // not taken yet is replaced, so the preview never shows an older one.
+        session.show_local(2, 2, &pixels);
         session.retain_video(&[]);
         let image = handle.take_video().expect("local frame");
         assert_eq!(image.participant, LOCAL_PARTICIPANT);

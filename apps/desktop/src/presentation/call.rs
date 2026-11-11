@@ -5,6 +5,7 @@ use super::controls::Availability;
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, ImageSource, Window, div, img, prelude::*, px};
+use std::time::Instant;
 use talk_core::ui::UserIntent;
 use talk_core::ui::presentation::{
     CallPolicyReason, CallStage, CallTileId, CallTileKind, MediaState, RequiredGate,
@@ -747,7 +748,7 @@ impl Desktop {
                         .absolute()
                         .inset_0()
                         .size_full()
-                        .rounded(px(if participant.speaking { 9. } else { 11. }))
+                        .rounded(px(11.))
                         .object_fit(gpui::ObjectFit::Contain)
                         .into_any_element()
                 } else {
@@ -797,7 +798,9 @@ impl Desktop {
                         tile_height
                     }))
                     .rounded(px(12.))
-                    .border(px(if participant.speaking { 3. } else { 1. }))
+                    // The border keeps one width. A wider one while speaking
+                    // shrank the content box and with it the whole picture.
+                    .border_1()
                     .border_color(if participant.speaking {
                         stage_speaking_color(t)
                     } else {
@@ -847,12 +850,22 @@ impl Desktop {
                                 .child(self.scaled_icon("wifi-off", 16., t.stage_text)),
                         )
                     })
+                    // The speaking ring lies over the picture's edge instead of
+                    // taking room from it.
                     .when(participant.speaking, |d| {
                         d.child(
                             div()
                                 .absolute()
-                                .inset(px(3.))
-                                .rounded(px(10.))
+                                .inset_0()
+                                .rounded(px(11.))
+                                .border_2()
+                                .border_color(stage_speaking_color(t)),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .inset(px(2.))
+                                .rounded(px(9.))
                                 .border_1()
                                 .border_color(gpui::rgba(0x8fe6b655)),
                         )
@@ -1727,7 +1740,8 @@ impl Desktop {
                             .min_h_0()
                             .flex()
                             .child(body)
-                            .children(notice_layer),
+                            .children(notice_layer)
+                            .children(self.call_chat_notice(call.scope, show_chat, cx)),
                     )
                     .when(!matches!(call.stage, CallStage::Outgoing | CallStage::Required(_)), |d| d.child(controls))
             )
@@ -1791,6 +1805,117 @@ impl Desktop {
             .text_color(t.stage_text)
             .child(div().flex_none().child(leading))
             .child(div().flex_1().min_w_0().child(text.to_owned()))
+    }
+    /// A chat message that arrived while the call covers the conversation:
+    /// a small card in the corner of the stage that opens the chat and goes
+    /// away by itself. It never takes focus or moves the stage.
+    fn call_chat_notice(
+        &self,
+        scope: talk_core::ui::CallScope,
+        chat_shown: bool,
+        cx: &Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        let (author, text) = self.call_chat.visible(scope, Instant::now())?;
+        if chat_shown || self.overlay == Some(Overlay::CallChat) {
+            return None;
+        }
+        let t = self.theme;
+        Some(
+            self.stage_popover(div())
+                .id("call-chat-notice")
+                .absolute()
+                .right(px(16.))
+                .bottom(px(12.))
+                .w(px(300.))
+                .px_3()
+                .py_2()
+                .flex()
+                .items_start()
+                .gap_3()
+                .cursor_pointer()
+                .child(div().flex_none().pt(px(2.)).child(self.scaled_icon(
+                    "chat",
+                    16.,
+                    t.stage_muted,
+                )))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_size(self.sp(12.))
+                                .text_color(t.stage_muted)
+                                .truncate()
+                                .child(author.to_owned()),
+                        )
+                        .child(
+                            div()
+                                .text_size(self.sp(13.))
+                                .line_clamp(2)
+                                .child(text.to_owned()),
+                        ),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.call_chat.dismiss();
+                    this.handle(LocalAction::ToggleCallChat, window, cx);
+                }))
+                .into_any_element(),
+        )
+    }
+    /// Remembers the newest chat message of the running call and raises a
+    /// notice for one that arrives from somebody else while the chat is closed.
+    pub(super) fn observe_call_chat(&mut self, next: &super::PresentationSnapshot) {
+        let Some(call) = next.call.as_ref().filter(|call| {
+            matches!(
+                call.stage,
+                CallStage::Active | CallStage::Connecting | CallStage::Reconnecting
+            )
+        }) else {
+            self.call_chat = ChatNotice::default();
+            return;
+        };
+        let room = next.selected.filter(|room| {
+            room.account == call.scope.account && room.conversation == call.scope.conversation
+        });
+        let newest = room.and_then(|_| {
+            next.messages.as_slice().iter().rev().find(|message| {
+                !message.metadata.system
+                    && !message.metadata.deleted
+                    && !message.metadata.pin_notice
+            })
+        });
+        let quiet = self.call_chat_open
+            || self.overlay == Some(Overlay::CallChat)
+            || self.call_minimized == Some(call.scope);
+        let text = newest.map(|message| {
+            let body = message.body.as_str().trim();
+            if body.is_empty() {
+                message
+                    .attachments
+                    .as_slice()
+                    .first()
+                    .map_or("…", |file| file.name.as_str())
+            } else {
+                body
+            }
+        });
+        self.call_chat.observe(
+            call.scope,
+            newest.map(|message| ChatArrival {
+                id: message.local_id,
+                timestamp: message.metadata.timestamp,
+                own: message.own,
+                author: message.author.as_str(),
+                text: text.unwrap_or_default(),
+            }),
+            quiet,
+            Instant::now(),
+        );
     }
     fn call_reaction(
         &self,
@@ -1952,6 +2077,64 @@ fn stage_metrics(window_height: f32, scale: u16) -> (f32, f32, f32) {
 
 // The stage remains dark in both app appearances. Lift the existing success
 // token for that surface instead of using its light-surface foreground unchanged.
+/// The newest chat message seen during a call and the notice raised for it.
+#[derive(Default)]
+pub(super) struct ChatNotice {
+    newest: Option<(talk_core::ui::CallScope, u128, u64)>,
+    shown: Option<(talk_core::ui::CallScope, String, String, Instant)>,
+}
+pub(super) struct ChatArrival<'a> {
+    id: u128,
+    timestamp: u64,
+    own: bool,
+    author: &'a str,
+    text: &'a str,
+}
+impl ChatNotice {
+    const VISIBLE: std::time::Duration = std::time::Duration::from_secs(6);
+    /// `quiet`: the chat is on screen, so the message itself is the notice.
+    fn observe(
+        &mut self,
+        call: talk_core::ui::CallScope,
+        newest: Option<ChatArrival<'_>>,
+        quiet: bool,
+        now: Instant,
+    ) {
+        if quiet {
+            self.shown = None;
+        }
+        let Some(arrival) = newest else {
+            return;
+        };
+        let previous = self
+            .newest
+            .replace((call, arrival.id, arrival.timestamp))
+            .filter(|(scope, _, _)| *scope == call);
+        // The first message seen in a call is history, not an arrival; an
+        // older newest message means the previous one was deleted.
+        let Some((_, id, timestamp)) = previous else {
+            return;
+        };
+        if id == arrival.id || arrival.timestamp < timestamp || arrival.own || quiet {
+            return;
+        }
+        let line = arrival.text.lines().next().unwrap_or_default();
+        self.shown = Some((
+            call,
+            arrival.author.to_owned(),
+            line.chars().take(160).collect(),
+            now,
+        ));
+    }
+    fn visible(&self, call: talk_core::ui::CallScope, now: Instant) -> Option<(&str, &str)> {
+        let (scope, author, text, at) = self.shown.as_ref()?;
+        (*scope == call && now.duration_since(*at) < Self::VISIBLE)
+            .then_some((author.as_str(), text.as_str()))
+    }
+    fn dismiss(&mut self) {
+        self.shown = None;
+    }
+}
 fn stage_speaking_color(theme: super::Theme) -> gpui::Hsla {
     gpui::Hsla {
         l: theme.success.l.max(0.70),
@@ -1990,6 +2173,52 @@ mod gallery_tests {
         }
     }
 
+    #[test]
+    fn a_chat_message_from_somebody_else_is_announced_once_while_the_chat_is_closed() {
+        use super::{ChatArrival, ChatNotice};
+        use talk_core::ids::*;
+        let account = AccountId::from_local(1);
+        let call = talk_core::ui::CallScope {
+            account: AccountScope {
+                account,
+                runtime: RuntimeGeneration::from_local(2),
+            },
+            conversation: ConversationId {
+                account,
+                host: HostId::from_local(3),
+                local: 4,
+            },
+            call: CallGeneration::from_local(5),
+        };
+        let arrival = |id, timestamp, own| {
+            Some(ChatArrival {
+                id,
+                timestamp,
+                own,
+                author: "Mara",
+                text: "Erste Zeile\nzweite Zeile",
+            })
+        };
+        let start = std::time::Instant::now();
+        let mut notice = ChatNotice::default();
+        // What is already there when the call starts is history.
+        notice.observe(call, arrival(1, 10, false), false, start);
+        assert!(notice.visible(call, start).is_none());
+        // The same message again, an own message and a deletion stay quiet.
+        notice.observe(call, arrival(1, 10, false), false, start);
+        notice.observe(call, arrival(2, 11, true), false, start);
+        notice.observe(call, arrival(1, 10, false), false, start);
+        assert!(notice.visible(call, start).is_none());
+        notice.observe(call, arrival(3, 12, false), false, start);
+        assert_eq!(notice.visible(call, start), Some(("Mara", "Erste Zeile")));
+        assert!(notice.visible(call, start + ChatNotice::VISIBLE).is_none());
+        // With the chat on screen the message itself is the notice.
+        notice.observe(call, arrival(4, 13, false), true, start);
+        assert!(notice.visible(call, start).is_none());
+        notice.observe(call, arrival(5, 14, false), false, start);
+        notice.dismiss();
+        assert!(notice.visible(call, start).is_none());
+    }
     #[test]
     fn speaking_ring_contrasts_with_the_stage_in_both_appearances() {
         fn luminance(color: gpui::Hsla) -> f32 {

@@ -452,6 +452,7 @@ pub struct Desktop {
         talk_core::ui::presentation::CallReactionView,
         Instant,
     )>,
+    call_chat: call::ChatNotice,
     onboarding_open: bool,
     pub prejoin: Option<CallScope>,
     pub dismissed_incoming: Option<CallScope>,
@@ -861,6 +862,7 @@ impl Desktop {
             recording_consent,
             recent_call_reaction,
             fixture_call_reaction,
+            call_chat: call::ChatNotice::default(),
             onboarding_open: onboarding,
             prejoin,
             dismissed_incoming: None,
@@ -1479,6 +1481,7 @@ impl Desktop {
             self.recent_call_reaction = Some((call.scope, reaction.clone(), Instant::now()));
         }
         self.observe_reference_previews(&next);
+        self.observe_call_chat(&next);
         self.snapshot = next;
         if let Some(context) = self.snapshot.selected {
             let stored = self.port.composer_drafts(context);
