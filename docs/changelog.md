@@ -2,6 +2,14 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.21 alpha (2026-11-11)
+
+### Fixes
+
+- **calls:** Sign in to signaling again after an expired hello token (`a8340fc`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.21/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.21/docs/limitations.md)
+
 ## v0.0.20 alpha (2026-11-10)
 
 ### Fixes
