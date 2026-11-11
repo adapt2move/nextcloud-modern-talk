@@ -1592,3 +1592,17 @@ async fn network_resume_hint_replaces_a_live_socket_and_resumes_without_a_second
     stop.send(()).unwrap();
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn dial_reaches_the_address_family_that_answers() {
+    // "localhost" names both families; only IPv4 listens here.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let stream = tokio::time::timeout(Duration::from_secs(3), dial("localhost", port))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(stream.peer_addr().unwrap().is_ipv4());
+    drop(listener);
+    assert!(dial("localhost", port).await.is_err());
+}

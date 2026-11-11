@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use std::time::Instant;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
-    Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
+    Connector, MaybeTlsStream, WebSocketStream, client_async_tls_with_config,
     tungstenite::{self, Message, client::IntoClientRequest, protocol::WebSocketConfig},
 };
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -97,6 +97,49 @@ async fn read(socket: &mut Socket) -> Result<Value, ErrorKind> {
         }
     }
 }
+/// Opens a TCP connection to the first address that answers. A host with an
+/// IPv6 address on a network without IPv6 routing leaves that attempt hanging;
+/// trying one address after another would spend the whole deadline on it.
+pub async fn dial(host: &str, port: u16) -> std::io::Result<TcpStream> {
+    use futures_util::stream::FuturesUnordered;
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let found: Vec<_> = tokio::net::lookup_host((host, port)).await?.collect();
+    // Alternate the address families in the resolver's order of preference.
+    let leading = found.first().is_some_and(|address| address.is_ipv6());
+    let (first, second): (Vec<std::net::SocketAddr>, Vec<std::net::SocketAddr>) = found
+        .into_iter()
+        .partition(|address| address.is_ipv6() == leading);
+    let mut order = Vec::new();
+    for index in 0..first.len().max(second.len()) {
+        order.extend(
+            first
+                .get(index)
+                .into_iter()
+                .chain(second.get(index))
+                .copied(),
+        );
+    }
+    let mut attempts: FuturesUnordered<_> = order
+        .into_iter()
+        .take(6)
+        .enumerate()
+        .map(|(index, address)| async move {
+            tokio::time::sleep(Duration::from_millis(250 * index as u64)).await;
+            TcpStream::connect(address).await
+        })
+        .collect();
+    let mut last = std::io::Error::from(std::io::ErrorKind::NotFound);
+    while let Some(attempt) = attempts.next().await {
+        match attempt {
+            Ok(stream) => {
+                stream.set_nodelay(true)?;
+                return Ok(stream);
+            }
+            Err(error) => last = error,
+        }
+    }
+    Err(last)
+}
 pub(super) async fn connect(shared: &Shared, index: usize) -> Result<Socket, ErrorKind> {
     let url = {
         let settings = shared.settings.lock().map_err(|_| ErrorKind::Uncertain)?;
@@ -146,8 +189,11 @@ pub(super) async fn connect(shared: &Shared, index: usize) -> Result<Socket, Err
     };
     // tokio-tungstenite performs one upgrade only: a 3xx fails instead of
     // forwarding the request or hello credentials to a redirected origin.
+    let host = url.host_str().ok_or(ErrorKind::Malformed)?.to_owned();
+    let port = url.port_or_known_default().ok_or(ErrorKind::Malformed)?;
     until(shared, deadline(shared, 5000), &shared.stop, async {
-        connect_async_tls_with_config(request, Some(config), false, connector)
+        let stream = dial(&host, port).await.map_err(|_| ErrorKind::Transport)?;
+        client_async_tls_with_config(request, stream, Some(config), connector)
             .await
             .map(|(socket, _)| socket)
             .map_err(socket_error)

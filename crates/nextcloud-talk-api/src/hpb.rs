@@ -3,6 +3,7 @@
 //! No account password, cookies, device authority or application policy enters
 //! the WebSocket task. Sources and wire invariants are recorded in `wire`.
 mod session;
+pub use session::dial;
 mod settings;
 mod state;
 mod wire;

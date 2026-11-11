@@ -20,7 +20,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpStream, UdpSocket},
+    net::UdpSocket,
     sync::mpsc,
     task::JoinHandle,
 };
@@ -127,12 +127,11 @@ async fn connect(
 ) -> Result<Box<dyn Stream>, Error> {
     let tcp = tokio::time::timeout(
         CONNECT_TIMEOUT,
-        TcpStream::connect((target.host.as_str(), target.port)),
+        nextcloud_talk_api::hpb::dial(&target.host, target.port),
     )
     .await
     .map_err(|_| Error::Engine)?
     .map_err(|_| Error::Engine)?;
-    tcp.set_nodelay(true).map_err(|_| Error::Engine)?;
     if !target.tls {
         return Ok(Box::new(tcp));
     }
