@@ -976,6 +976,11 @@ impl Accounts {
             }
             if messages_changed {
                 self.hint_thread_refresh(scope, now);
+                // The open conversation shows the message now, not at its next
+                // periodic poll.
+                if self.snapshot.active_account == Some(scope) {
+                    self.message_poll_at = Instant::now();
+                }
             }
         }
     }

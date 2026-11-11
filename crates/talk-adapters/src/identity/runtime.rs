@@ -607,7 +607,7 @@ impl IdentityRuntime {
                         self.shared.wake.notify_one();
                     }
                     if priority == RequestPriority::User
-                        && !matches!(command, RuntimeCommand::AccountData { .. })
+                        && preempts(&command)
                         && let Ok(active) = c.inflight.lock()
                         && let Some(active) = active.as_ref()
                         && active.preemptible
@@ -1115,6 +1115,19 @@ fn clears_reachability(
     }
 }
 
+/// Whether a user-priority command may cancel disposable work in flight. The
+/// periodic observation of a running call is not a user action: it repeats
+/// four times a second and would starve every message and room poll.
+fn preempts(command: &RuntimeCommand) -> bool {
+    !matches!(
+        command,
+        RuntimeCommand::AccountData { .. }
+            | RuntimeCommand::Request {
+                request: ProtocolRequest::Meeting(talk_core::calls::Command::Observe(_)),
+                ..
+            }
+    )
+}
 fn preemptible(command: &RuntimeCommand) -> bool {
     use talk_core::protocol::{content::ContentCommand as C, messaging::MessagingCommand as M};
     matches!(
@@ -3019,6 +3032,31 @@ mod tests {
         assert!(!preemptible(&RuntimeCommand::AccountData {
             account: scope.account,
             command: super::super::data::DataCommand::Load
+        }));
+    }
+    #[test]
+    fn observing_a_running_call_does_not_cancel_message_polls() {
+        let scope = AccountScope {
+            account: AccountId::from_local(1),
+            runtime: RuntimeGeneration::from_local(1),
+        };
+        let call = talk_core::ids::CallScope {
+            account: scope,
+            conversation: ConversationId {
+                account: scope.account,
+                host: talk_core::ids::HostId::from_local(1),
+                local: 1,
+            },
+            call: talk_core::ids::CallGeneration::from_local(1),
+        };
+        assert!(!preempts(&RuntimeCommand::Request {
+            scope,
+            request: ProtocolRequest::Meeting(talk_core::calls::Command::Observe(call)),
+        }));
+        // What the user does in the call still goes first.
+        assert!(preempts(&RuntimeCommand::Request {
+            scope,
+            request: ProtocolRequest::Meeting(talk_core::calls::Command::Stop(call)),
         }));
     }
 }
