@@ -1311,6 +1311,43 @@ impl Desktop {
             }
             primary_controls = primary_controls.child(group);
         }
+        // A room with guest access shows its link among the main controls,
+        // where a host looks for it while people are waiting to be let in.
+        if joined
+            && !lobby
+            && self.selected().is_some_and(|row| {
+                row.context.account == call.scope.account
+                    && row.context.conversation == call.scope.conversation
+                    && row.kind == talk_core::ui::presentation::ConversationKind::GuestAccessible
+            })
+        {
+            let open = self.call_guest_link_open == Some(call.scope);
+            primary_controls = primary_controls.child(
+                div()
+                    .relative()
+                    .child(
+                        self.round_icon_button(
+                            "call-guest-link",
+                            ("link", "Gästelink anzeigen"),
+                            ButtonStyle::Stage,
+                            Availability::available().hinted(),
+                            LocalAction::ToggleCallGuestLink(call.scope),
+                            cx,
+                        )
+                        .size(px(44.))
+                        .min_h(px(44.))
+                        .rounded_full()
+                        .when(open, |d| d.bg(t.accent)),
+                    )
+                    .when(open, |d| {
+                        d.child(self.call_guest_link_popover(
+                            call.scope,
+                            f32::from(window.viewport_size().width),
+                            cx,
+                        ))
+                    }),
+            );
+        }
         // Keep the controls on one line when the side panels become overlays.
         let narrow_controls = window.viewport_size().width < px(900.) || self.scale >= 150;
         let chat_unread = self
@@ -1685,24 +1722,6 @@ impl Desktop {
                                     .text_color(if t.dark { t.danger } else { t.danger_bg }).text_size(self.sp(12.))
                                     .font_weight(FontWeight::BOLD).child(format!("● {}", self.l("Aufzeichnung läuft"))))
                             })
-                            .when(
-                                self.selected().is_some_and(|row| {
-                                    row.context.account == call.scope.account
-                                        && row.context.conversation == call.scope.conversation
-                                        && row.kind
-                                            == talk_core::ui::presentation::ConversationKind::GuestAccessible
-                                }),
-                                |header| {
-                                    header.child(self.icon_button(
-                                        "call-guest-link",
-                                        ("link", "Gästelink kopieren"),
-                                        ButtonStyle::Stage,
-                                        Availability::available().labelled(),
-                                        LocalAction::CopyCallGuestLink(call.scope),
-                                        cx,
-                                    ))
-                                },
-                            )
                             .child(self.icon_button(
                                 "minimize-call",
                                 ("chevron-down", "Anruf minimieren"),
@@ -1760,6 +1779,106 @@ impl Desktop {
             .shadow(dark_stage.elevation(super::theme::Elevation::Popover))
             .text_color(t.stage_text)
             .occlude()
+    }
+    /// The guest link of the call's room: readable, selectable with the pointer
+    /// and copyable, centred above its button.
+    fn call_guest_link_popover(
+        &self,
+        scope: talk_core::ui::CallScope,
+        window_width: f32,
+        cx: &Context<Self>,
+    ) -> Div {
+        let t = self.theme;
+        let context = talk_core::ui::presentation::ConversationRef {
+            account: scope.account,
+            conversation: scope.conversation,
+        };
+        let panel =
+            self.snapshot.conversation_panel.as_ref().filter(|panel| {
+                panel.context == context && self.snapshot.selected == Some(context)
+            });
+        let blocked = panel
+            .and_then(|panel| panel.details.as_ref())
+            .is_some_and(|details| details.classified || details.sensitive);
+        let failed = panel.is_some_and(|panel| {
+            matches!(
+                panel.state,
+                talk_core::ui::conversation::RemoteState::Failed(..)
+            )
+        });
+        let width = (window_width - 48.).clamp(220., 380.);
+        let popover = self
+            .stage_popover(
+                div()
+                    .absolute()
+                    .bottom(px(54.))
+                    .left(px(22. - width / 2.))
+                    .w(px(width)),
+            )
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_size(self.sp(13.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(self.scaled_icon("link", 14., t.stage_text))
+                    .child(self.l("Gästelink").to_owned()),
+            );
+        let note = |text: &str| {
+            div()
+                .text_size(self.sp(12.))
+                .text_color(t.stage_muted)
+                .child(self.l(text).to_owned())
+        };
+        match self.call_guest_link(context) {
+            Some(_) if blocked => popover.child(note(
+                "Weitergeben ist durch die Gesprächsrichtlinie gesperrt.",
+            )),
+            Some(link) => popover
+                .child(
+                    div()
+                        .min_w_0()
+                        .px_2()
+                        .py_1()
+                        .rounded(px(8.))
+                        .bg(t.stage)
+                        .text_size(self.sp(13.))
+                        .child(super::selectable::SelectableText::new(
+                            "call-guest-link-text",
+                            link,
+                            self.text_selection.clone(),
+                            // The stage is dark in both appearances.
+                            super::Theme {
+                                selected: gpui::Hsla {
+                                    a: 0.45,
+                                    ..t.accent
+                                },
+                                ..t
+                            },
+                            true,
+                        )),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .child(self.button_with_leading_icon(
+                            "call-guest-link-copy",
+                            ("Link kopieren", "copy"),
+                            ButtonStyle::Stage,
+                            Availability::available(),
+                            LocalAction::CopyCallGuestLink(scope),
+                            cx,
+                        )),
+                ),
+            None if failed => popover.child(note("Der Gästelink konnte nicht geladen werden.")),
+            None => popover.child(note("Gästelink wird geladen …")),
+        }
     }
     /// A readable status line on the dark call stage. Failures use a light amber
     /// mark; the text keeps the stage's own foreground for contrast.

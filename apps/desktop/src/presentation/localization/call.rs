@@ -270,10 +270,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "End for everyone",
         "Finalizar para todas las personas",
     ),
+    ("Gästelink", "Guest link", "Enlace para invitados"),
     (
         "Gästelink kopiert.",
         "Guest link copied.",
         "Enlace para invitados copiado.",
+    ),
+    (
+        "Gästelink wird geladen …",
+        "Loading the guest link …",
+        "Cargando el enlace para invitados …",
     ),
     ("Hand gehoben", "Hand raised", "Mano levantada"),
     ("Hand heben", "Raise hand", "Levantar la mano"),
@@ -339,6 +345,7 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Laptop microphone",
         "Micrófono del portátil",
     ),
+    ("Link kopieren", "Copy link", "Copiar enlace"),
     (
         "Mikrofon auswählen",
         "Choose microphone",

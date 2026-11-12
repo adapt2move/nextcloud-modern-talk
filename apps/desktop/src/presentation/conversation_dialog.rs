@@ -338,11 +338,80 @@ impl Desktop {
         if self.snapshot.selected != Some(context) {
             return;
         }
-        self.open_room_dialog(Overlay::Settings, cx);
         self.guest_link_copy = Some(context);
+        // The link shown above the call controls is copied as it stands.
+        if self.call_guest_link(context).is_some() {
+            self.settle_call_guest_link(cx);
+            return;
+        }
+        self.open_room_dialog(Overlay::Settings, cx);
         self.submit_room(ConversationAction::GuestLink);
     }
+    /// Load the guest link of the call's room for display above the call
+    /// controls. Nothing is copied.
+    pub(super) fn show_call_guest_link(
+        &mut self,
+        context: ConversationRef,
+        cx: &mut Context<Self>,
+    ) {
+        if self.snapshot.selected != Some(context) || self.call_guest_link(context).is_some() {
+            return;
+        }
+        self.guest_link_reads = 0;
+        self.open_room_dialog(Overlay::Settings, cx);
+        self.submit_room(ConversationAction::GuestLink);
+    }
+    /// The loaded guest link of `context`, if its room is the selected one.
+    pub(super) fn call_guest_link(&self, context: ConversationRef) -> Option<&str> {
+        self.snapshot
+            .conversation_panel
+            .as_ref()
+            .filter(|panel| panel.context == context && self.snapshot.selected == Some(context))
+            .and_then(|panel| panel.guest_link.as_ref())
+            .map(|link| link.as_str())
+    }
+    /// The link and the room policy arrive separately. A read that lost the race
+    /// with the details is repeated, a bounded number of times.
+    fn settle_shown_guest_link(&mut self) {
+        let Some(scope) = self.call_guest_link_open else {
+            return;
+        };
+        let context = ConversationRef {
+            account: scope.account,
+            conversation: scope.conversation,
+        };
+        if self.snapshot.selected != Some(context)
+            || self
+                .snapshot
+                .call
+                .as_ref()
+                .is_none_or(|call| call.scope != scope)
+        {
+            self.call_guest_link_open = None;
+            return;
+        }
+        // The details may not have been observed yet; the link follows them.
+        let Some(panel) = self
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .filter(|panel| panel.context == context)
+        else {
+            return;
+        };
+        if panel.details.is_some()
+            && panel.guest_link.is_none()
+            && !panel.state.pending()
+            && !matches!(panel.state, RemoteState::Failed(..))
+            && self.guest_link_copy.is_none()
+            && self.guest_link_reads < 3
+        {
+            self.guest_link_reads += 1;
+            self.submit_room(ConversationAction::GuestLink);
+        }
+    }
     pub(super) fn settle_call_guest_link(&mut self, cx: &mut Context<Self>) {
+        self.settle_shown_guest_link();
         let Some(context) = self.guest_link_copy else {
             return;
         };
@@ -1564,8 +1633,22 @@ impl Desktop {
                                         ))
                                     }),
                             )
+                            // Selectable, so the link can be marked and copied by
+                            // hand like any other text.
                             .when_some(panel.guest_link.as_ref(), |b, link| {
-                                b.child(self.hint(link.as_str()))
+                                b.child(
+                                    div()
+                                        .min_w_0()
+                                        .text_size(self.sp(13.))
+                                        .text_color(self.theme.muted)
+                                        .child(super::selectable::SelectableText::new(
+                                            "room-guest-link-text",
+                                            link.as_str(),
+                                            self.text_selection.clone(),
+                                            self.theme,
+                                            !d.classified && !d.sensitive,
+                                        )),
+                                )
                             })
                             .child(
                                 self.room_field(

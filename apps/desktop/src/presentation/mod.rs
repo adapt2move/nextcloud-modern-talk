@@ -138,6 +138,7 @@ pub enum LocalAction {
     ToggleCallSecondary,
     DismissRecordingFailure(CallScope),
     CopyCallGuestLink(CallScope),
+    ToggleCallGuestLink(CallScope),
     ToggleCallReactions(CallScope),
     ConfirmEndCall,
     ConfirmRecording,
@@ -432,6 +433,8 @@ pub struct Desktop {
     call_moderation_open: bool,
     call_secondary_open: bool,
     call_reactions_open: Option<CallScope>,
+    /// The guest link of the call's room is shown above the call controls.
+    call_guest_link_open: Option<CallScope>,
     call_focus: Option<(CallScope, u128)>,
     call_speaker: Option<CallScope>,
     call_minimized: Option<CallScope>,
@@ -443,6 +446,8 @@ pub struct Desktop {
     dismissed_recording_failure: Option<CallScope>,
     /// A guest-link copy that waits for the room details and the link itself.
     guest_link_copy: Option<ConversationRef>,
+    /// Repeated reads of the guest link shown above the call controls.
+    guest_link_reads: u8,
     call_recovery: call::recovery::Recovery,
     call_clock: Option<gpui::Task<()>>,
     recording_consent: call::consent::State,
@@ -748,6 +753,19 @@ impl Desktop {
         } else {
             None
         };
+        // A layout fixture that already holds the guest link shows it at once.
+        let fixture_guest_link = snapshot
+            .call
+            .as_ref()
+            .filter(|call| {
+                development
+                    && snapshot.conversation_panel.as_ref().is_some_and(|panel| {
+                        panel.guest_link.is_some()
+                            && panel.context.account == call.scope.account
+                            && panel.context.conversation == call.scope.conversation
+                    })
+            })
+            .map(|call| call.scope);
         let mut desktop = Self {
             materials: controls::Materials::new(material_images, cx),
             material_preview,
@@ -847,6 +865,7 @@ impl Desktop {
             call_moderation_open: false,
             call_secondary_open: false,
             call_reactions_open: fixture_call_reaction.map(|(scope, _)| scope),
+            call_guest_link_open: fixture_guest_link,
             call_focus: None,
             call_speaker,
             call_minimized,
@@ -857,6 +876,7 @@ impl Desktop {
             call_ended_frame_pending: None,
             dismissed_recording_failure: None,
             guest_link_copy: None,
+            guest_link_reads: 0,
             call_recovery: call::recovery::Recovery::default(),
             call_clock: None,
             recording_consent,
@@ -1197,6 +1217,7 @@ impl Desktop {
             self.call_participants_open = false;
             self.call_moderation_open = false;
             self.call_secondary_open = false;
+            self.call_guest_link_open = None;
             self.call_clock = None;
         }
         let previous = self.snapshot.selected;
@@ -1508,6 +1529,7 @@ impl Desktop {
             self.call_chat_open = false;
             self.call_participants_open = false;
             self.call_secondary_open = false;
+            self.call_guest_link_open = None;
             self.call_reactions_open = None;
             self.call_device_picker = None;
             if self
@@ -2284,6 +2306,7 @@ impl Desktop {
                 }) {
                     self.call_minimized = Some(scope);
                     self.call_reactions_open = None;
+                    self.call_guest_link_open = None;
                     self.call_secondary_open = false;
                     self.call_device_picker = None;
                     self.device_picker = None;
@@ -2400,6 +2423,7 @@ impl Desktop {
                 }) {
                     self.call_reactions_open =
                         (self.call_reactions_open != Some(scope)).then_some(scope);
+                    self.call_guest_link_open = None;
                     self.call_device_picker = None;
                     self.device_picker = None;
                 }
@@ -2469,7 +2493,29 @@ impl Desktop {
                     self.dismissed_recording_failure = Some(scope);
                 }
             }
+            LocalAction::ToggleCallGuestLink(scope) => {
+                let context = ConversationRef {
+                    account: scope.account,
+                    conversation: scope.conversation,
+                };
+                if self.call_guest_link_open.take().is_none()
+                    && self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .is_some_and(|call| call.scope == scope)
+                    && self.snapshot.selected == Some(context)
+                {
+                    self.call_guest_link_open = Some(scope);
+                    self.call_reactions_open = None;
+                    self.call_secondary_open = false;
+                    self.call_device_picker = None;
+                    self.device_picker = None;
+                    self.show_call_guest_link(context, cx);
+                }
+            }
             LocalAction::ToggleCallSecondary => {
+                self.call_guest_link_open = None;
                 self.call_secondary_open = !self.call_secondary_open
             }
             LocalAction::ToggleCallModeration => {
@@ -2516,6 +2562,13 @@ impl Desktop {
                 }
                 if self.call_reactions_open.take().is_some() {
                     if let Some(focus) = self.control_focus.current(&"call-reactions".into()) {
+                        focus.focus(window);
+                    }
+                    cx.notify();
+                    return;
+                }
+                if self.call_guest_link_open.take().is_some() {
+                    if let Some(focus) = self.control_focus.current(&"call-guest-link".into()) {
                         focus.focus(window);
                     }
                     cx.notify();
@@ -3065,6 +3118,7 @@ impl Desktop {
             }
             LocalAction::CallDevicePicker(scope, kind) => {
                 self.call_reactions_open = None;
+                self.call_guest_link_open = None;
                 if self.snapshot.call.as_ref().is_some_and(|call| {
                     call.scope == scope
                         && matches!(call.stage, CallStage::Active | CallStage::Connecting)

@@ -231,6 +231,7 @@ pub const SCENARIOS: &[&str] = &[
     "sharing",
     "sharing-closed",
     "call-guest",
+    "call-guest-link",
     "call-denied",
     "room",
     "voice-room",
@@ -511,6 +512,17 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     author_key: text(key),
                 }),
             );
+        }
+        return state;
+    }
+    if scenario == Some("call-guest-link") {
+        let mut state = snapshot(Some("call-guest"));
+        dialog::configure(&mut state);
+        if let Some(panel) = state.conversation_panel.as_mut() {
+            panel.guest_link = Some(text("https://cloud.example.test/call/q7wm4xk2"));
+            if let Some(details) = panel.details.as_mut() {
+                details.guest_access = Some(true);
+            }
         }
         return state;
     }
