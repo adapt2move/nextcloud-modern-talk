@@ -16,7 +16,7 @@ impl Accounts {
         if now < due {
             return;
         }
-        match self.load_threads(scope, offset) {
+        match self.load_threads(scope, offset, true) {
             Ok(()) => self.thread_refresh_due = None,
             Err(SubmitError::Busy) => {
                 self.thread_refresh_due = Some((scope, offset, now + Duration::from_secs(2)));
@@ -41,7 +41,7 @@ impl Accounts {
         }
     }
     pub(super) fn refresh_threads(&mut self, scope: AccountScope) -> Result<(), SubmitError> {
-        self.load_threads(scope, 0)
+        self.load_threads(scope, 0, false)
     }
     pub(super) fn page_threads(
         &mut self,
@@ -54,9 +54,14 @@ impl Accounts {
         if !previous && !next {
             return Err(SubmitError::StaleScope);
         }
-        self.load_threads(scope, offset)
+        self.load_threads(scope, offset, false)
     }
-    fn load_threads(&mut self, scope: AccountScope, offset: u32) -> Result<(), SubmitError> {
+    fn load_threads(
+        &mut self,
+        scope: AccountScope,
+        offset: u32,
+        timed: bool,
+    ) -> Result<(), SubmitError> {
         self.current(scope)?;
         if self.snapshot.active_account != Some(scope) {
             return Err(SubmitError::StaleScope);
@@ -73,9 +78,9 @@ impl Accounts {
             ProtocolRequest::SubscribedThreads { offset },
             Purpose::Threads(scope, offset),
         )?;
-        self.snapshot.threads.account = Some(scope);
-        self.snapshot.threads.content = ContentState::Loading;
-        self.touch();
+        if announce_thread_load(&mut self.snapshot.threads, scope, offset, timed) {
+            self.touch();
+        }
         Ok(())
     }
 
@@ -147,6 +152,28 @@ impl Accounts {
     }
 }
 
+/// A deliberate refresh or page change shows a loading state. The periodic or
+/// hinted refresh of the page already shown does not: the list and its controls
+/// stay as they are until the read completes, instead of blinking every 30
+/// seconds and after every live message. Returns whether the list changed.
+fn announce_thread_load(
+    list: &mut ThreadList,
+    scope: AccountScope,
+    offset: u32,
+    timed: bool,
+) -> bool {
+    if timed
+        && list.account == Some(scope)
+        && list.offset == offset
+        && list.content == ContentState::Ready
+    {
+        return false;
+    }
+    list.account = Some(scope);
+    list.content = ContentState::Loading;
+    true
+}
+
 /// Keep the last useful page visible while transient failures retry in the background.
 fn record_thread_failure(list: &mut ThreadList, error: IdentityError) -> bool {
     if matches!(
@@ -174,6 +201,34 @@ fn record_thread_failure(list: &mut ThreadList, error: IdentityError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_timed_refresh_of_the_shown_page_announces_no_loading_state() {
+        let snapshot = crate::composition::fixtures::snapshot(Some("thread-list"));
+        let scope = snapshot.active_account.unwrap();
+        let shown = snapshot.threads;
+        assert_eq!(shown.content, ContentState::Ready);
+        let mut list = shown.clone();
+        assert!(!announce_thread_load(&mut list, scope, shown.offset, true));
+        assert_eq!(list, shown);
+        // A deliberate refresh, another page and a list without a shown page
+        // still say that they are loading.
+        assert!(announce_thread_load(&mut list, scope, shown.offset, false));
+        assert_eq!(list.content, ContentState::Loading);
+        assert_eq!(list.entries, shown.entries);
+        let mut list = shown.clone();
+        assert!(announce_thread_load(
+            &mut list,
+            scope,
+            shown.offset + 50,
+            true
+        ));
+        assert_eq!(list.content, ContentState::Loading);
+        let mut list = ThreadList::default();
+        assert!(announce_thread_load(&mut list, scope, 0, true));
+        assert_eq!(list.account, Some(scope));
+        assert_eq!(list.content, ContentState::Loading);
+    }
 
     #[test]
     fn live_hints_coalesce_without_delaying_the_first_refresh() {
