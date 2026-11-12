@@ -201,6 +201,53 @@ impl Desktop {
                 .line_height(self.sp(20.))
                 .flex_none()
         };
+        let avatar = |size: f32| {
+            let picture = if m.metadata.bot {
+                self.bot_avatar(size)
+            } else {
+                self.content_avatar(
+                    // A reply of one's own has no row in the timeline that
+                    // would lend it the account's picture.
+                    if m.own {
+                        talk_core::ui::content::AssetTarget::SelfAvatar
+                    } else {
+                        talk_core::ui::content::AssetTarget::MessageAvatar {
+                            context,
+                            message: m.local_id,
+                        }
+                    },
+                    m.initials.as_str(),
+                    size,
+                )
+            };
+            // The presence dot is made for the timeline's picture; beside a
+            // name it would cover half of the small one.
+            let presence = if size < 36. || m.metadata.bot {
+                talk_core::ui::presentation::Presence::Unknown
+            } else {
+                self.person_member(person_source(false))
+                    .map(|member| member.presence)
+                    .or_else(|| m.own.then(|| self.own_presence()))
+                    .or_else(|| {
+                        self.selected()
+                            .filter(|row| {
+                                !m.own
+                                    && row.context == context
+                                    && row.kind
+                                        == talk_core::ui::presentation::ConversationKind::Direct
+                                    && row.title.as_str() == m.author.as_str()
+                            })
+                            .map(|row| row.presence)
+                    })
+                    .unwrap_or(talk_core::ui::presentation::Presence::Unknown)
+            };
+            self.person_trigger(
+                person_source(false),
+                self.avatar_with_presence(picture, presence, size, t.surface),
+                cx,
+            )
+            .into_any_element()
+        };
         let mut content = div()
             .flex_1()
             .min_w_0()
@@ -214,6 +261,9 @@ impl Desktop {
                         .min_w_0()
                         .items_center()
                         .gap_2()
+                        // A thread pane is narrow: the picture sits beside the
+                        // name and the text below uses the full width.
+                        .when(thread, |d| d.child(avatar(THREAD_AVATAR)))
                         .child(
                             self.person_trigger(
                                 person_source(true),
@@ -235,7 +285,10 @@ impl Desktop {
                 )
             })
             .when_some(
-                m.metadata.parent.as_ref().filter(|_| !m.metadata.deleted),
+                m.metadata
+                    .parent
+                    .as_ref()
+                    .filter(|parent| !m.metadata.deleted && !quotes_thread_root(m, parent, thread)),
                 |d, parent| {
                     let quote = self.quote_preview(
                         if parent.unavailable {
@@ -271,6 +324,14 @@ impl Desktop {
                     }
                 },
             );
+        if let Some(title) = shown_thread_title(m, thread) {
+            content = content.child(
+                div()
+                    .min_w_0()
+                    .font_weight(FontWeight::BOLD)
+                    .child(title.to_owned()),
+            );
+        }
         if m.metadata.deleted {
             content = content.child(self.hint(self.l("Nachricht gelöscht.")));
         } else if !self.bare_attachment_body(m) && (upload.is_none() || !m.body.as_str().is_empty())
@@ -629,11 +690,13 @@ impl Desktop {
                     .min_h(px(28.))
                     .text_color(t.selected_text)
                     .child(self.scaled_icon("chat", 14., t.accent))
-                    .children(
-                        recent
-                            .iter()
-                            .map(|reply| self.person_avatar(reply.initials.as_str(), 20.)),
-                    )
+                    .children(recent.iter().map(|reply| {
+                        if reply.metadata.bot {
+                            self.bot_avatar(20.)
+                        } else {
+                            self.person_avatar(reply.initials.as_str(), 20.)
+                        }
+                    }))
                     .when(recent.is_empty(), |button| {
                         button.children(activity.into_iter().flat_map(|activity| {
                             activity
@@ -661,145 +724,159 @@ impl Desktop {
         let hovered_id = toolbar_id.clone();
         let gutter = px(if compact { 4. } else { 12. });
         div()
-        .when(!thread && self.message_ui.first_unread == Some((context, m.local_id)), |row| {
-            row.child(
-                div().px_6().py_2().flex().items_center().gap_2()
-                    .child(div().flex_1().h(px(1.)).bg(t.accent))
-                    .child(div().text_size(self.sp(11.)).font_weight(FontWeight::MEDIUM).text_color(t.selected_text).child(self.l("Neue Nachrichten")))
-                    .child(div().flex_1().h(px(1.)).bg(t.accent)),
-            )
-        })
-        .child(div().px(gutter).child(
-            div()
-                .id(row_id("message", 0))
-                .group(action_group.clone())
-                .when((has_toolbar || resting.is_some()) && !self.background_inert, |row| {
-                    row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                        if this.toolbar_hover.update(&hovered_id, *hovered, this.reduced_motion, std::time::Instant::now()) {
-                            cx.notify();
-                        }
-                    }))
-                })
-                // A secondary click opens the same actions as the "…" button.
-                .when(
-                    has_toolbar && message_actions_allowed(m) && !self.background_inert,
-                    |row| {
-                        let (menu_context, message) = (context, m.local_id);
-                        row.on_mouse_down(
-                            gpui::MouseButton::Right,
-                            cx.listener(move |this, _, window, cx| {
-                                this.handle(
-                                    LocalAction::MessageIn(
-                                        menu_context,
-                                        if thread {
-                                            Action::ThreadMenu(message)
-                                        } else {
-                                            Action::Menu(message)
-                                        },
-                                    ),
-                                    window,
-                                    cx,
-                                );
-                            }),
-                        )
-                    },
-                )
-                .relative()
-                .rounded(px(8.))
-                .px(gutter)
-                .py(px(if continuation || compact { 4. } else { 12. }))
-                .when(m.own, |d| d.min_h(px(34.)))
-                .flex()
-                .gap_3()
-                .when(
-                    self.highlighted_message == Some((context, m.local_id)),
-                    |d| {
-                        let elapsed = self.highlight_started.map_or(1400., |started| {
-                            started.elapsed().as_secs_f32() * 1000.
-                        });
-                        let opacity = if self.reduced_motion {
-                            1.
-                        } else {
-                            (1. - ((elapsed - 600.) / 800.).clamp(0., 1.)).max(0.)
-                        };
-                        d.bg(gpui::Hsla {
-                            a: t.selected.a * opacity,
-                            ..t.selected
-                        })
-                    },
-                )
-                // The tint and the toolbar share one visibility owner, so the
-                // controls always sit on the row they act on.
-                .when(shown, |d| d.bg(t.subtle))
-                .child(if continuation {
-                    div()
-                        .relative()
-                        .w(px(36.))
-                        .h(self.sp(20.))
-                        .flex_none()
-                        .text_size(self.sp(12.))
-                        .line_height(self.sp(20.))
-                        .text_color(t.muted)
-                        .child(
-                            div()
-                                .child(
-                                    time_label
-                                        .split_whitespace()
-                                        .next()
-                                        .unwrap_or("")
-                                        .to_owned(),
-                                )
-                                .opacity(0.)
-                                .group_hover(action_group.clone(), |s| s.opacity(1.)),
-                        )
-                        .into_any_element()
-                } else {
-                    self.person_trigger(
-                        person_source(false),
-                        self.avatar_with_presence(
-                            self.content_avatar(
-                                talk_core::ui::content::AssetTarget::MessageAvatar { context, message: m.local_id },
-                                m.initials.as_str(), 36.,
-                            ),
-                            self.person_member(person_source(false))
-                                .map(|member| member.presence)
-                                .or_else(|| m.own.then(|| self.own_presence()))
-                                .or_else(|| self.selected().filter(|row| {
-                                    !m.own && row.context == context
-                                        && row.kind == talk_core::ui::presentation::ConversationKind::Direct
-                                        && row.title.as_str() == m.author.as_str()
-                                }).map(|row| row.presence))
-                                .unwrap_or(talk_core::ui::presentation::Presence::Unknown),
-                            36., t.surface,
-                        ), cx,
-                    ).into_any_element()
-                })
-                .child(content)
-                // The receipt sits at the bottom right of the message, like the
-                // ticks in other chat clients.
-                .children(resting.map(|indicator| {
-                    div().flex().flex_col().flex_none().justify_end().child(
-                        self.delivery_indicator(indicator, row_id("message-delivery", 0), cx),
+            .when(
+                !thread && self.message_ui.first_unread == Some((context, m.local_id)),
+                |row| {
+                    row.child(
+                        div()
+                            .px_6()
+                            .py_2()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(div().flex_1().h(px(1.)).bg(t.accent))
+                            .child(
+                                div()
+                                    .text_size(self.sp(11.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(t.selected_text)
+                                    .child(self.l("Neue Nachrichten")),
+                            )
+                            .child(div().flex_1().h(px(1.)).bg(t.accent)),
                     )
-                }))
-                .when(!thread, |d| d.child(self.pin_source_anchor(context, m.local_id)))
-                // The toolbar never enters the message's flex layout: revealing it
-                // cannot move text, metadata or receipts.
-                .when(has_toolbar, |d| {
-                    d.child(self.message_toolbar(
-                        m,
-                        ToolbarState {
-                            thread,
-                            shown,
-                            actions_open,
-                        },
-                        toolbar_id,
-                        toolbar_admission,
-                        gutter,
-                        cx,
-                    ))
-                }),
-        ))
+                },
+            )
+            .child(
+                div().px(gutter).child(
+                    div()
+                        .id(row_id("message", 0))
+                        .group(action_group.clone())
+                        .when(
+                            (has_toolbar || resting.is_some()) && !self.background_inert,
+                            |row| {
+                                row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                                    if this.toolbar_hover.update(
+                                        &hovered_id,
+                                        *hovered,
+                                        this.reduced_motion,
+                                        std::time::Instant::now(),
+                                    ) {
+                                        cx.notify();
+                                    }
+                                }))
+                            },
+                        )
+                        // A secondary click opens the same actions as the "…" button.
+                        .when(
+                            has_toolbar && message_actions_allowed(m) && !self.background_inert,
+                            |row| {
+                                let (menu_context, message) = (context, m.local_id);
+                                row.on_mouse_down(
+                                    gpui::MouseButton::Right,
+                                    cx.listener(move |this, _, window, cx| {
+                                        this.handle(
+                                            LocalAction::MessageIn(
+                                                menu_context,
+                                                if thread {
+                                                    Action::ThreadMenu(message)
+                                                } else {
+                                                    Action::Menu(message)
+                                                },
+                                            ),
+                                            window,
+                                            cx,
+                                        );
+                                    }),
+                                )
+                            },
+                        )
+                        .relative()
+                        .rounded(px(8.))
+                        .px(gutter)
+                        .py(px(if continuation || compact { 4. } else { 12. }))
+                        .when(m.own, |d| d.min_h(px(34.)))
+                        .flex()
+                        .gap_3()
+                        .when(
+                            self.highlighted_message == Some((context, m.local_id)),
+                            |d| {
+                                let elapsed = self.highlight_started.map_or(1400., |started| {
+                                    started.elapsed().as_secs_f32() * 1000.
+                                });
+                                let opacity = if self.reduced_motion {
+                                    1.
+                                } else {
+                                    (1. - ((elapsed - 600.) / 800.).clamp(0., 1.)).max(0.)
+                                };
+                                d.bg(gpui::Hsla {
+                                    a: t.selected.a * opacity,
+                                    ..t.selected
+                                })
+                            },
+                        )
+                        // The tint and the toolbar share one visibility owner, so the
+                        // controls always sit on the row they act on.
+                        .when(shown, |d| d.bg(t.subtle))
+                        .when(!thread, |d| {
+                            d.child(if continuation {
+                                div()
+                                    .relative()
+                                    .w(px(36.))
+                                    .h(self.sp(20.))
+                                    .flex_none()
+                                    .text_size(self.sp(12.))
+                                    .line_height(self.sp(20.))
+                                    .text_color(t.muted)
+                                    .child(
+                                        div()
+                                            .child(
+                                                time_label
+                                                    .split_whitespace()
+                                                    .next()
+                                                    .unwrap_or("")
+                                                    .to_owned(),
+                                            )
+                                            .opacity(0.)
+                                            .group_hover(action_group.clone(), |s| s.opacity(1.)),
+                                    )
+                                    .into_any_element()
+                            } else {
+                                avatar(36.)
+                            })
+                        })
+                        .child(content)
+                        // The receipt sits at the bottom right of the message, like the
+                        // ticks in other chat clients.
+                        .children(resting.map(|indicator| {
+                            div().flex().flex_col().flex_none().justify_end().child(
+                                self.delivery_indicator(
+                                    indicator,
+                                    row_id("message-delivery", 0),
+                                    cx,
+                                ),
+                            )
+                        }))
+                        .when(!thread, |d| {
+                            d.child(self.pin_source_anchor(context, m.local_id))
+                        })
+                        // The toolbar never enters the message's flex layout: revealing it
+                        // cannot move text, metadata or receipts.
+                        .when(has_toolbar, |d| {
+                            d.child(self.message_toolbar(
+                                m,
+                                ToolbarState {
+                                    thread,
+                                    shown,
+                                    actions_open,
+                                },
+                                toolbar_id,
+                                toolbar_admission,
+                                gutter,
+                                cx,
+                            ))
+                        }),
+                ),
+            )
     }
 
     /// Quick reactions, emoji, reply, thread and "…" for one hovered or focused
@@ -1171,6 +1248,41 @@ fn call_status(message: &MessageView) -> Option<(&'static str, bool)> {
     }
 }
 
+/// Picture beside the author's name in a thread pane.
+const THREAD_AVATAR: f32 = 20.;
+
+/// A reply in a thread quotes the thread's root unless it answers another reply.
+/// Inside the thread pane the root is the first row, so the quote says nothing.
+fn quotes_thread_root(
+    message: &MessageView,
+    parent: &talk_core::ui::messaging::Reply,
+    thread: bool,
+) -> bool {
+    thread && !parent.external && message.metadata.thread == Some(parent.id)
+}
+
+/// The title of a thread above its root, unless the message already begins with
+/// it. The thread pane names the thread in its heading.
+fn shown_thread_title(message: &MessageView, thread: bool) -> Option<&str> {
+    if thread || message.metadata.deleted || message.metadata.thread != Some(message.local_id) {
+        return None;
+    }
+    let title = message.metadata.thread_title.as_ref()?.as_str().trim();
+    // Markdown emphasis, heading and quote marks do not change what a line says.
+    let plain = |text: &str| -> String {
+        text.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim_start_matches(['#', '*', '_', '>', '`', '~', ' '])
+            .to_lowercase()
+    };
+    let wanted = plain(title.trim_end_matches(['…', '.']));
+    if wanted.is_empty() || plain(message.body.as_str()).starts_with(&wanted) {
+        return None;
+    }
+    Some(title)
+}
+
 /// Messages of one author within this window share one header.
 const GROUP_WINDOW_SECONDS: u64 = 300;
 
@@ -1405,6 +1517,64 @@ mod tests {
         assert!(!grouped_message(&first, &second, true));
         second.metadata.thread = Some(8);
         assert!(!grouped_message_surface(&first, &second, true, true));
+    }
+
+    #[test]
+    fn a_reply_quotes_its_thread_root_only_outside_the_thread() {
+        let quote = |id| talk_core::ui::messaging::Reply {
+            id,
+            external: false,
+            author: Text::new("Root author").unwrap(),
+            text: Text::new("Root").unwrap(),
+            unavailable: false,
+        };
+        let mut reply = authored_message(9, Some("users:one"), 32_400);
+        reply.metadata.thread = Some(7);
+        assert!(quotes_thread_root(&reply, &quote(7), true));
+        assert!(!quotes_thread_root(&reply, &quote(7), false));
+        // An answer to another reply of the thread keeps its quote.
+        assert!(!quotes_thread_root(&reply, &quote(8), true));
+        // A private reply's quote is another room's message with the same number.
+        let mut external = quote(7);
+        external.external = true;
+        assert!(!quotes_thread_root(&reply, &external, true));
+        reply.metadata.thread = None;
+        assert!(!quotes_thread_root(&reply, &quote(7), true));
+    }
+
+    #[test]
+    fn a_thread_title_shows_above_its_root_unless_the_message_begins_with_it() {
+        let mut root = authored_message(7, Some("users:one"), 32_400);
+        root.metadata.thread = Some(7);
+        root.metadata.thread_title = Some(Text::new("Release plan").unwrap());
+        root.body = Text::new("Who takes which platform?").unwrap();
+        assert_eq!(shown_thread_title(&root, false), Some("Release plan"));
+        // The thread pane names the thread in its heading.
+        assert_eq!(shown_thread_title(&root, true), None);
+        for body in [
+            "Release plan",
+            "release   plan: who takes which platform?",
+            "**Release plan**\nWho takes which platform?",
+            "# Release plan\n\nDetails",
+        ] {
+            root.body = Text::new(body).unwrap();
+            assert_eq!(shown_thread_title(&root, false), None, "{body}");
+        }
+        // A title the server cut off still matches the beginning.
+        root.metadata.thread_title = Some(Text::new("Release pl…").unwrap());
+        root.body = Text::new("Release plan for the next version").unwrap();
+        assert_eq!(shown_thread_title(&root, false), None);
+        root.body = Text::new("Something else").unwrap();
+        assert_eq!(shown_thread_title(&root, false), Some("Release pl…"));
+        // Replies carry the title too; only the root shows it.
+        root.metadata.thread = Some(6);
+        assert_eq!(shown_thread_title(&root, false), None);
+        root.metadata.thread = Some(7);
+        root.metadata.deleted = true;
+        assert_eq!(shown_thread_title(&root, false), None);
+        root.metadata.deleted = false;
+        root.metadata.thread_title = Some(Text::new("  ").unwrap());
+        assert_eq!(shown_thread_title(&root, false), None);
     }
 
     #[test]

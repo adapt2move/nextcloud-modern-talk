@@ -507,8 +507,26 @@ impl NextcloudClient {
                 })
                 .map_err(|_| self.error(ErrorKind::TooLarge))?;
         }
+        let author_bot = message
+            .actor_type
+            .as_deref()
+            .is_some_and(|kind| automated_actor(kind, message.actor_id.as_deref().unwrap_or("")));
         let mut rich = Page::empty();
         for r in &message.rich {
+            // Talk's system-message parser resolves every actor that is not a
+            // guest, phone or federated user as a local account, so a bot becomes
+            // the placeholder for a deleted account. The message itself carries
+            // the bot's name.
+            let name = if author_bot
+                && r.placeholder == "actor"
+                && r.kind == "highlight"
+                && r.id.as_deref() == Some("deleted_users")
+                && !message.author.trim().is_empty()
+            {
+                message.author.as_str()
+            } else {
+                r.name.as_str()
+            };
             rich.try_push(RichObject {
                 id: r
                     .id
@@ -526,7 +544,7 @@ impl NextcloudClient {
                 placeholder: Text::new(&r.placeholder)
                     .map_err(|_| self.error(ErrorKind::TooLarge))?,
                 kind: Text::new(&r.kind).map_err(|_| self.error(ErrorKind::TooLarge))?,
-                name: Text::new(&r.name).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                name: Text::new(name).map_err(|_| self.error(ErrorKind::TooLarge))?,
                 link: r
                     .link
                     .as_ref()
@@ -574,6 +592,12 @@ impl NextcloudClient {
             // root owns the reply footer; a reply ID is not a thread ID.
             .filter(|_| message.is_thread == Some(true) && message.thread_id == Some(message.id))
             .and_then(|count| u32::try_from(count).ok());
+        // Talk repeats the title on every message of a thread.
+        let thread_title = message
+            .thread_title
+            .as_deref()
+            .filter(|title| message.is_thread == Some(true) && !title.trim().is_empty())
+            .and_then(|title| Text::new(title).ok());
         let replyable = message.replyable;
         let system = message
             .system
@@ -597,6 +621,8 @@ impl NextcloudClient {
             parent,
             thread,
             thread_replies,
+            thread_title,
+            author_bot,
             reactions,
             rich,
             system,
@@ -2325,6 +2351,17 @@ fn reaction_counts(
         result.try_push(reaction).map_err(|_| ErrorKind::TooLarge)?;
     }
     Ok(result)
+}
+
+/// Talk's actor types for senders that are no person: installed bots, the
+/// Matterbridge relay and the reserved guest IDs of the command line, the system,
+/// the changelog and the sample conversations.
+fn automated_actor(kind: &str, actor: &str) -> bool {
+    match kind {
+        "bots" | "bridged" => true,
+        "guests" => matches!(actor, "cli" | "system" | "changelog" | "sample"),
+        _ => false,
+    }
 }
 
 /// A room-bound correlation value, not a permission or a wire identity.

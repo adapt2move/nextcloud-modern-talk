@@ -696,7 +696,11 @@ impl Desktop {
                     .gap_3()
                     .p_3()
                     .child(self.avatar_with_presence(
-                        self.person_avatar(&initials, 48.),
+                        if member.is_none() && message.is_some_and(|m| m.metadata.bot) {
+                            self.bot_avatar(48.)
+                        } else {
+                            self.person_avatar(&initials, 48.)
+                        },
                         state,
                         48.,
                         self.theme.surface,

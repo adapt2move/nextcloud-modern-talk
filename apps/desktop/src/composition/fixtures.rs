@@ -1126,6 +1126,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     message.reply_count = if message.local_id == 1 { 2 } else { 0 };
                     if message.local_id == 1 {
                         message.metadata.thread = Some(1);
+                        message.metadata.thread_title = Some(text("Design review"));
                         message.metadata.rich = Page::empty();
                         message.attachments = Page::empty();
                     }
@@ -1156,6 +1157,14 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             }
             let mut reply = message(40, "Mara Fischer", "MF", "10:00", "Das klingt gut.", false);
             reply.metadata.thread = Some(root);
+            // Talk quotes the root on every plain reply of a thread.
+            reply.metadata.parent = Some(talk_core::ui::messaging::Reply {
+                id: root,
+                external: false,
+                author: text("Alex Sommer"),
+                text: text("Thread-Anfang"),
+                unavailable: false,
+            });
             reply.metadata.author_key = Some(text("5:users:mara"));
             reply.metadata.replyable = true;
             reply.metadata.timestamp = 1_770_000_000;
@@ -1180,7 +1189,19 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             second.metadata.replyable = true;
             second.metadata.edit = Decision::Allowed;
             second.metadata.timestamp = 1_770_000_120;
-            panel.thread_messages = page([reply, second]);
+            let mut bot = message(
+                42,
+                "Build (Bot)",
+                "B",
+                "10:05",
+                "Der Entwurf wurde gebaut und steht zur Durchsicht bereit.",
+                false,
+            );
+            bot.metadata.thread = Some(root);
+            bot.metadata.bot = true;
+            bot.metadata.author_key = Some(text("5:bots:build"));
+            bot.metadata.timestamp = 1_770_000_300;
+            panel.thread_messages = page([reply, second, bot]);
         }
         return state;
     }

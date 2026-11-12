@@ -825,6 +825,8 @@ impl Desktop {
                 // the content owner still retires it on policy/expiry changes.
                 if targets.len() < MAX_IMAGES
                     && !message.own
+                    // A bot is drawn as a robot; the server has no picture of it.
+                    && !message.metadata.bot
                     && matches!(
                         message.delivery,
                         talk_core::ui::presentation::DeliveryState::Received
@@ -848,6 +850,47 @@ impl Desktop {
                             message: message.local_id,
                             placeholder: rich.placeholder.clone(),
                         }));
+                    }
+                }
+            }
+            // A reply has no row in the timeline. One request per author is
+            // enough: the other replies of that author reuse its picture.
+            if self
+                .thread_parent
+                .is_some_and(|(thread, _)| thread == context)
+                && let Some(panel) = self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .filter(|panel| panel.context == context)
+            {
+                let mut authors = Vec::new();
+                for message in panel.thread_messages.as_slice() {
+                    let Some(author) = message.metadata.author_key.as_ref() else {
+                        continue;
+                    };
+                    if message.own
+                        || message.metadata.bot
+                        || message.metadata.deleted
+                        || authors.contains(&author)
+                    {
+                        continue;
+                    }
+                    authors.push(author);
+                    let avatar = AssetTarget::MessageAvatar {
+                        context,
+                        message: message.local_id,
+                    };
+                    if targets.len() < MAX_IMAGES
+                        && !targets.contains(&avatar)
+                        && matches!(
+                            message.delivery,
+                            talk_core::ui::presentation::DeliveryState::Received
+                                | talk_core::ui::presentation::DeliveryState::ServerAccepted
+                        )
+                        && avatar_alias(&self.snapshot, &avatar).is_none()
+                    {
+                        targets.push(avatar);
                     }
                 }
             }
@@ -3461,14 +3504,22 @@ fn avatar_alias<'a>(
     message_avatar_alias(
         snapshot.content_panel.assets.as_slice(),
         snapshot.messages.as_slice(),
+        snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| panel.context == *context)
+            .map_or(&[][..], |panel| panel.thread_messages.as_slice()),
         *context,
         *message,
     )
 }
 
+/// `replies` are the rows of the open thread: a reply has no row in the
+/// timeline, and its author may have a picture there or on another reply.
 fn message_avatar_alias<'a>(
     assets: &'a [AssetView],
     rows: &[talk_core::ui::presentation::MessageView],
+    replies: &[talk_core::ui::presentation::MessageView],
     context: ConversationRef,
     message: u128,
 ) -> Option<&'a AssetView> {
@@ -3481,6 +3532,7 @@ fn message_avatar_alias<'a>(
     }
     let actor = rows
         .iter()
+        .chain(replies)
         .find(|m| m.local_id == message)?
         .metadata
         .author_key
@@ -3497,6 +3549,7 @@ fn message_avatar_alias<'a>(
             && matches!(a.state, AssetState::Ready { .. })
             && rows
                 .iter()
+                .chain(replies)
                 .any(|m| m.local_id == *source && m.metadata.author_key.as_ref() == Some(actor))
     })
 }
@@ -3677,20 +3730,24 @@ mod tests {
             avatar_message(2, Some("5:users:synthetic")),
         ];
         assert_eq!(
-            message_avatar_alias(std::slice::from_ref(&source), &rows, context, 2),
+            message_avatar_alias(std::slice::from_ref(&source), &rows, &[], context, 2),
             Some(&source)
         );
         rows[1].metadata.author_key = None;
-        assert!(message_avatar_alias(std::slice::from_ref(&source), &rows, context, 2).is_none());
+        assert!(
+            message_avatar_alias(std::slice::from_ref(&source), &rows, &[], context, 2).is_none()
+        );
         rows[1].metadata.author_key = Some(Text::new("6:guests:synthetic").unwrap());
         assert!(
-            message_avatar_alias(std::slice::from_ref(&source), &rows, context, 2).is_none(),
+            message_avatar_alias(std::slice::from_ref(&source), &rows, &[], context, 2).is_none(),
             "equal labels or IDs in another actor namespace are not identity"
         );
         rows[1].metadata.author_key = rows[0].metadata.author_key.clone();
         let mut other = context;
         other.account.runtime = RuntimeGeneration::from_local(2);
-        assert!(message_avatar_alias(std::slice::from_ref(&source), &rows, other, 2).is_none());
+        assert!(
+            message_avatar_alias(std::slice::from_ref(&source), &rows, &[], other, 2).is_none()
+        );
         for state in [
             AssetState::Denied,
             AssetState::Unsupported,
@@ -3707,12 +3764,14 @@ mod tests {
                 color: None,
                 document_pages: None,
             };
-            assert!(message_avatar_alias(&[source.clone(), target], &rows, context, 2).is_none());
+            assert!(
+                message_avatar_alias(&[source.clone(), target], &rows, &[], context, 2).is_none()
+            );
         }
         rows[0].metadata.deleted = true;
         rows[1].metadata.deleted = true;
         assert_eq!(
-            message_avatar_alias(std::slice::from_ref(&source), &rows, context, 2),
+            message_avatar_alias(std::slice::from_ref(&source), &rows, &[], context, 2),
             Some(&source),
             "tombstones retain a known actor's already admitted image without restoring message content"
         );

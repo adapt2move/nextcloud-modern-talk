@@ -2715,6 +2715,8 @@ mod tests {
                 parent: None,
                 thread: None,
                 thread_replies: None,
+                thread_title: None,
+                author_bot: false,
                 reactions: Page::empty(),
                 rich: Page::empty(),
                 system: None,

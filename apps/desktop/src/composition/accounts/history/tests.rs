@@ -1292,7 +1292,8 @@ fn pin_notice_classification_never_matches_localized_message_bodies() {
         assert!(message_view(&value).metadata.pin_notice);
         value.system = Some(text("file_shared"));
         assert!(!message_view(&value).metadata.pin_notice);
-        for tag in ["poll_voted", "poll_closed"] {
+        // The root of a thread already says that the thread exists.
+        for tag in ["poll_voted", "poll_closed", "thread_created"] {
             value.system = Some(text(tag));
             assert!(message_view(&value).metadata.pin_notice);
             value.message.kind = MessageKind::Comment;
@@ -1300,6 +1301,27 @@ fn pin_notice_classification_never_matches_localized_message_bodies() {
             value.message.kind = MessageKind::System;
         }
     }
+}
+
+#[test]
+fn bots_and_thread_titles_survive_projection_and_the_cache() {
+    let key = context(1, 1, 1, 1);
+    let mut value = message(key, 7, "Deployment finished");
+    value.author_bot = true;
+    value.thread = Some(value.message.id);
+    value.thread_title = Some(text("Deployments"));
+    let view = message_view(&value);
+    assert!(view.metadata.bot);
+    assert_eq!(
+        view.metadata.thread_title.as_ref().map(Text::as_str),
+        Some("Deployments")
+    );
+    let restored = restored_message(&cached_message(&view).expect("cacheable row"));
+    assert!(restored.metadata.bot);
+    assert_eq!(restored.metadata.thread_title, view.metadata.thread_title);
+    // A tombstone keeps no title of its former content.
+    value.message.kind = MessageKind::Deleted;
+    assert!(message_view(&value).metadata.thread_title.is_none());
 }
 
 #[test]
@@ -1486,6 +1508,8 @@ fn message(context: ConversationRef, id: u64, body: &str) -> MessageDetails {
         parent: None,
         thread: None,
         thread_replies: None,
+        thread_title: None,
+        author_bot: false,
         reactions: Page::empty(),
         rich: Page::empty(),
         system: None,

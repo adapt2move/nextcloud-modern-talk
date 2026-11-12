@@ -120,6 +120,12 @@ of complete parity with the official clients.
   follow its last message as read. A search hit or quote inside a thread scrolls
   to the thread's root when that is loaded and does not open the thread. The
   "new messages" divider is omitted when the first unread message is a thread reply.
+  The notice that a thread was created is hidden; a notice already in the local
+  cache stays until that part of the history is read again. A thread's title
+  shows above its root only when the message does not begin with it.
+- Bots, the Matterbridge relay and Talk's system senders get a robot picture,
+  recognized by the server's actor type. Messages cached by an older version
+  show initials until they are read again.
 - Message-level mark unread needs a live-proven preceding message; cached gaps
   do not establish adjacency. A conversation opens at its newest message; there
   is no jump to the first unread one. Account search shows at most two pages in

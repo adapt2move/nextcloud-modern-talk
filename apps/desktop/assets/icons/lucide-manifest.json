@@ -75,6 +75,14 @@
       "upstream_sha256": "394889e9631fe3a9a63be9a479a95b451b708e432d895978d21d9130b5ee5dbe"
     },
     {
+      "asset": "bot.svg",
+      "upstream_path": "icons/bot.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/bot.svg",
+      "sha256": "5405202f83c8c88994a2554b9acedc79ae588f56ea4587b91045c30b729e8b50",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "e46fe72fc5b33d7a17b0112df85da9ded851860312e8353f4fe23d87a4ce77f5"
+    },
+    {
       "asset": "browser.svg",
       "upstream_path": "icons/panels-top-left.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/panels-top-left.svg",

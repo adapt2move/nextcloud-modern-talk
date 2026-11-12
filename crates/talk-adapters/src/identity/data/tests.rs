@@ -124,6 +124,8 @@ fn message(id: u64) -> CachedMessage {
         parent: None,
         thread: None,
         thread_replies: 0,
+        thread_title: None,
+        bot: false,
         reactions: page([CachedReaction {
             emoji: text("❤️"),
             count: 1,

@@ -1756,6 +1756,8 @@ fn cached_message(message: &MessageView) -> Option<CachedMessage> {
             .thread
             .and_then(|id| u64::try_from(id).ok()),
         thread_replies: message.reply_count,
+        thread_title: message.metadata.thread_title.clone(),
+        bot: message.metadata.bot,
         reactions: page(
             message
                 .metadata
@@ -1840,6 +1842,8 @@ fn restored_message(message: &CachedMessage) -> MessageView {
                     unavailable: p.unavailable,
                 }),
             thread: message.thread.map(u128::from),
+            thread_title: message.thread_title.clone(),
+            bot: message.bot,
             reactions: page(message.reactions.as_slice().iter().map(|r| {
                 talk_core::ui::messaging::Reaction {
                     emoji: r.emoji.clone(),

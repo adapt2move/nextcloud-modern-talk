@@ -46,6 +46,11 @@ pub struct MessageDetails {
     pub thread: Option<MessageId>,
     /// Number of replies when the server identifies this message as a thread root.
     pub thread_replies: Option<u32>,
+    /// Title of the thread this message belongs to, as the thread service reports it.
+    pub thread_title: Option<Text<256>>,
+    /// The author is an automated sender (a Talk bot, bridge or system account),
+    /// classified from the actor type and never from the display name.
+    pub author_bot: bool,
     pub reactions: Page<Reaction, 64>,
     pub rich: Page<RichObject, 32>,
     pub system: Option<Text<128>>,

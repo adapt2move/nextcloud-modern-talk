@@ -2587,9 +2587,14 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
             system_event: system_event(m),
             pin_notice: m.message.kind == protocol::MessageKind::System
                 && m.system.as_ref().is_some_and(|kind| {
+                    // The root of a thread already says that the thread exists.
                     matches!(
                         kind.as_str(),
-                        "message_pinned" | "message_unpinned" | "poll_voted" | "poll_closed"
+                        "message_pinned"
+                            | "message_unpinned"
+                            | "poll_voted"
+                            | "poll_closed"
+                            | "thread_created"
                     )
                 }),
             read_through: None,
@@ -2607,6 +2612,8 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
                 unavailable: p.unavailable,
             }),
             thread: m.thread.map(|m| u128::from(m.sequence)),
+            thread_title: m.thread_title.clone().filter(|_| !deleted),
+            bot: m.author_bot,
             reactions: page(m.reactions.as_slice().iter().map(|r| view::Reaction {
                 emoji: r.emoji.clone(),
                 count: r.count,
@@ -2874,6 +2881,8 @@ mod tests {
             parent: None,
             thread: None,
             thread_replies: Some(3),
+            thread_title: None,
+            author_bot: false,
             reactions: Page::empty(),
             rich: Page::empty(),
             system: None,
@@ -3069,6 +3078,8 @@ mod tests {
             parent: None,
             thread: None,
             thread_replies: None,
+            thread_title: None,
+            author_bot: false,
             reactions: Page::empty(),
             rich: Page::empty(),
             system: None,
@@ -3258,6 +3269,8 @@ mod immediate_send_tests {
                 parent: None,
                 thread: None,
                 thread_replies: None,
+                thread_title: None,
+                author_bot: false,
                 reactions: Page::empty(),
                 rich: Page::empty(),
                 system: None,

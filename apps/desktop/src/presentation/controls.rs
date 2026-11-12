@@ -1615,6 +1615,14 @@ impl Desktop {
             .justify_center()
     }
 
+    /// Picture of an automated sender. A bot has no profile picture and its
+    /// initials would read as a person's.
+    pub(super) fn bot_avatar(&self, size: f32) -> Div {
+        self.avatar_shape(size)
+            .bg(self.theme.selected)
+            .child(self.scaled_icon("bot", size * 0.62, self.theme.accent))
+    }
+
     pub(super) fn presence_indicator(&self, color: Hsla, background: Hsla) -> Div {
         div()
             .flex_none()

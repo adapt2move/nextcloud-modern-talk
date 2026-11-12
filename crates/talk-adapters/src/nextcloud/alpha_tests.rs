@@ -1791,3 +1791,94 @@ async fn breakout_modes_assignments_and_broadcast_use_scoped_rooms() {
         assert!(String::from_utf8_lossy(&seen[9]).contains("/breakout-rooms/testroom/broadcast"));
     }
 }
+
+#[tokio::test]
+async fn a_bot_is_named_in_its_system_messages_and_marked_as_automated() {
+    let mut created = message(43);
+    created["actorType"] = json!("bots");
+    created["actorId"] = json!("bot-a78f46c5c203141b247554e180e1aa3553d282c6");
+    created["actorDisplayName"] = json!("Deploy (Bot)");
+    created["messageType"] = json!("system");
+    created["systemMessage"] = json!("thread_created");
+    created["message"] = json!("{actor} created thread {title}");
+    // Talk's system-message parser resolves a bot as a missing local account.
+    created["messageParameters"] = json!({
+        "actor": {"type": "highlight", "id": "deleted_users", "name": "Deleted user"},
+        "title": {"type": "highlight", "id": "thread/42", "name": "Deployments"}
+    });
+    let mut root = message(42);
+    root["actorType"] = json!("bots");
+    root["actorId"] = json!("bot-a78f46c5c203141b247554e180e1aa3553d282c6");
+    root["actorDisplayName"] = json!("Deploy (Bot)");
+    root["threadId"] = json!(42);
+    root["isThread"] = json!(true);
+    root["threadTitle"] = json!("Deployments");
+    root["threadReplies"] = json!(0);
+    // A person whose account is gone keeps the server's placeholder.
+    let mut left = message(41);
+    left["actorType"] = json!("deleted_users");
+    left["actorId"] = json!("deleted_users");
+    left["actorDisplayName"] = json!("");
+    left["messageType"] = json!("system");
+    left["systemMessage"] = json!("user_removed");
+    left["message"] = json!("{actor} left");
+    left["messageParameters"] =
+        json!({"actor": {"type": "highlight", "id": "deleted_users", "name": "Deleted user"}});
+    let server = Server::start(vec![
+        Reply::data(features(&["threads", "chat-replies"])),
+        Reply::data(room()),
+        Reply::data(json!([created, root, left])),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let conversation = bind(&mut client);
+    let ProtocolReply::Messaging {
+        result: R::Messages { messages, .. },
+        ..
+    } = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::Messaging {
+                conversation,
+                operation: OperationId::from_local(1),
+                command: M::History {
+                    before: None,
+                    thread: None,
+                },
+            },
+        )
+        .await
+        .expect("history")
+    else {
+        panic!("history")
+    };
+    let by_id = |sequence: u64| {
+        messages
+            .as_slice()
+            .iter()
+            .find(|details| details.message.id.sequence == sequence)
+            .expect("message")
+    };
+    let actor = |sequence: u64| {
+        by_id(sequence)
+            .rich
+            .as_slice()
+            .iter()
+            .find(|object| object.placeholder.as_str() == "actor")
+            .expect("actor")
+            .name
+            .as_str()
+            .to_owned()
+    };
+    assert_eq!(actor(43), "Deploy (Bot)");
+    assert!(by_id(43).author_bot);
+    assert!(by_id(42).author_bot);
+    assert_eq!(
+        by_id(42).thread_title.as_ref().map(|title| title.as_str()),
+        Some("Deployments")
+    );
+    assert_eq!(actor(41), "Deleted user");
+    assert!(!by_id(41).author_bot);
+    assert!(by_id(41).thread_title.is_none());
+}

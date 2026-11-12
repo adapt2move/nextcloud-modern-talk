@@ -41,6 +41,8 @@ fn details(context: ConversationRef, id: u64, body: &str) -> wire::MessageDetail
         parent: None,
         thread: None,
         thread_replies: None,
+        thread_title: None,
+        author_bot: false,
         reactions: Page::empty(),
         rich: Page::empty(),
         system: None,

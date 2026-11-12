@@ -213,6 +213,10 @@ pub struct CachedMessage {
     pub thread: Option<u64>,
     #[serde(default)]
     pub thread_replies: u16,
+    #[serde(default, with = "codec::optional_text")]
+    pub thread_title: Option<Text<256>>,
+    #[serde(default)]
+    pub bot: bool,
     #[serde(with = "codec::page")]
     pub reactions: Page<CachedReaction, 64>,
     #[serde(default = "Page::empty", with = "codec::page")]

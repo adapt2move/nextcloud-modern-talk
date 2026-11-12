@@ -133,6 +133,10 @@ pub struct MessageMetadata {
     pub replyable: bool,
     pub parent: Option<Reply>,
     pub thread: Option<u128>,
+    /// Title of the thread, carried by its root and its replies.
+    pub thread_title: Option<Text<256>>,
+    /// An automated sender; it gets a robot picture instead of a person's.
+    pub bot: bool,
     pub reactions: Page<Reaction, 64>,
     pub rich: Page<RichObject, 32>,
     pub edit: Decision,
@@ -159,6 +163,8 @@ impl Default for MessageMetadata {
             replyable: false,
             parent: None,
             thread: None,
+            thread_title: None,
+            bot: false,
             reactions: Page::empty(),
             rich: Page::empty(),
             edit: Decision::Unknown,
