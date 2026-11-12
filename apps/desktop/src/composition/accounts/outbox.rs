@@ -996,7 +996,7 @@ impl Accounts {
             A::MarkRead(message) => id(self
                 .history
                 .get(context)
-                .map_or(*message, |h| h.read_through_pin_notices(*message)))
+                .map_or(*message, |h| h.read_through_hidden(*message)))
             .map(|message| Intent::MarkRead { message }),
             A::MarkUnread => Ok(Intent::MarkUnread),
             A::RenameThread { root, title } => id(*root).map(|root| Intent::RenameThread {

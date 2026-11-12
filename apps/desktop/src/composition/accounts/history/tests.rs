@@ -585,7 +585,7 @@ fn metadata_warmup_repairs_legacy_cache_without_new_messages_or_read_side_effect
     );
     assert!(room.read_edges.is_empty());
     assert_eq!(room.read_tail, None);
-    assert_eq!(room.read_through_pin_notices(7), 7);
+    assert_eq!(room.read_through_hidden(7), 7);
     assert!(!room.read_reaches_latest(8));
     assert_eq!(room.metadata_before(now), None);
     assert_eq!(room.state, RemoteState::Idle);
@@ -940,13 +940,13 @@ fn hidden_tail_repair_at_capacity_keeps_the_recovered_visible_anchor() {
         assert_eq!(room.messages.as_slice().len(), 100);
     }
     let room = cache.get(key).unwrap();
-    assert_eq!(room.read_through_pin_notices(49), 149);
+    assert_eq!(room.read_through_hidden(49), 149);
     assert_eq!(room.read_tail, Some((148, 149)));
     assert_eq!(room.poll_cursor(Instant::now()), Some(149));
     assert!(room.read_reaches_latest(149));
     // A normal empty poll retains the live proof, with no second message page.
     complete(&mut cache, key, 6, Work::Poll, messages(key, [], Some(149)));
-    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(49), 149);
+    assert_eq!(cache.get(key).unwrap().read_through_hidden(49), 149);
     for (serial, id) in [(7, 150), (8, 151)] {
         complete(
             &mut cache,
@@ -958,7 +958,7 @@ fn hidden_tail_repair_at_capacity_keeps_the_recovered_visible_anchor() {
         let room = cache.get(key).unwrap();
         assert_eq!(room.visible_messages().as_slice()[0].local_id, 49);
         assert_eq!(room.messages.as_slice().len(), 100);
-        assert_eq!(room.read_through_pin_notices(49), u128::from(id));
+        assert_eq!(room.read_through_hidden(49), u128::from(id));
         assert_eq!(room.read_tail, Some((148, u128::from(id))));
         assert_eq!(room.latest, Some(u128::from(id)));
     }
@@ -1042,7 +1042,7 @@ fn restored_hidden_tail_requires_a_bounded_live_poll_before_read_extension() {
     let now = Instant::now();
     let room = cache.get(key).unwrap();
     assert_eq!(room.latest, Some(8));
-    assert_eq!(room.read_through_pin_notices(7), 7);
+    assert_eq!(room.read_through_hidden(7), 7);
     assert_eq!(room.poll_cursor(now), Some(7));
     let operation = admit(&mut cache, key, 2, Work::Poll);
     cache.poll_admitted(key, operation, 7);
@@ -1064,7 +1064,7 @@ fn restored_hidden_tail_requires_a_bounded_live_poll_before_read_extension() {
         false
     ));
     let room = cache.get(key).unwrap();
-    assert_eq!(room.read_through_pin_notices(7), 8);
+    assert_eq!(room.read_through_hidden(7), 8);
     assert_eq!(room.poll_cursor(now + Duration::from_secs(31)), Some(8));
     assert_eq!(
         room.visible_messages().as_slice()[0].metadata.read_through,
@@ -1171,9 +1171,9 @@ fn pin_notices_are_hidden_without_losing_cursors_cache_or_read_barriers() {
     );
     assert_eq!(room.messages.as_slice().len(), 5);
     assert_eq!(room.latest, Some(11));
-    assert_eq!(room.read_through_pin_notices(7), 9);
-    assert_eq!(room.read_through_pin_notices(10), 11);
-    assert_eq!(room.read_through_pin_notices(6), 6);
+    assert_eq!(room.read_through_hidden(7), 9);
+    assert_eq!(room.read_through_hidden(10), 11);
+    assert_eq!(room.read_through_hidden(6), 6);
     let durable = cache
         .durable(
             key,
@@ -1205,7 +1205,7 @@ fn pin_notices_are_hidden_without_losing_cursors_cache_or_read_barriers() {
         Work::Poll,
         messages(key, [notice(8, "message_pinned")], Some(11)),
     );
-    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(7), 9);
+    assert_eq!(cache.get(key).unwrap().read_through_hidden(7), 9);
 }
 
 #[test]
@@ -1248,7 +1248,7 @@ fn later_pin_notices_advance_the_painted_read_target_only_across_observed_pages(
         Work::Poll,
         messages(key, [notice(10)], Some(10)),
     );
-    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(7), 10);
+    assert_eq!(cache.get(key).unwrap().read_through_hidden(7), 10);
     // A newest-page fetch does not establish continuity from event cursor 10.
     complete(
         &mut cache,
@@ -1257,7 +1257,7 @@ fn later_pin_notices_advance_the_painted_read_target_only_across_observed_pages(
         Work::Latest,
         messages(key, [notice(15)], Some(15)),
     );
-    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(7), 10);
+    assert_eq!(cache.get(key).unwrap().read_through_hidden(7), 10);
     // Observing the missing ordinary row still cannot acknowledge it by
     // reading the earlier row, even when a later poll proves adjacency.
     complete(
@@ -1271,8 +1271,8 @@ fn later_pin_notices_advance_the_painted_read_target_only_across_observed_pages(
             Some(17),
         ),
     );
-    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(7), 10);
-    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(16), 17);
+    assert_eq!(cache.get(key).unwrap().read_through_hidden(7), 10);
+    assert_eq!(cache.get(key).unwrap().read_through_hidden(16), 17);
     assert!(cache.get(key).unwrap().read_edges.len() <= 99);
 }
 
@@ -3795,4 +3795,208 @@ fn translations_follow_the_live_older_thread_page_and_main_tombstones_win() {
     room.open_thread = None;
     room.project(&mut panel);
     assert!(panel.translations.as_slice().is_empty());
+}
+
+fn thread_root(key: ConversationRef, id: u64, body: &str) -> MessageDetails {
+    let mut root = message(key, id, body);
+    root.thread = Some(root.message.id);
+    root.thread_replies = Some(1);
+    root
+}
+fn thread_reply_to(key: ConversationRef, root: u64, id: u64, body: &str) -> MessageDetails {
+    let mut reply = message(key, id, body);
+    reply.thread = Some(MessageId {
+        conversation: key.conversation,
+        sequence: root,
+    });
+    reply
+}
+
+#[test]
+fn thread_replies_stay_out_of_the_main_timeline_but_keep_cursors_and_read_state() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(
+            key,
+            [
+                thread_root(key, 7, "Root"),
+                thread_reply_to(key, 7, 8, "First reply"),
+                message(key, 9, "Main timeline"),
+                thread_reply_to(key, 7, 10, "Second reply"),
+            ],
+            Some(10),
+        ),
+    );
+    let ids = |room: &History| {
+        room.visible_messages()
+            .as_slice()
+            .iter()
+            .map(|message| message.local_id)
+            .collect::<Vec<_>>()
+    };
+    let room = cache.get(key).unwrap();
+    // The root is its own thread and keeps its row; replies do not get one.
+    assert_eq!(ids(room), [7, 9]);
+    assert_eq!(room.messages.as_slice().len(), 4);
+    assert_eq!(room.related_messages().as_slice().len(), 4);
+    assert_eq!(room.latest, Some(10));
+    // A room that ends in a thread reply can still be read to its end, but a
+    // read never passes the next visible message.
+    assert_eq!(room.read_through_hidden(7), 8);
+    assert_eq!(room.read_through_hidden(9), 10);
+    assert_eq!(
+        room.visible_messages().as_slice()[1].metadata.read_through,
+        Some(10)
+    );
+
+    // A live reply changes neither the timeline's rows nor its place, extends
+    // the read target and asks for the root's footer at the next tick.
+    cache.get_mut(key).unwrap().thread_activity_requested = Some(Instant::now());
+    assert!(
+        !cache
+            .get(key)
+            .unwrap()
+            .needs_thread_activity(Instant::now())
+    );
+    let poll = admit(&mut cache, key, 2, Work::Poll);
+    cache.poll_admitted(key, poll, 10);
+    assert!(cache.complete(
+        key,
+        poll,
+        Work::Poll,
+        RequestId(2),
+        &Ok(messages(
+            key,
+            [thread_reply_to(key, 7, 11, "Live reply")],
+            Some(11)
+        )),
+        false
+    ));
+    let room = cache.get(key).unwrap();
+    assert_eq!(ids(room), [7, 9]);
+    assert_eq!(room.read_through_hidden(9), 11);
+    assert_eq!(room.latest, Some(11));
+    assert!(room.needs_thread_activity(Instant::now()));
+
+    // The restored cache hides the same rows.
+    let durable = cache
+        .durable(
+            key,
+            NavigationRoomKey::new("r1:00000000000000000000000000000001").unwrap(),
+            now_unix(),
+        )
+        .unwrap();
+    let restored = context(1, 0, 0, 1);
+    let mut next = Cache::default();
+    next.restore(restored, &durable);
+    assert_eq!(ids(next.get(restored).unwrap()), [7, 9]);
+}
+
+#[test]
+fn a_live_thread_reply_and_its_edit_reach_the_open_thread_only() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    complete(
+        &mut model.history,
+        key,
+        1,
+        Work::History,
+        messages(
+            key,
+            [
+                thread_root(key, 7, "Root"),
+                thread_reply_to(key, 7, 8, "First reply"),
+                message(key, 9, "Main timeline"),
+            ],
+            Some(9),
+        ),
+    );
+    model.project_history(key);
+    let timeline = |model: &Accounts| {
+        model
+            .snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .map(|message| message.local_id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(timeline(&model), [7, 9]);
+
+    let thread = admit_target(&mut model, key, 2, Work::Thread);
+    model.apply_message(
+        RequestId(2),
+        key,
+        thread,
+        Work::Thread,
+        reply(
+            key,
+            thread,
+            messages(key, [thread_reply_to(key, 7, 8, "First reply")], None),
+        ),
+    );
+    let poll = admit(&mut model.history, key, 3, Work::Poll);
+    model.history.poll_admitted(key, poll, 9);
+    model.apply_message(
+        RequestId(3),
+        key,
+        poll,
+        Work::Poll,
+        reply(
+            key,
+            poll,
+            messages(
+                key,
+                [
+                    thread_reply_to(key, 7, 8, "First reply, edited"),
+                    thread_reply_to(key, 7, 10, "Live reply"),
+                ],
+                Some(10),
+            ),
+        ),
+    );
+    assert_eq!(timeline(&model), [7, 9]);
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(
+        panel
+            .thread_messages
+            .as_slice()
+            .iter()
+            .map(|message| (message.local_id, message.body.as_str()))
+            .collect::<Vec<_>>(),
+        [(8, "First reply, edited"), (10, "Live reply")]
+    );
+
+    // A search hit or quote inside the thread lands on the thread's root.
+    let located = admit_target(&mut model, key, 4, Work::Context(10));
+    model.apply_message(
+        RequestId(4),
+        key,
+        located,
+        Work::Context(10),
+        reply(
+            key,
+            located,
+            messages(
+                key,
+                [
+                    message(key, 9, "Main timeline"),
+                    thread_reply_to(key, 7, 10, "Live reply"),
+                ],
+                None,
+            ),
+        ),
+    );
+    assert_eq!(
+        model.snapshot.message_panel.as_ref().unwrap().located,
+        Some((RequestId(4), 7))
+    );
+    assert_eq!(timeline(&model), [7, 9]);
 }

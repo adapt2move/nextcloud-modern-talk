@@ -771,7 +771,7 @@ impl Accounts {
             V::MarkRead(id) => V::MarkRead(
                 self.history
                     .get(context)
-                    .map_or(id, |history| history.read_through_pin_notices(id)),
+                    .map_or(id, |history| history.read_through_hidden(id)),
             ),
             other => other,
         };
@@ -1588,11 +1588,18 @@ impl Accounts {
         self.history.expire(history::now_unix());
         self.observed_deliberate_read(context, work, result.is_ok());
         self.project_history(context);
-        let canonical_messages = self
+        let related_messages = self
             .history
             .get(context)
-            .map(|history| history.visible_messages())
+            .map(|history| history.related_messages())
             .unwrap_or_else(|| self.snapshot.messages.clone());
+        let canonical_messages: Page<MessageView, 100> = page(
+            related_messages
+                .as_slice()
+                .iter()
+                .filter(|message| !history::thread_reply(message))
+                .cloned(),
+        );
         let changed: Vec<u128> = match &result {
             Ok(wire::MessagingResult::Messages { messages, .. })
                 if matches!(
@@ -1653,7 +1660,7 @@ impl Accounts {
                                 .iter()
                                 .map(message_view)
                                 .filter(|message| {
-                                    message.local_id > marker && !message.metadata.pin_notice
+                                    message.local_id > marker && !history::hidden(message)
                                 })
                                 .min_by_key(|message| message.local_id)
                             {
@@ -1662,12 +1669,17 @@ impl Accounts {
                                 completion = Completion::Failed(UnavailableReason::PolicyUnknown);
                             }
                         } else if let Work::Context(id) = work {
-                            if messages
+                            if let Some(target) = messages
                                 .as_slice()
                                 .iter()
-                                .any(|m| u128::from(m.message.id.sequence) == id)
+                                .find(|m| u128::from(m.message.id.sequence) == id)
                             {
-                                panel.located = Some((request, id));
+                                // A thread reply has no row in the main timeline;
+                                // its root is the nearest place to land.
+                                let row = target
+                                    .thread
+                                    .map_or(id, |thread| u128::from(thread.sequence));
+                                panel.located = Some((request, row));
                             } else {
                                 completion = Completion::Failed(UnavailableReason::PolicyUnknown);
                             }
@@ -2019,7 +2031,7 @@ impl Accounts {
                 result: completion,
             });
         }
-        reconcile_related(panel, &canonical_messages, &changed);
+        reconcile_related(panel, &related_messages, &changed);
         let open_thread = panel.thread_root.map(|root| {
             (
                 root,

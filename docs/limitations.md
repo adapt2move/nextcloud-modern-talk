@@ -110,7 +110,12 @@ of complete parity with the official clients.
   Account-wide discovery lists server-returned subscriptions in known rooms and
   is session-only. Unread is inferred from room read markers. Reply pages hold
   50 messages; thread attachments and typing are unavailable. An ordinary message
-  cannot be converted into a thread through the implemented API.
+  cannot be converted into a thread through the implemented API. Thread replies
+  appear only in their thread; the main timeline shows the root with its reply
+  count. Reading the main timeline to its end also marks the thread replies that
+  follow its last message as read. A search hit or quote inside a thread scrolls
+  to the thread's root when that is loaded and does not open the thread. The
+  "new messages" divider is omitted when the first unread message is a thread reply.
 - Message-level mark unread needs a live-proven preceding message; cached gaps
   do not establish adjacency. A conversation opens at its newest message; there
   is no jump to the first unread one. Account search shows at most two pages in

@@ -347,40 +347,50 @@ impl History {
             .filter(|thread| thread.root == root)
             .and_then(|thread| thread.root_message.as_ref())
     }
+    /// The main timeline. A thread reply belongs to its thread's pane; the root
+    /// keeps its row here and reports the replies in its footer.
     pub(super) fn visible_messages(&self) -> Page<MessageView, 100> {
-        page(
-            self.messages
-                .as_slice()
-                .iter()
-                .filter(|message| !message.metadata.pin_notice)
-                .map(|message| {
-                    let mut visible = message.clone();
-                    if let Some(activity) = self
-                        .thread_activity
+        page(self.projected().filter(|message| !thread_reply(message)))
+    }
+    /// The main timeline's rows and the thread replies beside them. Excerpts in
+    /// the thread pane, pins and search reconcile edits and deletions from these.
+    pub(super) fn related_messages(&self) -> Page<MessageView, 100> {
+        page(self.projected())
+    }
+    /// Retained rows with their current reply count and read targets. Pin
+    /// activity is left to its banner and marker.
+    fn projected(&self) -> impl Iterator<Item = MessageView> + '_ {
+        self.messages
+            .as_slice()
+            .iter()
+            .filter(|message| !message.metadata.pin_notice)
+            .map(|message| {
+                let mut visible = message.clone();
+                if let Some(activity) = self
+                    .thread_activity
+                    .as_slice()
+                    .iter()
+                    .find(|activity| activity.root == message.local_id)
+                    && !message.metadata.deleted
+                {
+                    visible.reply_count = activity.replies;
+                } else if let Some(rows) = self.thread(message.local_id)
+                    && !message.metadata.deleted
+                {
+                    let loaded = rows
                         .as_slice()
                         .iter()
-                        .find(|activity| activity.root == message.local_id)
-                        && !message.metadata.deleted
-                    {
-                        visible.reply_count = activity.replies;
-                    } else if let Some(rows) = self.thread(message.local_id)
-                        && !message.metadata.deleted
-                    {
-                        let loaded = rows
-                            .as_slice()
-                            .iter()
-                            .filter(|row| row.local_id != message.local_id)
-                            .count();
-                        visible.reply_count = visible
-                            .reply_count
-                            .max(u16::try_from(loaded).unwrap_or(u16::MAX));
-                    }
-                    let target = self.read_through_pin_notices(message.local_id);
-                    visible.metadata.read_through = (target != message.local_id).then_some(target);
-                    visible.metadata.unread_after = self.predecessor(message.local_id);
-                    visible
-                }),
-        )
+                        .filter(|row| row.local_id != message.local_id)
+                        .count();
+                    visible.reply_count = visible
+                        .reply_count
+                        .max(u16::try_from(loaded).unwrap_or(u16::MAX));
+                }
+                let target = self.read_through_hidden(message.local_id);
+                visible.metadata.read_through = (target != message.local_id).then_some(target);
+                visible.metadata.unread_after = self.predecessor(message.local_id);
+                visible
+            })
     }
 
     pub(super) fn thread(&self, root: u128) -> Option<&Page<MessageView, 50>> {
@@ -419,10 +429,12 @@ impl History {
             })
     }
 
-    /// Invisible pin activity carries no additional user content. A deliberate
-    /// read of its preceding visible row may include only that adjacent run,
-    /// never the next ordinary message or an unloaded server gap.
-    pub(super) fn read_through_pin_notices(&self, id: u128) -> u128 {
+    /// Rows without a place in the main timeline cannot be read there: pin
+    /// activity carries no user content, and a thread reply is shown in its
+    /// thread only. A deliberate read of the preceding visible row may include
+    /// only that adjacent run, never the next visible message or an unloaded
+    /// server gap. Otherwise a room that ends in such rows stays unread.
+    pub(super) fn read_through_hidden(&self, id: u128) -> u128 {
         let Some(index) = self
             .messages
             .as_slice()
@@ -433,10 +445,7 @@ impl History {
         };
         let mut target = id;
         for message in self.messages.as_slice().iter().skip(index + 1) {
-            if !message.metadata.system
-                || !message.metadata.pin_notice
-                || !self.read_edges.contains(&(target, message.local_id))
-            {
+            if !hidden(message) || !self.read_edges.contains(&(target, message.local_id)) {
                 break;
             }
             target = message.local_id;
@@ -502,15 +511,17 @@ impl History {
             .as_slice()
             .iter()
             .rev()
-            .find(|message| !message.metadata.pin_notice)
+            .find(|message| !hidden(message))
             .map(|message| message.local_id)
         else {
             return Some(latest);
         };
-        let through = self.read_through_pin_notices(last_visible);
-        let unknown_tail = self.messages.as_slice().last().is_some_and(|message| {
-            message.metadata.system && message.metadata.pin_notice && message.local_id > through
-        });
+        let through = self.read_through_hidden(last_visible);
+        let unknown_tail = self
+            .messages
+            .as_slice()
+            .last()
+            .is_some_and(|message| hidden(message) && message.local_id > through);
         if unknown_tail
             && self.tail_probe.is_none_or(|(cursor, at)| {
                 cursor != through || now.saturating_duration_since(at) >= Duration::from_secs(30)
@@ -1510,22 +1521,19 @@ impl Cache {
                     .collect();
                 let mut observed: Vec<_> = incoming
                     .iter()
-                    .map(|message| {
-                        (
-                            message.local_id,
-                            message.metadata.system && message.metadata.pin_notice,
-                        )
-                    })
+                    .map(|message| (message.local_id, hidden(message)))
                     .collect();
                 observed.sort_unstable_by_key(|row| row.0);
                 observed.dedup_by_key(|row| row.0);
                 // Invisible activity must not evict the reader's visible
                 // anchor. Its verified continuation uses only the ID proof
                 // below; the retained message window stays capped at 100.
-                let hidden_poll = work == Work::Poll
-                    && incoming
-                        .iter()
-                        .all(|message| message.metadata.system && message.metadata.pin_notice);
+                let hidden_poll = work == Work::Poll && incoming.iter().all(hidden);
+                // A reply that arrives now shows only in its root's footer. Read
+                // the thread activity at the next tick, not after the cooldown.
+                if work == Work::Poll && incoming.iter().any(thread_reply) {
+                    room.thread_activity_requested = None;
+                }
                 room.merge(
                     incoming.into_iter(),
                     flight.version,
@@ -1589,11 +1597,11 @@ impl Cache {
             Ok(MessagingResult::Message(message)) => {
                 // A confirmed local edit/delete outranks every read already
                 // admitted at completion, including a later-started slow poll.
-                room.merge(
-                    std::iter::once(message_view(message)),
-                    mutation_version,
-                    false,
-                );
+                let message = message_view(message);
+                if thread_reply(&message) {
+                    room.thread_activity_requested = None;
+                }
+                room.merge(std::iter::once(message), mutation_version, false);
             }
             Ok(MessagingResult::Reactions { message, reactions }) if matches!(work, Work::Reaction(target) if target == u128::from(message.sequence)) =>
             {
@@ -1868,6 +1876,18 @@ fn restored_system_event(system: bool, code: Option<&Text<32>>) -> SystemEvent {
     }
 }
 
+/// A reply inside a server thread. The root carries its own ID as thread ID.
+pub(super) fn thread_reply(message: &MessageView) -> bool {
+    message
+        .metadata
+        .thread
+        .is_some_and(|root| root != message.local_id)
+}
+/// Canonical for cursors, cache and read state, but without a row in the main
+/// timeline: pin and poll activity, and replies that belong to a thread.
+pub(super) fn hidden(message: &MessageView) -> bool {
+    message.metadata.system && message.metadata.pin_notice || thread_reply(message)
+}
 pub(super) fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
