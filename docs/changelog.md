@@ -2,6 +2,20 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.25 alpha (2026-11-12)
+
+### Features
+
+- **calls:** Show the guest link among the call controls, selectable as text (`191edf9`)
+
+### Fixes
+
+- **threads:** Tidy the thread pane, show thread titles and give bots a name and a robot picture (`4f524b4`)
+- **calls:** Let the speaking ring follow the voice and ring only the microphone in the dock (`6f8bc12`)
+- **chat:** Show no card for a link the server could not read (`fab3afe`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.25/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.25/docs/limitations.md)
+
 ## v0.0.24 alpha (2026-11-12)
 
 ### Fixes
