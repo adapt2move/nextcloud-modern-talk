@@ -62,7 +62,10 @@ impl Desktop {
                             self.dialog_header()
                                 .gap_1()
                                 .py_3()
-                                .child(self.thread_heading(cx))
+                                // Beside the title: 12 next to the panel, its border,
+                                // 16 of header padding on each side, the gap and the
+                                // close button.
+                                .child(self.thread_heading((width - 82.).max(96.), cx))
                                 .child(
                                     self.icon_button(
                                         "close-overlay",
@@ -153,7 +156,36 @@ impl Desktop {
             )
     }
 
-    fn thread_heading(&self, cx: &Context<Self>) -> Div {
+    /// `text` cut to `width` with an ellipsis. Unwrapped text in the flow keeps
+    /// its first measurement, which can be its full length, and is then clipped
+    /// in the middle of a letter. A heading whose width follows from its pane is
+    /// cut here instead.
+    fn ellipsized(
+        &self,
+        text: &str,
+        size: f32,
+        weight: FontWeight,
+        width: f32,
+        cx: &Context<Self>,
+    ) -> gpui::SharedString {
+        let line = text.replace(['\n', '\r'], " ");
+        let mut font = gpui::font("Google Sans");
+        font.weight = weight;
+        let mut runs = vec![gpui::TextRun {
+            len: line.len(),
+            font: font.clone(),
+            color: self.theme.text,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }];
+        cx.text_system()
+            .line_wrapper(font, self.sp(size))
+            .truncate_line(line.into(), px(width), "…", &mut runs)
+    }
+
+    /// A long title or room name ends in an ellipsis before the close button.
+    fn thread_heading(&self, width: f32, cx: &Context<Self>) -> Div {
         let heading = self
             .current_thread_details()
             .map(|details| details.title.as_str())
@@ -166,6 +198,8 @@ impl Desktop {
             .flex()
             .flex_col()
             .child(if self.current_thread_details().is_some() {
+                // The button's gap and the chevron follow the title.
+                let title = width - 8. - 14. * (f32::from(self.scale) / 100.).sqrt();
                 self.style_panel_title(self.control(
                     "thread-options",
                     ButtonStyle::Quiet,
@@ -176,15 +210,25 @@ impl Desktop {
                 .justify_start()
                 .p_0()
                 .min_h(px(24.))
-                .child(heading.to_owned())
+                .child(div().whitespace_nowrap().child(self.ellipsized(
+                    heading,
+                    18.,
+                    FontWeight::SEMIBOLD,
+                    title,
+                    cx,
+                )))
                 .child(self.scaled_icon("chevron-down", 14., self.theme.muted))
                 .into_any_element()
             } else {
                 self.style_panel_title(div())
-                    .child(heading.to_owned())
+                    .whitespace_nowrap()
+                    .child(self.ellipsized(heading, 18., FontWeight::SEMIBOLD, width, cx))
                     .into_any_element()
             })
-            .child(self.hint(room))
+            .child(
+                self.hint(&self.ellipsized(room, 12., FontWeight::NORMAL, width, cx))
+                    .whitespace_nowrap(),
+            )
     }
 
     pub fn overlay_view(&self, window: &Window, cx: &Context<Self>) -> Div {
