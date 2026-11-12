@@ -1513,7 +1513,7 @@ impl Cache {
                 {
                     room.first_message = flight.older_before;
                 }
-                let incoming: Vec<_> = messages
+                let mut incoming: Vec<_> = messages
                     .as_slice()
                     .iter()
                     .take(50)
@@ -1525,6 +1525,16 @@ impl Cache {
                     .collect();
                 observed.sort_unstable_by_key(|row| row.0);
                 observed.dedup_by_key(|row| row.0);
+                // A forward poll reports an edit, a deletion or a reaction as
+                // the changed message itself. One older than the retained
+                // window is no new message and has no row to update; merged, it
+                // appeared above the loaded history.
+                if work == Work::Poll
+                    && let Some(first) = room.messages.as_slice().first()
+                {
+                    let first = first.local_id;
+                    incoming.retain(|message| message.local_id >= first);
+                }
                 // Invisible activity must not evict the reader's visible
                 // anchor. Its verified continuation uses only the ID proof
                 // below; the retained message window stays capped at 100.

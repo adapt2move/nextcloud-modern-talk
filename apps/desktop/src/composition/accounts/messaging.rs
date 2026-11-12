@@ -1735,6 +1735,10 @@ impl Accounts {
                         } else if work == Work::Poll
                             && let Some(root) = panel.thread_root
                         {
+                            // A change to a reply older than the loaded page
+                            // arrives like a new one; it has no row here.
+                            let loaded = panel.thread_messages.as_slice();
+                            let first = loaded.first().map_or(0, |row| row.local_id);
                             let updates = messages
                                 .as_slice()
                                 .iter()
@@ -1742,10 +1746,9 @@ impl Accounts {
                                 .filter(|row| {
                                     !row.metadata.pin_notice
                                         && ((!panel.thread_has_newer
-                                            && row.metadata.thread == Some(root))
-                                            || panel
-                                                .thread_messages
-                                                .as_slice()
+                                            && row.metadata.thread == Some(root)
+                                            && row.local_id >= first)
+                                            || loaded
                                                 .iter()
                                                 .any(|old| old.local_id == row.local_id))
                                 })
@@ -2185,7 +2188,7 @@ fn merge_thread(
     let mut rows = existing.as_slice().to_vec();
     for row in incoming.into_iter().take(50) {
         if let Some(old) = rows.iter_mut().find(|old| old.local_id == row.local_id) {
-            *old = row;
+            replace_row(old, row);
         } else {
             rows.push(row);
         }
@@ -2670,6 +2673,17 @@ fn rich_body(message: &wire::MessageDetails) -> (Text<4096>, bool) {
     let truncated = !rest.is_empty() || output.len() > 4096 || output.lines().count() > 256;
     (text(&output), truncated)
 }
+/// Talk reports an edit, a deletion or a reaction as a hidden event that carries
+/// the changed message, and it never nests a parent inside that copy. The quoted
+/// parent of a message does not change, so a row observed without one keeps the
+/// retained excerpt. Otherwise the quote vanished and the row regrouped with its
+/// neighbours until the next full read brought it back.
+fn replace_row(current: &mut MessageView, mut incoming: MessageView) {
+    if incoming.metadata.parent.is_none() {
+        incoming.metadata.parent = current.metadata.parent.take();
+    }
+    *current = incoming;
+}
 /// Stable identity merges updates/deletions and bounds loaded history independently of virtualization.
 pub(super) fn merge(
     existing: &Page<MessageView, 100>,
@@ -2679,7 +2693,7 @@ pub(super) fn merge(
     let mut messages = existing.as_slice().to_vec();
     for message in incoming.take(50) {
         if let Some(current) = messages.iter_mut().find(|m| m.local_id == message.local_id) {
-            *current = message;
+            replace_row(current, message);
         } else {
             messages.push(message);
         }
@@ -3125,6 +3139,36 @@ mod tests {
         let older = merge(&next, [row(1, "older")].into_iter(), true);
         assert_eq!(older.as_slice()[0].local_id, 1);
         assert_eq!(older.as_slice().last().unwrap().local_id, 100);
+    }
+    #[test]
+    fn an_update_without_reply_context_keeps_the_retained_quote() {
+        let quote = view::Reply {
+            id: 1,
+            external: false,
+            author: text("Synthetic"),
+            text: text("Quoted"),
+            unavailable: false,
+        };
+        let mut reply = row(2, "reply");
+        reply.metadata.parent = Some(quote.clone());
+        // Talk's edit and reaction events carry the message without its parent.
+        let main = merge(
+            &page([row(1, "Quoted"), reply.clone()]),
+            [row(2, "edited")].into_iter(),
+            false,
+        );
+        assert_eq!(main.as_slice()[1].body.as_str(), "edited");
+        assert_eq!(main.as_slice()[1].metadata.parent, Some(quote.clone()));
+        let thread = merge_thread(&page([reply]), [row(2, "edited")]);
+        assert_eq!(thread.as_slice()[0].body.as_str(), "edited");
+        assert_eq!(thread.as_slice()[0].metadata.parent, Some(quote));
+        // A row that never quoted anything gains nothing.
+        let plain = merge(
+            &page([row(1, "old")]),
+            [row(1, "edited")].into_iter(),
+            false,
+        );
+        assert_eq!(plain.as_slice()[0].metadata.parent, None);
     }
     #[test]
     fn deleted_messages_remove_all_retained_excerpts_and_pins() {

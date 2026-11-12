@@ -4000,3 +4000,59 @@ fn a_live_thread_reply_and_its_edit_reach_the_open_thread_only() {
     );
     assert_eq!(timeline(&model), [7, 9]);
 }
+
+#[test]
+fn a_polled_change_keeps_its_quote_and_one_below_the_window_adds_no_row() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let mut quoting = message(key, 8, "Reply");
+    quoting.parent = Some(ReplyContext {
+        id: MessageId {
+            conversation: key.conversation,
+            sequence: 7,
+        },
+        external: false,
+        author: text("Synthetic user"),
+        text: text("Quoted"),
+        unavailable: false,
+    });
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(
+            key,
+            [message(key, 7, "Quoted"), quoting, message(key, 9, "Next")],
+            Some(9),
+        ),
+    );
+    // Talk delivers an edit or a reaction as the changed message without its
+    // parent, also for a message that was never loaded here.
+    let poll = admit(&mut cache, key, 2, Work::Poll);
+    cache.poll_admitted(key, poll, 9);
+    assert!(cache.complete(
+        key,
+        poll,
+        Work::Poll,
+        RequestId(2),
+        &Ok(messages(
+            key,
+            [message(key, 8, "Reply, edited"), message(key, 3, "Older")],
+            Some(11)
+        )),
+        false
+    ));
+    let rows = cache.get(key).unwrap().visible_messages();
+    assert_eq!(
+        rows.as_slice()
+            .iter()
+            .map(|row| (row.local_id, row.body.as_str()))
+            .collect::<Vec<_>>(),
+        [(7, "Quoted"), (8, "Reply, edited"), (9, "Next")]
+    );
+    let parent = rows.as_slice()[1].metadata.parent.as_ref().unwrap();
+    assert_eq!((parent.id, parent.text.as_str()), (7, "Quoted"));
+    assert_eq!(cache.get(key).unwrap().latest, Some(11));
+}
