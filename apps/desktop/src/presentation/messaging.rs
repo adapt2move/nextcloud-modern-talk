@@ -269,6 +269,37 @@ fn preserved_row_offset(
     offset + header_inset * (f32::from(u8::from(is_first)) - f32::from(u8::from(was_first)))
 }
 
+/// The rows to measure again when a change cannot move any other row: the same
+/// messages in the same order, differing only in read bookkeeping, which is not
+/// painted, or in the reply count of a thread root. A root with replies groups
+/// with no neighbour before or after the change, so only its own height can
+/// differ. `None` means anything else changed and the whole list is measured.
+fn contained_changes(observed: &[MessageView], rows: &[MessageView]) -> Option<Vec<usize>> {
+    if observed.len() != rows.len() {
+        return None;
+    }
+    let mut changed = Vec::new();
+    for (index, (old, new)) in observed.iter().zip(rows).enumerate() {
+        if old == new {
+            continue;
+        }
+        let mut same = old.clone();
+        same.metadata.read_through = new.metadata.read_through;
+        same.metadata.unread_after = new.metadata.unread_after;
+        if same.reply_count != new.reply_count {
+            if same.reply_count == 0 || new.reply_count == 0 {
+                return None;
+            }
+            same.reply_count = new.reply_count;
+            changed.push(index);
+        }
+        if same != *new {
+            return None;
+        }
+    }
+    Some(changed)
+}
+
 impl MessageUi {
     #[cfg(feature = "dev-probes")]
     pub(super) fn probe_history(&self) -> String {
@@ -936,6 +967,32 @@ impl Desktop {
             self.message_ui.search.update(cx, |i, _| i.reset());
             self.message_ui.show_pins = false;
             self.message_ui.last_located = None;
+        } else if rows_changed
+            && self.message_ui.observed_pins == pins
+            && self.message_ui.observed_translations == translations
+            && self.message_ui.observed_translation_status == translation_status
+            && let Some(changed) = contained_changes(&self.message_ui.observed, rows)
+        {
+            // A reply in a thread changes its root's footer and the read target
+            // of the last row, nothing else. Every other row keeps its measured
+            // height and the reader keeps their place.
+            if !changed.is_empty() {
+                let top = self.message_ui.list.logical_scroll_top();
+                for index in changed {
+                    self.message_ui.list.splice(index..index + 1, 1);
+                }
+                self.message_ui.list.scroll_to(
+                    if at_bottom && !self.message_ui.arrival.borrow().following() {
+                        ListOffset {
+                            item_ix: rows.len(),
+                            offset_in_item: px(0.),
+                        }
+                    } else {
+                        top
+                    },
+                );
+            }
+            self.message_ui.observed = rows.to_vec();
         } else if rows_changed
             && at_bottom
             && !self.message_ui.arrival.borrow().following()
@@ -3770,6 +3827,42 @@ mod tests {
         // is pending. Its correlated receipt owns whether the editor restores.
         assert!(may_replace_composer(&Action::CancelCompose, Some(1), true));
         assert!(may_replace_composer(&Action::ToggleSearch, Some(1), false));
+    }
+    #[test]
+    fn only_a_thread_footer_or_read_bookkeeping_change_keeps_the_other_rows_measured() {
+        let row = |id: u128, replies: u16| MessageView {
+            local_id: id,
+            author: Text::new("Fixture").unwrap(),
+            initials: Text::new("F").unwrap(),
+            time_label: Text::new("09:00").unwrap(),
+            body: Text::new("Body").unwrap(),
+            own: false,
+            delivery: talk_core::ui::presentation::DeliveryState::Received,
+            attachments: talk_core::ui::Page::empty(),
+            reply_count: replies,
+            metadata: talk_core::ui::messaging::MessageMetadata::default(),
+        };
+        let observed = [row(1, 0), row(2, 3), row(3, 0)];
+        // One more reply in an existing thread measures only its root again.
+        let mut rows = observed.clone();
+        rows[1].reply_count = 4;
+        assert_eq!(contained_changes(&observed, &rows), Some(vec![1]));
+        // A hidden reply extends the last row's read target; nothing is painted.
+        rows[2].metadata.read_through = Some(9);
+        assert_eq!(contained_changes(&observed, &rows), Some(vec![1]));
+        let mut read_only = observed.clone();
+        read_only[2].metadata.read_through = Some(9);
+        assert_eq!(contained_changes(&observed, &read_only), Some(Vec::new()));
+        // The first reply adds a footer and ends the row's grouping with its
+        // neighbours; an edit or another row count can move every row.
+        let mut first_reply = observed.clone();
+        first_reply[0].reply_count = 1;
+        assert_eq!(contained_changes(&observed, &first_reply), None);
+        let mut edited = observed.clone();
+        edited[1].reply_count = 4;
+        edited[2].body = Text::new("Edited").unwrap();
+        assert_eq!(contained_changes(&observed, &edited), None);
+        assert_eq!(contained_changes(&observed, &observed[..2]), None);
     }
     #[test]
     fn system_file_share_uses_attachment_surface_while_activity_notice_stays_compact() {
