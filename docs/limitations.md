@@ -162,7 +162,8 @@ of complete parity with the official clients.
   without a connection shows pictures only where the chat cache has a thumbnail.
   Unsupported or larger content offers browser handoff or download. Link cards
   depend on the server's reference providers and fetch no arbitrary embedded web
-  content. Locations can open OpenStreetMap deliberately; map tiles are not loaded.
+  content. A link the server could not read, for which it returns only the
+  address, gets no card. Locations can open OpenStreetMap deliberately; map tiles are not loaded.
 - The gallery/video player needs native, real-server and packaged-runtime
   validation. Supported local playback depends on available codecs and is limited
   to 32 MiB, 1920×1080 and 30 fps; offline viewing uses a cached thumbnail.
