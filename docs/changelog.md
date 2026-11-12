@@ -2,6 +2,18 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.24 alpha (2026-11-12)
+
+### Fixes
+
+- **ui:** End a long thread title with an ellipsis before the close button (`89538e2`)
+- **sidebar:** Refresh the thread list without a loading state (`f993770`)
+- **chat:** Keep the timeline still when a thread gets a reply (`5e8faf5`)
+- **chat:** Keep a message's quote and grouping when it is edited or gets a reaction (`42f645a`)
+- **threads:** Show thread replies only in their thread (`497cf9b`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.24/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.24/docs/limitations.md)
+
 ## v0.0.23 alpha (2026-11-12)
 
 ### Fixes
