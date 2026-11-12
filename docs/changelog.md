@@ -2,6 +2,19 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.22 alpha (2026-11-12)
+
+### Fixes
+
+- **calls:** Steady tile while speaking, fresher own preview, chat notice (`b17142f`)
+- **calls:** Keep a call running through membership changes and recover it (`b6e5e5b`)
+- **chat:** Remove the jump to unread messages (`0bd6aad`)
+- **chat:** Keep polling messages while a call is running (`197c543`)
+- **sidebar:** Do not announce the pending refresh of a restored list (`25a07e7`)
+- **calls:** Reach signaling on networks without working IPv6 (`77465c8`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.22/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.22/docs/limitations.md)
+
 ## v0.0.21 alpha (2026-11-11)
 
 ### Fixes
