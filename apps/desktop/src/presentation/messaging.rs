@@ -149,6 +149,16 @@ struct ContextStatus {
     label: &'static str,
     retry: Option<RequestId>,
 }
+/// The width of the file list in the shared-contents dialog: the dialog is at most
+/// 700 wide, leaves 20 around itself and pads its content by 16 and the list's
+/// border by 1 on each side (see `overlays.rs`).
+fn shared_list_width(window: &Window) -> gpui::Pixels {
+    px((f32::from(window.viewport_size().width) - 40.).clamp(0., 700.) - 34.)
+}
+/// What a file row leaves for the name: paddings, icon and gap, and the download button.
+fn shared_name_width(list_width: gpui::Pixels) -> gpui::Pixels {
+    px((f32::from(list_width) - 112.).max(96.))
+}
 fn context_status(load: &ContextLoad) -> Option<ContextStatus> {
     use talk_core::ui::{UnavailableReason, conversation::RemoteState};
     let (label, retry) = match load.state {
@@ -2620,7 +2630,7 @@ impl Desktop {
             )
     }
 
-    pub(super) fn shared_contents(&self, cx: &Context<Self>) -> Div {
+    pub(super) fn shared_contents(&self, window: &Window, cx: &Context<Self>) -> Div {
         let Some(row) = self.selected() else {
             return div().child(self.hint(self.l("Das Gespräch ist nicht mehr verfügbar.")));
         };
@@ -2735,7 +2745,7 @@ impl Desktop {
                 body = body.child(self.hint(self.l("Keine angehefteten Nachrichten geladen.")));
             }
         } else {
-            body = body.child(self.shared_files(cx));
+            body = body.child(self.shared_files(shared_list_width(window), cx));
         }
         match if pins { panel.pins_state } else { panel.state } {
             talk_core::ui::conversation::RemoteState::Loading(_) => {
@@ -2776,7 +2786,7 @@ impl Desktop {
     }
     /// Pictures and videos as a grid of tiles, other files as rows. Both open the
     /// viewer or download in place and share the chat's attachment actions.
-    pub(super) fn shared_files(&self, cx: &Context<Self>) -> Div {
+    pub(super) fn shared_files(&self, list_width: gpui::Pixels, cx: &Context<Self>) -> Div {
         use super::content::gallery::{Kind, kind};
         use talk_core::ui::content::AttachmentRef;
         let mut body = div().flex().flex_col().gap_4();
@@ -2836,7 +2846,13 @@ impl Desktop {
                             .iter()
                             .enumerate()
                             .map(|(index, (reference, object))| {
-                                self.shared_row(reference.clone(), object, index > 0, cx)
+                                self.shared_row(
+                                    reference.clone(),
+                                    object,
+                                    index > 0,
+                                    shared_name_width(list_width),
+                                    cx,
+                                )
                             }),
                     ),
             );
@@ -4027,5 +4043,16 @@ mod tests {
                 true
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod shared_list_tests {
+    use super::shared_name_width;
+    use gpui::px;
+    #[test]
+    fn the_name_gets_what_the_row_leaves_and_never_less_than_a_few_letters() {
+        assert_eq!(shared_name_width(px(666.)), px(554.));
+        assert_eq!(shared_name_width(px(100.)), px(96.));
     }
 }

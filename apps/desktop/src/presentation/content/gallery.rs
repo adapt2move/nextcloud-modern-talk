@@ -492,6 +492,7 @@ impl Desktop {
         reference: AttachmentRef,
         object: &RichObject,
         divider: bool,
+        name_width: gpui::Pixels,
         cx: &Context<Self>,
     ) -> Div {
         let key = placeholder_key(reference.placeholder.as_str());
@@ -546,8 +547,12 @@ impl Desktop {
                         .flex_col()
                         .items_start()
                         .child(
+                            // A name only ends in an ellipsis if it is measured at a
+                            // width that is known from the start; in the flow it kept
+                            // the layout of a first, wrong width and was cut off. The
+                            // row's width follows from the dialog, so it is given.
                             div()
-                                .w_full()
+                                .w(name_width)
                                 .truncate()
                                 .text_size(self.sp(13.))
                                 .text_color(self.theme.text)

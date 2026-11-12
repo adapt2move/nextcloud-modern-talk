@@ -241,7 +241,7 @@ impl Desktop {
             self.l(title).to_owned()
         };
         let body = match overlay {
-            Overlay::Files => self.shared_contents(cx),
+            Overlay::Files => self.shared_contents(window, cx),
             Overlay::CloudFiles => self.cloud_files_body(cx),
             Overlay::RoomInfo | Overlay::Participants => self.details_body(overlay, cx),
             Overlay::CallParticipants => self.call_participants_body(cx),
@@ -807,7 +807,7 @@ impl Desktop {
                     ));
                 }
             }
-            Overlay::Files => return self.shared_files(cx),
+            Overlay::Files => return self.shared_files(px(632.), cx),
             _ => (),
         }
         body
