@@ -615,6 +615,8 @@ pub struct Snapshot {
     pub microphone: DeviceState,
     /// Short-lived level indication from already authorized local audio.
     pub local_speaking: bool,
+    /// Loudness step of that audio, from 1 (quiet) to [`SPEAKING_LEVELS`]; 0 while silent.
+    pub local_level: u8,
     pub camera: DeviceState,
     pub screen: DeviceState,
     pub sharing: SharingState,
@@ -708,8 +710,14 @@ pub struct Participant {
     pub camera: bool,
     pub raised_hand: bool,
     pub speaking: bool,
+    /// Loudness step of the received audio, from 1 (quiet) to [`SPEAKING_LEVELS`];
+    /// 0 while silent.
+    pub level: u8,
     pub can_mute: bool,
 }
+
+/// Loudness steps of the speaking indication. A level is not a measurement.
+pub const SPEAKING_LEVELS: u8 = 4;
 
 #[cfg(test)]
 mod tests {

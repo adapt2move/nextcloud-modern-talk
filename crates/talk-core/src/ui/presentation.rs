@@ -426,6 +426,8 @@ pub struct ParticipantView {
     pub raised_hand: bool,
     /// Recent decoded audio exceeds the local indication threshold.
     pub speaking: bool,
+    /// How loud that audio is, from 1 to `talk_core::calls::SPEAKING_LEVELS`; 0 while silent.
+    pub speaking_level: u8,
     pub call_can_mute: bool,
     /// Last observed call flags, absent outside the call projection.
     pub call_microphone: Option<bool>,

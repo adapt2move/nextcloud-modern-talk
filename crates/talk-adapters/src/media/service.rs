@@ -662,6 +662,7 @@ mod screen_tests {
                     phase: Phase::Connecting,
                     microphone: DeviceState::Off,
                     local_speaking: false,
+                    local_level: 0,
                     camera: DeviceState::Off,
                     screen: DeviceState::Off,
                     sharing: SharingState::Idle,

@@ -567,18 +567,12 @@ impl Desktop {
                     .items_center()
                     .justify_center()
                     .gap_4()
-                    .child(
-                        self.incoming_call_avatar(
-                            self.person_avatar(
-                                call.participants
-                                    .as_slice()
-                                    .iter()
-                                    .find(|p| !p.self_user)
-                                    .map_or("?", |p| p.initials.as_str()),
-                                96.,
-                            ),
-                        ),
-                    )
+                    .child(self.incoming_call_avatar(
+                        match call.participants.as_slice().iter().find(|p| !p.self_user) {
+                            Some(callee) => self.call_avatar(call, callee, 96.),
+                            None => self.person_avatar("?", 96.),
+                        },
+                    ))
                     .child(div().text_size(self.sp(20.)).child(
                         self.lf("{name} wird angerufen …", &[("name", call.title.as_str())]),
                     ))
@@ -759,8 +753,9 @@ impl Desktop {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(self.person_avatar(
-                            participant.initials.as_str(),
+                        .child(self.call_avatar(
+                            call,
+                            participant,
                             if focused == Some(participant.local_id) {
                                 104.
                             } else if pip && participant.self_user {
@@ -852,20 +847,23 @@ impl Desktop {
                     })
                     // The speaking ring lies over the picture's edge instead of
                     // taking room from it.
+                    // Its weight follows the voice: thin for a quiet one, heavy
+                    // for a loud one.
                     .when(participant.speaking, |d| {
-                        d.child(
-                            div()
-                                .absolute()
-                                .inset_0()
-                                .rounded(px(11.))
-                                .border_2()
-                                .border_color(stage_speaking_color(t)),
+                        let weight = f32::from(participant.speaking_level.clamp(1, 4));
+                        d.children(
+                            dock::speaking_ring_overlay(
+                                participant.speaking_level.max(1),
+                                stage_speaking_color(t),
+                                None,
+                            )
+                            .map(|ring| ring.rounded(px(11.))),
                         )
                         .child(
                             div()
                                 .absolute()
-                                .inset(px(2.))
-                                .rounded(px(9.))
+                                .inset(px(weight))
+                                .rounded(px(11. - weight))
                                 .border_1()
                                 .border_color(gpui::rgba(0x8fe6b655)),
                         )

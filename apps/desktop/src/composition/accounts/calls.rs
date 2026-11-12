@@ -1365,6 +1365,13 @@ fn project(
                     self_user: true,
                     raised_hand: value.hand_raised,
                     speaking: value.local_speaking,
+                    speaking_level: if value.local_speaking {
+                        value
+                            .local_level
+                            .clamp(1, talk_core::calls::SPEAKING_LEVELS)
+                    } else {
+                        0
+                    },
                     call_can_mute: false,
                     call_microphone: local_device_state(value.microphone),
                     call_camera: local_device_state(value.camera),
@@ -1385,6 +1392,11 @@ fn project(
                             self_user: false,
                             raised_hand: p.raised_hand,
                             speaking: p.speaking,
+                            speaking_level: if p.speaking {
+                                p.level.clamp(1, talk_core::calls::SPEAKING_LEVELS)
+                            } else {
+                                0
+                            },
                             call_can_mute: p.can_mute,
                             call_microphone: Some(p.microphone),
                             call_camera: Some(p.camera),
@@ -1457,6 +1469,7 @@ mod action_tests {
                 participants: Page::empty(),
                 microphone: DeviceState::Off,
                 local_speaking: false,
+                local_level: 0,
                 camera: DeviceState::Off,
                 screen: DeviceState::Off,
                 sharing: talk_core::calls::SharingState::Idle,
@@ -1580,6 +1593,7 @@ mod action_tests {
                     camera: true,
                     raised_hand: true,
                     speaking: false,
+                    level: 0,
                     can_mute: false,
                 })
                 .unwrap();
@@ -1635,6 +1649,7 @@ mod action_tests {
                     camera: false,
                     raised_hand: false,
                     speaking: false,
+                    level: 0,
                     can_mute: false,
                 })
                 .unwrap();

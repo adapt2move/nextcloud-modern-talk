@@ -66,7 +66,11 @@ of complete parity with the official clients.
   established. Raised hands, reactions, moderator controls, automatic lobby
   admission and physical devices need further native/server validation. Device
   switching stops publication and requires explicit enablement. The call dock
-  stays inside the main window.
+  stays inside the main window. The speaking ring follows four loudness steps of
+  the decoded audio with fixed thresholds; it is not calibrated to a microphone
+  and was not checked with physical devices. Call tiles and the dock show a
+  profile picture for yourself and for the other person of a one-to-one call;
+  the other participants of a group call show initials.
 
 ## Navigation, messages and offline use
 

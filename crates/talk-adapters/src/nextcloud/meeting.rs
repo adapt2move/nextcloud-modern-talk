@@ -1010,6 +1010,7 @@ fn pending_snapshot(call: &CallSession) -> Snapshot {
         phase: call.phase(),
         microphone: DeviceState::Off,
         local_speaking: false,
+        local_level: 0,
         camera: DeviceState::Off,
         screen: DeviceState::Unavailable,
         sharing: talk_core::calls::SharingState::Idle,

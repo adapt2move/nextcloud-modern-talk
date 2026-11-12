@@ -297,6 +297,7 @@ fn participant(id: u128, name: &str, initials: &str, me: bool) -> ParticipantVie
         self_user: me,
         raised_hand: false,
         speaking: false,
+        speaking_level: 0,
         call_can_mute: false,
         call_microphone: None,
         call_camera: None,
@@ -1861,7 +1862,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 _ => CallStage::Active,
             },
             accept: Decision::Allowed,
-            microphone: if scenario == "call-active" {
+            microphone: if matches!(scenario, "call-active" | "call-dock") {
                 MediaState::Active
             } else if scenario == "call-requested" {
                 MediaState::Requested
@@ -1976,6 +1977,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     people[0].call_camera = Some(false);
                     people[1].call_microphone = Some(true);
                     people[1].speaking = true;
+                    people[1].speaking_level = 3;
                     people[1].call_can_mute = scenario == "call-participants-raised";
                     people[1].call_camera = Some(false);
                     people[3].raised_hand = true;
@@ -1987,6 +1989,15 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                             participant(8, "Luis Berger", "LB", false),
                         ]);
                     }
+                    people
+                } else if scenario == "call-dock" {
+                    // A loud voice beside one's own quiet one: the ring around
+                    // the other person is heavy, the one at the microphone thin.
+                    let mut people = vec![participants()[0].clone(), participants()[2].clone()];
+                    people[0].speaking = true;
+                    people[0].speaking_level = 4;
+                    people[1].speaking = true;
+                    people[1].speaking_level = 2;
                     people
                 } else if direct || id == 2 {
                     vec![participants()[0].clone(), participants()[2].clone()]

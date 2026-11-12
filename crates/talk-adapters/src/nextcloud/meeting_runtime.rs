@@ -233,6 +233,7 @@ impl LiveCall {
             phase: Phase::Connecting,
             microphone: DeviceState::Off,
             local_speaking: false,
+            local_level: 0,
             camera: DeviceState::Off,
             screen: DeviceState::Unavailable,
             sharing: talk_core::calls::SharingState::Idle,
@@ -1677,13 +1678,16 @@ async fn media_loop(
             let screen = peers.iter().find(|peer| peer.stream == StreamKind::Screen && peer.role == Role::Subscriber);
             for person in participants.0.iter().take(if screen.is_some() { 15 } else { 16 }) {
                 if let Some(source) = bundle.peers.iter().find(|p| p.session == person.session) {
-                    let speaking = policy_ready && peers.iter().find(|peer| peer.role != Role::Publisher && peer.session == person.session)
-                        .is_some_and(|peer| peer.speaking.active(Instant::now()));
+                    let level = if policy_ready {
+                        peers.iter().find(|peer| peer.role != Role::Publisher && peer.session == person.session)
+                            .map_or(0, |peer| peer.speaking.level(Instant::now()))
+                    } else { 0 };
+                    let speaking = level > 0;
                     participant_snapshot.try_push(calls::Participant {
                         local: person.local, participant: person.local, kind: calls::StreamKind::Camera,
                         dimensions: peers.iter().find(|peer| peer.session == person.session && peer.stream == StreamKind::Camera).and_then(|peer| peer.dimensions),
                         flowing: peers.iter().find(|peer| peer.session == person.session && peer.stream == StreamKind::Camera).is_some_and(|peer| peer.last_frame.is_some_and(|at| at.elapsed() < Duration::from_secs(3))),
-                        name: source.name.clone(), microphone: source.microphone, camera: source.camera, raised_hand: person.hand.raised(), speaking,
+                        name: source.name.clone(), microphone: source.microphone, camera: source.camera, raised_hand: person.hand.raised(), speaking, level,
                         can_mute: policy_ready && bundle.mute_supported && source.microphone && !end_pending
                             && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
                             && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending),
@@ -1698,7 +1702,7 @@ async fn media_loop(
                     kind: calls::StreamKind::Screen, dimensions: peer.dimensions,
                     flowing: peer.last_frame.is_some_and(|at| at.elapsed() < Duration::from_secs(3)),
                     microphone: source.microphone, camera: source.camera,
-                    raised_hand: person.hand.raised(), speaking: false, can_mute: false,
+                    raised_hand: person.hand.raised(), speaking: false, level: 0, can_mute: false,
                 }).map_err(|_| ())?;
             }
             let mut invitees = talk_core::bounded::Page::empty();
@@ -1748,7 +1752,8 @@ async fn media_loop(
                 } else if recovering || !transport_ready || session.control_degraded() { Phase::Reconnecting } else { call.phase() };
                 snapshot.wishes = call.wishes();
                 snapshot.microphone = if mic_failed { DeviceState::Unavailable } else if mic { DeviceState::Active } else if wishes.microphone { DeviceState::Requested } else { DeviceState::Off };
-                snapshot.local_speaking = policy_ready && mic && local_speaking.active(Instant::now());
+                snapshot.local_level = if policy_ready && mic { local_speaking.level(Instant::now()) } else { 0 };
+                snapshot.local_speaking = snapshot.local_level > 0;
                 snapshot.camera = if camera_failed { DeviceState::Unavailable } else if camera { DeviceState::Active } else if wishes.camera { DeviceState::Requested } else { DeviceState::Off };
                 snapshot.peers = participants.0.len() as u16;
                 snapshot.participants = participant_snapshot;
