@@ -2,6 +2,15 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.23 alpha (2026-11-12)
+
+### Fixes
+
+- **ui:** Offer the full emoji picker for the status message (`7c6c44b`)
+- **ui:** End long file names in the shared contents dialog with an ellipsis (`bfc48c5`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.23/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.23/docs/limitations.md)
+
 ## v0.0.22 alpha (2026-11-12)
 
 ### Fixes
