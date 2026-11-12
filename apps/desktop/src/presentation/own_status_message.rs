@@ -297,22 +297,32 @@ impl Desktop {
                 ),
         );
         if self.own_status_emoji_open {
+            // The whole picker the composer uses, not a short fixed row.
+            let has_icon = !self.own_status_icon_input.read(cx).content.is_empty();
             body = body.child(
-                div().flex().flex_wrap().gap_1().children(
-                    ["💬", "😊", "🏠", "🎯", "☕", "🌴"]
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, emoji)| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_2()
+                    .rounded(px(8.))
+                    .border_1()
+                    .border_color(t.input_border)
+                    .bg(t.subtle)
+                    .child(self.emoji_grid(cx))
+                    .when(has_icon, |d| {
+                        d.child(
                             self.button(
-                                ("status-emoji", i),
-                                emoji,
+                                "status-emoji-clear",
+                                "Emoji entfernen",
                                 ButtonStyle::Quiet,
                                 ready,
-                                LocalAction::SelectStatusEmoji(emoji),
+                                LocalAction::SelectStatusEmoji(""),
                                 cx,
                             )
-                        }),
-                ),
+                            .justify_start(),
+                        )
+                    }),
             );
         }
         if self.own_status_message_error {

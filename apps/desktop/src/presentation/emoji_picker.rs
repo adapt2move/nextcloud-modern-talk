@@ -30,6 +30,15 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.own_status_emoji_open && self.own_status_editing {
+            // The status message takes the emoji, and the choice is done.
+            self.own_status_icon_input
+                .update(cx, |input, _| input.set_context_value(emoji));
+            self.own_status_emoji_open = false;
+            self.remember_emoji(emoji);
+            cx.notify();
+            return;
+        }
         if self.pick_reaction_emoji(emoji, window, cx) {
             return;
         }
@@ -45,15 +54,20 @@ impl Desktop {
             self.composer.clone()
         };
         editor.update(cx, |input, cx| input.insert_emoji(emoji, cx));
-        self.emoji_recent.retain(|recent| *recent != emoji);
-        self.emoji_recent.insert(0, emoji);
-        self.emoji_recent.truncate(16);
+        self.remember_emoji(emoji);
         editor.focus_handle(cx).focus(window);
         cx.notify();
     }
 
+    /// The emoji moves to the front of the recent ones.
+    fn remember_emoji(&mut self, emoji: &'static str) {
+        self.emoji_recent.retain(|recent| *recent != emoji);
+        self.emoji_recent.insert(0, emoji);
+        self.emoji_recent.truncate(16);
+    }
+
     /// Category tabs (with the recent ones first, once there are any) over a grid.
-    fn emoji_grid(&self, cx: &Context<Self>) -> Div {
+    pub(super) fn emoji_grid(&self, cx: &Context<Self>) -> Div {
         let t = self.theme;
         let has_recent = !self.emoji_recent.is_empty();
         // Tab 0 is "recent" when it exists; the others follow the data order.
@@ -93,32 +107,49 @@ impl Desktop {
         } else {
             data::CATEGORIES[shown - 1].1.to_vec()
         };
-        div().flex().flex_col().gap_2().child(tabs).child(
-            div()
-                .id("emoji-grid")
-                .max_h(px(252.))
-                .overflow_y_scroll()
-                .flex()
-                .flex_wrap()
-                .gap(px(2.))
-                .children(emojis.into_iter().map(|emoji| {
-                    self.button(
-                        gpui::ElementId::from(gpui::SharedString::from(format!(
-                            "emoji-{shown}-{emoji}"
-                        ))),
-                        emoji,
-                        ButtonStyle::Quiet,
-                        Availability::available(),
-                        LocalAction::EmojiPick(emoji),
-                        cx,
-                    )
-                    .size(px(38.))
-                    .p_0()
-                    .rounded(px(8.))
-                    .justify_center()
-                    .text_size(self.sp(22.))
-                })),
-        )
+        let title = if shown == 0 {
+            "Zuletzt verwendet"
+        } else {
+            data::CATEGORY_NAMES[shown - 1]
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(tabs)
+            .child(
+                div()
+                    .px_1()
+                    .text_size(self.sp(12.))
+                    .text_color(t.muted)
+                    .child(self.l(title).to_owned()),
+            )
+            .child(
+                div()
+                    .id("emoji-grid")
+                    .max_h(px(252.))
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(2.))
+                    .children(emojis.into_iter().map(|emoji| {
+                        self.button(
+                            gpui::ElementId::from(gpui::SharedString::from(format!(
+                                "emoji-{shown}-{emoji}"
+                            ))),
+                            emoji,
+                            ButtonStyle::Quiet,
+                            Availability::available(),
+                            LocalAction::EmojiPick(emoji),
+                            cx,
+                        )
+                        .size(px(38.))
+                        .p_0()
+                        .rounded(px(8.))
+                        .justify_center()
+                        .text_size(self.sp(22.))
+                    })),
+            )
     }
 
     /// Records where one composer's emoji button is, so the popover can open there.

@@ -11,6 +11,7 @@ mod conversation;
 mod creation;
 mod date_picker;
 mod discovery;
+mod emoji;
 mod federation;
 mod files;
 mod message_summary;
@@ -58,6 +59,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         conversation::MESSAGES,
         creation::MESSAGES,
         discovery::MESSAGES,
+        emoji::MESSAGES,
         reference::MESSAGES,
         search_navigation::MESSAGES,
         shell::MESSAGES,
@@ -297,6 +299,7 @@ mod tests {
             call::MESSAGES,
             creation::MESSAGES,
             discovery::MESSAGES,
+            emoji::MESSAGES,
             reference::MESSAGES,
             chat::MESSAGES,
             avatar::MESSAGES,

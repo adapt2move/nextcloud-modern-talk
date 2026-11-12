@@ -2,6 +2,19 @@
 //! glyphs only (no skin-tone or family sequences), so every platform's color emoji
 //! font draws them and a reaction is one grapheme.
 
+/// The title of each category, in the order of [`CATEGORIES`]; German source
+/// text, translated with the rest of the interface.
+pub(super) const CATEGORY_NAMES: [&str; 8] = [
+    "Smileys und Emotionen",
+    "Gesten und Menschen",
+    "Herzen und Symbole",
+    "Tiere und Natur",
+    "Essen und Trinken",
+    "Aktivitäten und Reisen",
+    "Objekte",
+    "Flaggen",
+];
+
 /// Tab glyph and the emojis of one category.
 pub(super) const CATEGORIES: [(&str, &[&str]); 8] = [
     (
@@ -90,6 +103,12 @@ pub(super) const CATEGORIES: [(&str, &[&str]); 8] = [
 mod tests {
     use super::*;
     use unicode_segmentation::UnicodeSegmentation;
+
+    #[test]
+    fn every_category_has_a_title() {
+        assert_eq!(CATEGORY_NAMES.len(), CATEGORIES.len());
+        assert!(CATEGORY_NAMES.iter().all(|name| !name.is_empty()));
+    }
 
     #[test]
     fn every_entry_is_one_grapheme_and_unique_within_its_category() {
