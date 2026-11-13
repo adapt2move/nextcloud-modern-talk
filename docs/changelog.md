@@ -2,6 +2,15 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.26 alpha (2026-11-13)
+
+### Fixes
+
+- **media:** Stabilize Opus reception and TURN session lifetimes (#47) (`240b757`)
+- **calls:** Discard malformed VP8 packets and preserve failure context (`6a7a7b1`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.26/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.26/docs/limitations.md)
+
 ## v0.0.25 alpha (2026-11-12)
 
 ### Features
