@@ -4,6 +4,13 @@
 #[path = "../../crates/talk-adapters/src/media/engine.rs"]
 #[allow(dead_code)] // Shared production engine also serves call-only operations.
 mod engine;
+#[path = "../../crates/talk-adapters/src/media/e2ee/mod.rs"]
+#[allow(dead_code)]
+mod frame_protection;
+// The shared engine resolves key holders through its production owner path.
+mod media {
+    pub(crate) use super::frame_protection as e2ee;
+}
 
 use engine::{
     CandidateKind, Event, IcePolicy, IceServer, NativePeer, PeerConnectionState, RtcConfiguration,

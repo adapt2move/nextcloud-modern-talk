@@ -49,6 +49,9 @@ of complete parity with the official clients.
   Full HPB process replacement with an existing Talk 25 web peer can leave its
   subscription gate stale; explicit web-peer leave/rejoin restored media in the
   exercised case. A native rejoin cannot repair the remote peer's state.
+  Malformed VP8 packet headers are discarded before native decoding without
+  restarting the call. Video recovery still needs a valid keyframe; oversized
+  frames, unsupported codecs and media-pipeline failures remain errors.
 - Screen sharing uses VP8, admits one remote screen up to 1920×1080 and stops
   selection on call/control loss. It never restarts automatically after recovery.
   Multiple screen broadcasters and conference-scale performance are unqualified.

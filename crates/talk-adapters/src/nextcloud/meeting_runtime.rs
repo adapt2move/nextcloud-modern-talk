@@ -1552,14 +1552,26 @@ async fn media_loop(
                         Err(error) => {
                             #[cfg(feature = "backend-test")]
                             eprintln!("camera engine stopped: role={:?} error={error:?}", peer.role);
-                            stage = match (peer.role, error) {
+                            stage = match (peer.role, error.error) {
                                 (Role::Publisher, EngineError::Closed) => "publisher engine closed",
                                 (Role::Publisher, EngineError::Overloaded) => "publisher engine overloaded",
+                                (Role::Publisher, EngineError::Malformed) => "publisher engine malformed",
+                                (Role::Publisher, EngineError::Unsupported) => "publisher engine unsupported",
                                 (Role::Publisher, _) => "publisher engine failed",
                                 (_, EngineError::Closed) => "peer engine closed",
                                 (_, EngineError::Overloaded) => "peer engine overloaded",
+                                (_, EngineError::Malformed) => "peer engine malformed",
+                                (_, EngineError::Unsupported) => "peer engine unsupported",
                                 _ => "peer engine failed",
                             };
+                            use talk_core::ports::ErrorKind;
+                            crate::media::note_call_stop_failure(stage, error.step, match error.error {
+                                EngineError::Closed => ErrorKind::Cancelled,
+                                EngineError::Engine => ErrorKind::Uncertain,
+                                EngineError::Malformed => ErrorKind::Malformed,
+                                EngineError::Overloaded => ErrorKind::TooLarge,
+                                EngineError::Unsupported => ErrorKind::Unsupported,
+                            });
                             return Err(());
                         }
                     };

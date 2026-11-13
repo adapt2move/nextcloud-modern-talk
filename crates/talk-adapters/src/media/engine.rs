@@ -56,6 +56,13 @@ pub enum Error {
     Overloaded,
     Unsupported,
 }
+/// Fixed operation and category only; no SDP, addresses, codec payloads or
+/// dependency error strings may reach call diagnostics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EventError {
+    pub step: &'static str,
+    pub error: Error,
+}
 #[derive(Default)]
 pub struct IceServer {
     pub urls: Vec<String>,
@@ -331,6 +338,7 @@ struct Incoming {
     video: bool,
     screen: bool,
     packets: u64,
+    discarded: u64,
     keyframes: u64,
     feedback_ssrc: u32,
     feedback_requests: u64,
@@ -380,6 +388,7 @@ impl Incoming {
         &mut self,
         enabled: bool,
         decrypt: Option<std::sync::Arc<std::sync::Mutex<crate::media::e2ee::frame::Decryptor>>>,
+        step: &mut &'static str,
     ) -> Result<(), Error> {
         if !enabled {
             self.decoder = None;
@@ -390,6 +399,7 @@ impl Incoming {
             };
             match event {
                 Some(TrackRemoteEvent::OnRtpPacket(packet)) if enabled => {
+                    *step = "RTP packet";
                     self.packets = self.packets.saturating_add(1);
                     if packet.payload.len() > 4096 {
                         return Err(Error::Overloaded);
@@ -402,13 +412,31 @@ impl Incoming {
                     }
                     self.ssrc = packet.header.ssrc;
                     if self.video && !packet.payload.is_empty() {
-                        if vp8_geometry(&packet.payload)?.is_some() {
+                        *step = "VP8 header";
+                        let geometry = match vp8_geometry(&packet.payload) {
+                            Ok(value) => value,
+                            // An authenticated RTP packet need not contain a
+                            // complete/valid codec header. Drop it before native
+                            // decode; the bounded pump and periodic PLI recover
+                            // on a valid keyframe without ending everyone's call.
+                            Err(Error::Malformed) => {
+                                self.discarded = self.discarded.saturating_add(1);
+                                continue;
+                            }
+                            Err(error) => return Err(error),
+                        };
+                        if geometry.is_some() {
                             self.keyframes = self.keyframes.saturating_add(1);
                         } else if self.decoder.is_none() {
                             continue;
                         }
                     }
                     if self.decoder.is_none() {
+                        *step = if self.video {
+                            "video decoder start"
+                        } else {
+                            "audio decoder start"
+                        };
                         self.decoder = Some(Codec::decoder(
                             self.video,
                             packet.header.payload_type,
@@ -416,7 +444,13 @@ impl Incoming {
                             decrypt.clone(),
                         )?);
                     }
+                    *step = "RTP marshal";
                     let bytes = packet.marshal().map_err(|_| Error::Malformed)?;
+                    *step = if self.video {
+                        "video decoder input"
+                    } else {
+                        "audio decoder input"
+                    };
                     self.decoder
                         .as_ref()
                         .ok_or(Error::Engine)?
@@ -427,11 +461,15 @@ impl Incoming {
                     TrackRemoteEvent::OnError
                     | TrackRemoteEvent::OnEnding
                     | TrackRemoteEvent::OnEnded,
-                ) => return Err(Error::Closed),
+                ) => {
+                    *step = "remote track ended";
+                    return Err(Error::Closed);
+                }
                 _ => {}
             }
         }
         if self.video && enabled && self.pli.elapsed() >= Duration::from_secs(2) {
+            *step = "video feedback";
             tokio::time::timeout(
                 Duration::from_millis(50),
                 self.track.write_rtcp(vec![Box::new(PictureLossIndication {
@@ -879,18 +917,20 @@ impl NativePeer {
             .map_err(|_| Error::Engine)?;
         self.check()
     }
-    pub async fn event(&mut self) -> Result<Option<Event>, Error> {
-        let result = self.poll().await;
+    pub async fn event(&mut self) -> Result<Option<Event>, EventError> {
+        let mut step = "peer state";
+        let result = self.poll(&mut step).await;
         if result.is_err() {
             self.close();
         }
-        result
+        result.map_err(|error| EventError { step, error })
     }
-    async fn poll(&mut self) -> Result<Option<Event>, Error> {
+    async fn poll(&mut self, step: &mut &'static str) -> Result<Option<Event>, Error> {
         self.check()?;
         let send = self.e2ee.as_ref().map(|keys| keys.send.clone());
         let receive = self.e2ee.as_ref().map(|keys| keys.receive.clone());
         if let Some(audio) = &self.audio {
+            *step = "audio send";
             audio
                 .flush(
                     4096,
@@ -900,6 +940,7 @@ impl NativePeer {
                 .await?;
         }
         if let Some(video) = &self.video {
+            *step = "video send";
             self.counters.video_transmitted = self.counters.video_transmitted.saturating_add(
                 video
                     .flush(
@@ -911,12 +952,15 @@ impl NativePeer {
             );
         }
         if let Some(audio) = &mut self.remote_audio {
-            audio.pump(true, receive.clone()).await?;
+            *step = "audio receive";
+            audio.pump(true, receive.clone(), step).await?;
         }
         if let Some(video) = &mut self.remote_video {
-            video.pump(self.receive_video, receive).await?;
+            *step = "video receive";
+            video.pump(self.receive_video, receive, step).await?;
         }
         for channel in &self.channels {
+            *step = "data message";
             for _ in 0..16 {
                 let Some(Some(event)) = channel.inner.poll().now_or_never() else {
                     break;
@@ -939,6 +983,7 @@ impl NativePeer {
         while let Ok(event) = self.events.try_recv() {
             match event {
                 CallbackEvent::Public(Event::Candidate(c)) => {
+                    *step = "local candidates";
                     if self.local_candidates >= 128 {
                         return Err(Error::Overloaded);
                     }
@@ -953,16 +998,22 @@ impl NativePeer {
                     return Ok(Some(Event::Candidate(c)));
                 }
                 CallbackEvent::Public(event) => return Ok(Some(event)),
-                CallbackEvent::Channel(c) => self.add_channel(c).await?,
+                CallbackEvent::Channel(c) => {
+                    *step = "data channel";
+                    self.add_channel(c).await?;
+                }
                 CallbackEvent::Track(track) => {
+                    *step = "remote track role";
                     if self.role == Role::Publisher {
                         return Err(Error::Unsupported);
                     }
+                    *step = "remote track streams";
                     let ssrcs = track.ssrcs().await;
                     if ssrcs.len() != 1 {
                         return Err(Error::Unsupported);
                     }
                     let ssrc = *ssrcs.first().ok_or(Error::Malformed)?;
+                    *step = "remote track codec";
                     let codec = track.codec(ssrc).await.ok_or(Error::Unsupported)?;
                     let video = match codec.mime_type.to_ascii_lowercase().as_str() {
                         "audio/opus" => false,
@@ -974,9 +1025,11 @@ impl NativePeer {
                     } else {
                         &mut self.remote_audio
                     };
+                    *step = "remote track replacement";
                     if target.is_some() {
                         return Err(Error::Unsupported);
                     }
+                    *step = "receiver identity";
                     let mut feedback_id = [0; 4];
                     getrandom::fill(&mut feedback_id).map_err(|_| Error::Engine)?;
                     // RTCP receiver feedback needs its own nonzero identity.
@@ -992,6 +1045,7 @@ impl NativePeer {
                         video,
                         screen: self.screen,
                         packets: 0,
+                        discarded: 0,
                         keyframes: 0,
                         feedback_ssrc,
                         feedback_requests: 0,
@@ -1207,6 +1261,41 @@ impl Drop for NativePeer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn event_failure_keeps_safe_context_and_closes_the_peer() {
+        let mut peer = NativePeer::new(RtcConfiguration::default()).await.unwrap();
+        let channel = peer
+            .pc()
+            .unwrap()
+            .create_data_channel("CANARY_PRIVATE_LABEL", None)
+            .await
+            .unwrap();
+        let (sender, events) = mpsc::sync_channel(EVENTS);
+        peer.events = events;
+        assert!(sender.try_send(CallbackEvent::Channel(channel)).is_ok());
+        let error = peer
+            .event()
+            .await
+            .err()
+            .expect("unknown channel is rejected");
+        assert_eq!(
+            error,
+            EventError {
+                step: "data channel",
+                error: Error::Unsupported
+            }
+        );
+        assert!(!format!("{error:?}").contains("CANARY"));
+        assert!(!peer.is_open());
+        assert_eq!(
+            peer.event().await.err(),
+            Some(EventError {
+                step: "peer state",
+                error: Error::Closed
+            })
+        );
+    }
+
     #[test]
     fn vp8_header_bounds_apply_before_native_decode_and_include_extensions() {
         let mut payload = vec![0x10, 0, 0, 0, 0x9d, 0x01, 0x2a, 0x80, 0x07, 0x38, 0x04];
@@ -1236,6 +1325,101 @@ mod tests {
             height: 240,
             rgba,
         }
+    }
+
+    #[tokio::test]
+    async fn damaged_vp8_frames_do_not_end_audio_or_later_video() {
+        let mut sender = NativePeer::new(RtcConfiguration::default()).await.unwrap();
+        let mut receiver = NativePeer::new(RtcConfiguration::default()).await.unwrap();
+        let offer = sender.offer().await.unwrap();
+        let answer = receiver.remote(&offer).await.unwrap().unwrap();
+        sender.remote(&answer).await.unwrap();
+        sender.publish(true, true).unwrap();
+        let mut connected = [false; 2];
+        let mut damaged_sent = 0;
+        let mut audio_at_damage = 0;
+        let mut decoded = 0;
+        let started = Instant::now();
+        let mut tick = tokio::time::interval(Duration::from_millis(10));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut frame = 0u64;
+        while started.elapsed() < Duration::from_secs(6) {
+            tick.tick().await;
+            while let Some(event) = sender.event().await.unwrap() {
+                match event {
+                    Event::Candidate(c) => receiver.candidate(&c).await.unwrap(),
+                    Event::Connection(s) => connected[0] = s == PeerConnectionState::Connected,
+                }
+            }
+            while let Some(event) = receiver.event().await.unwrap() {
+                match event {
+                    Event::Candidate(c) => sender.candidate(&c).await.unwrap(),
+                    Event::Connection(s) => connected[1] = s == PeerConnectionState::Connected,
+                }
+            }
+            if !connected.iter().all(|v| *v) {
+                continue;
+            }
+            if damaged_sent == 0 || damaged_sent == 1 && decoded >= 3 {
+                let video = sender.video.as_ref().unwrap();
+                // Authenticated RTP can still carry an incomplete codec header.
+                // Send it through the real payloader, SRTP and remote track.
+                video
+                    .track
+                    .write_sample(
+                        video.ssrc,
+                        96,
+                        &Sample {
+                            data: vec![0].into(),
+                            duration: Duration::from_millis(33),
+                            ..Sample::new(Instant::now())
+                        },
+                        &[],
+                    )
+                    .await
+                    .unwrap();
+                damaged_sent += 1;
+                audio_at_damage = receiver.counters.audio_nonzero;
+            }
+            let pcm: [i16; 480] = std::array::from_fn(|n| {
+                (((frame * 480 + n as u64) as f64 * 0.06).sin() * 4000.0) as i16
+            });
+            sender.audio(&pcm).await.unwrap();
+            if frame.is_multiple_of(3) {
+                sender
+                    .video(image(70), started.elapsed().as_micros() as i64)
+                    .unwrap();
+            }
+            frame += 1;
+            while receiver.take_audio().is_some() {}
+            while receiver.take_video().is_some() {
+                decoded += 1;
+            }
+            if decoded >= 6
+                && receiver.counters.audio_nonzero > audio_at_damage + 40
+                && receiver
+                    .remote_video
+                    .as_ref()
+                    .is_some_and(|v| v.discarded == 2)
+            {
+                break;
+            }
+        }
+        assert_eq!(
+            damaged_sent, 2,
+            "damage is sent before and during video playback"
+        );
+        assert_eq!(
+            receiver.remote_video.as_ref().map(|v| v.discarded),
+            Some(2),
+            "both damaged frames must have reached the receiver"
+        );
+        assert!(receiver.is_open(), "a bad frame must not close the peer");
+        assert!(
+            decoded >= 6 && receiver.counters.audio_nonzero > audio_at_damage + 40,
+            "valid media after damage must decode: video={decoded}, audio={}",
+            receiver.counters.audio_nonzero
+        );
     }
 
     #[tokio::test]

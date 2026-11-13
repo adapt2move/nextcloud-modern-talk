@@ -193,8 +193,10 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
     let mut observed_before_reconnect = None;
     let mut incoming_enabled = false;
     let continuity = matches!(mode, "network-resume" | "session-replaced");
-    let recovery_probe =
-        continuity || std::env::var("NMT_MEDIA_RECOVERY_PROBE").as_deref() == Ok("true");
+    let join_probe = mode == "participant-join";
+    let recovery_probe = continuity
+        || join_probe
+        || std::env::var("NMT_MEDIA_RECOVERY_PROBE").as_deref() == Ok("true");
     let mut ready_at: Option<Duration> = None;
     let mute_at = if continuity { 4 } else { 10 };
     let unmute_at = if continuity { 16 } else { 12 };
@@ -206,7 +208,11 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| matches!(*v, 32 | 50))
         .unwrap_or(32);
-    let limit = if mode == "reconnect" {
+    let limit = if join_probe {
+        // The late participant can wait for an outstanding internal signaling
+        // poll. Keep observing media after that real response arrives.
+        50
+    } else if mode == "reconnect" {
         44
     } else if recovery_probe {
         recovery_window
@@ -219,9 +225,10 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
     report["exchange_window_seconds"] = json!(limit);
     while started.elapsed()
         < if recovery_probe {
-            ready_at.map_or(Duration::from_secs(20), |ready| {
-                ready + Duration::from_secs(limit)
-            })
+            ready_at.map_or(
+                Duration::from_secs(if join_probe { 45 } else { 20 }),
+                |ready| ready + Duration::from_secs(limit),
+            )
         } else {
             Duration::from_secs(limit)
         }
@@ -532,7 +539,7 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
                 ready_at = Some(started.elapsed());
                 report["media_ready_ms"] = json!(started.elapsed().as_millis());
             }
-            if observed.len() < 96 {
+            if observed.len() < if join_probe { 128 } else { 96 } {
                 observed.push(json!({"ms":started.elapsed().as_millis(),"generation":observed_generation,"phase":format!("{:?}",current.phase),"sharing":format!("{:?}",current.sharing),"microphone_intent":current.wishes.microphone,"camera_intent":current.wishes.camera,"screen_flowing":current.participants.as_slice().iter().any(|p|p.kind==talk_core::calls::StreamKind::Screen && p.flowing),"peers":current.peers,"audio_sent":current.counters.audio_sent,"audio_received":current.counters.audio_received,"video_sent":current.counters.video_sent,"video_received":current.counters.video_received,"data_received":current.counters.data_received,"offers_sent":current.counters.offers_sent,"answers_sent":current.counters.answers_sent,"policy_refreshes":current.counters.policy_refreshes}));
             }
             report["samples"] = json!(&observed);
@@ -698,6 +705,7 @@ fn main() {
     if args.len() != 4
         || ![
             "media",
+            "participant-join",
             "reconnect",
             "policy-loss",
             "incoming-accept",
@@ -721,7 +729,11 @@ fn main() {
         .expect("bounded runtime");
     match runtime.block_on(async {
         tokio::time::timeout(
-            Duration::from_secs(92),
+            Duration::from_secs(if args[3] == "participant-join" {
+                120
+            } else {
+                92
+            }),
             run(
                 Path::new(&args[1]),
                 Path::new(&args[2]),
