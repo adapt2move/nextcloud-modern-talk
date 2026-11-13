@@ -4,6 +4,9 @@
 
 #[path = "codecs.rs"]
 mod codecs;
+#[cfg(test)]
+#[path = "gstreamer_probe.rs"]
+mod gstreamer_probe;
 #[path = "ice.rs"]
 mod ice;
 #[path = "turn_proxy.rs"]
@@ -23,7 +26,6 @@ use rtc::{
     shared::marshal::Marshal,
 };
 use std::{
-    collections::VecDeque,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -504,14 +506,13 @@ pub struct NativePeer {
     audio_guard: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     screen: bool,
     channels: Vec<Channel>,
-    pcm: VecDeque<[i16; 480]>,
     counters: Counters,
     remote_descriptions: u8,
     remote_candidates: u16,
     local_candidates: u16,
     role: Role,
     e2ee: Option<crate::media::e2ee::Keys>,
-    _bridges: Vec<turn_proxy::Bridge>,
+    bridges: Vec<turn_proxy::Bridge>,
     ice_support: IceSupport,
     ice_evidence: IceEvidence,
 }
@@ -583,9 +584,13 @@ impl NativePeer {
         // TURN over TCP/TLS is carried by loopback bridges the peer owns.
         let mut bridges = Vec::with_capacity(relays.len());
         if !relays.is_empty() {
-            let tls = turn_proxy::system_tls().ok();
             #[cfg(test)]
-            let tls = config.turn_tls.clone().or(tls);
+            let mut tls = config.turn_tls.clone();
+            #[cfg(not(test))]
+            let mut tls = None;
+            if tls.is_none() && relays.iter().any(|relay| relay.target.tls) {
+                tls = Some(turn_proxy::system_tls()?);
+            }
             for relay in relays {
                 let bridge = turn_proxy::Bridge::start(relay.target, tls.clone()).await?;
                 ice_servers[relay.server].urls[relay.url] =
@@ -703,14 +708,13 @@ impl NativePeer {
             audio_guard: None,
             screen: false,
             channels: Vec::with_capacity(2),
-            pcm: VecDeque::with_capacity(2),
             counters: Counters::default(),
             remote_descriptions: 0,
             remote_candidates: 0,
             local_candidates: 0,
             role,
             e2ee: config.e2ee,
-            _bridges: bridges,
+            bridges,
             ice_support,
             ice_evidence: IceEvidence::default(),
         };
@@ -1162,38 +1166,34 @@ impl NativePeer {
         if !self.is_open() {
             return None;
         }
-        if self.pcm.is_empty() {
-            let result = self.remote_audio.as_ref()?.decoder.as_ref()?.sample();
-            let sample = match result {
-                Ok(Some(s)) => s,
-                Ok(None) => return None,
-                Err(_) => {
-                    self.close();
-                    return None;
-                }
-            };
-            let Some(buffer) = sample.buffer() else {
-                self.close();
-                return None;
-            };
-            let Ok(data) = buffer.map_readable() else {
-                self.close();
-                return None;
-            };
-            // Opus 10/20 ms, mono PCM: at most two 480-sample output blocks.
-            if data.is_empty() || data.len() > 1920 || !data.len().is_multiple_of(960) {
+        let result = self.remote_audio.as_ref()?.decoder.as_ref()?.sample();
+        let sample = match result {
+            Ok(Some(s)) => s,
+            Ok(None) => return None,
+            Err(_) => {
                 self.close();
                 return None;
             }
-            for block in data.as_chunks::<960>().0 {
-                let mut pcm = [0; 480];
-                for (out, bytes) in pcm.iter_mut().zip(block.as_chunks::<2>().0) {
-                    *out = i16::from_le_bytes([bytes[0], bytes[1]]);
-                }
-                self.pcm.push_back(pcm);
-            }
+        };
+        let Some(buffer) = sample.buffer() else {
+            self.close();
+            return None;
+        };
+        let Ok(bytes) = buffer.map_readable() else {
+            self.close();
+            return None;
+        };
+        // audiobuffersplit owns block formation after conversion to mono S16LE
+        // at 48 kHz. Packet duration (including 40/60 ms) never changes this
+        // device contract. Keep an assertion at the native boundary rather than
+        // reintroducing a second PCM queue/splitter here.
+        if bytes.len() != 960 {
+            self.close();
+            return None;
         }
-        let data = self.pcm.pop_front()?;
+        let data = std::array::from_fn(|index| {
+            i16::from_le_bytes([bytes[index * 2], bytes[index * 2 + 1]])
+        });
         self.counters.audio_received = self.counters.audio_received.saturating_add(1);
         if data.iter().any(|s| s.unsigned_abs() > 100) {
             self.counters.audio_nonzero = self.counters.audio_nonzero.saturating_add(1);
@@ -1246,9 +1246,9 @@ impl NativePeer {
         self.remote_audio = None;
         self.remote_video = None;
         self.channels.clear();
-        self.pcm.clear();
         // Pooled PeerConnection Drop sets the driver's irreversible close latch.
         self.pc = None;
+        self.bridges.clear();
         while self.events.try_recv().is_ok() {}
     }
 }
@@ -1423,6 +1423,117 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn close_releases_turn_bridges_without_waiting_for_peer_drop() {
+        let mut peer = NativePeer::new(RtcConfiguration {
+            ice_servers: vec![IceServer {
+                urls: vec!["turn:localhost:3478?transport=tcp".into()],
+                username: "fixture".into(),
+                password: "fixture".into(),
+            }],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        assert_eq!(peer.bridges.len(), 1);
+        peer.close();
+        assert!(peer.bridges.is_empty());
+        assert_eq!(peer.publish(true, true), Err(Error::Closed));
+        peer.close();
+        assert!(peer.bridges.is_empty(), "close stays idempotent");
+    }
+
+    /// Exercise the production transport, decryptor, splitter and device handoff.
+    /// A 40/60 ms Opus packet used to close the peer in take_audio().
+    #[tokio::test]
+    async fn opus_packet_duration_changes_keep_audio_and_video_alive() {
+        for encrypted in [false, true] {
+            let key = [42; crate::media::e2ee::frame::KEY_LEN];
+            let config = || {
+                if encrypted {
+                    keyed(Some(key), Some(key))
+                } else {
+                    RtcConfiguration::default()
+                }
+            };
+            let mut sender = NativePeer::new(config()).await.unwrap();
+            let mut receiver = NativePeer::new(config()).await.unwrap();
+            let offer = sender.offer().await.unwrap();
+            let answer = receiver.remote(&offer).await.unwrap().unwrap();
+            sender.remote(&answer).await.unwrap();
+            sender.publish(true, true).unwrap();
+            let mut connected = [false; 2];
+            let mut tick = tokio::time::interval(Duration::from_millis(10));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let started = Instant::now();
+            let mut frame = 0_u64;
+            for duration in [10, 20, 40, 60] {
+                sender.audio.as_mut().unwrap().encoder =
+                    Some(Codec::audio_encoder_duration(duration).unwrap());
+                let audio_before = receiver.counters.audio_nonzero;
+                let video_before = receiver.counters.video_received;
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while Instant::now() < deadline {
+                    tick.tick().await;
+                    while let Some(event) = sender.event().await.unwrap() {
+                        match event {
+                            Event::Candidate(c) => receiver.candidate(&c).await.unwrap(),
+                            Event::Connection(s) => {
+                                connected[0] = s == PeerConnectionState::Connected
+                            }
+                        }
+                    }
+                    while let Some(event) = receiver.event().await.unwrap() {
+                        match event {
+                            Event::Candidate(c) => sender.candidate(&c).await.unwrap(),
+                            Event::Connection(s) => {
+                                connected[1] = s == PeerConnectionState::Connected
+                            }
+                        }
+                    }
+                    if !connected.iter().all(|c| *c) {
+                        continue;
+                    }
+                    let pcm = std::array::from_fn::<_, 480, _>(|n| {
+                        (((frame * 480 + n as u64) as f64 * 0.06).sin() * 6000.0) as i16
+                    });
+                    sender.audio(&pcm).await.unwrap();
+                    if frame.is_multiple_of(3) {
+                        sender
+                            .video(
+                                image((frame % 200) as u8),
+                                started.elapsed().as_micros() as i64,
+                            )
+                            .unwrap();
+                    }
+                    frame += 1;
+                    while receiver.take_audio().is_some() {}
+                    while receiver.take_video().is_some() {}
+                    assert!(
+                        receiver.is_open(),
+                        "Opus {duration} ms, encrypted={encrypted}"
+                    );
+                    if receiver.counters.audio_nonzero > audio_before + 30
+                        && receiver.counters.video_received > video_before + 5
+                    {
+                        break;
+                    }
+                }
+                assert!(
+                    receiver.counters.audio_nonzero > audio_before + 30,
+                    "fresh audible Opus {duration} ms, encrypted={encrypted}"
+                );
+                assert!(
+                    receiver.counters.video_received > video_before + 5,
+                    "fresh video during Opus {duration} ms, encrypted={encrypted}"
+                );
+            }
+            receiver.close();
+            assert!(receiver.take_audio().is_none());
+            assert_eq!(receiver.publish(true, true), Err(Error::Closed));
+        }
+    }
+
+    #[tokio::test]
     async fn one_static_screen_frame_decodes_without_following_capture_frames() {
         let mut sender = NativePeer::new(RtcConfiguration::default()).await.unwrap();
         let mut receiver = NativePeer::new(RtcConfiguration::default()).await.unwrap();
@@ -1484,6 +1595,12 @@ mod tests {
         let _turn = TURN.lock().await;
         'attempt: for _ in 0..6 {
             let (left, right) = configs();
+            let relay = [
+                left.ice_policy == IcePolicy::Relay,
+                right.ice_policy == IcePolicy::Relay,
+            ];
+            let connection_timeout =
+                Duration::from_secs(if relay.iter().any(|v| *v) { 15 } else { 4 });
             let mut a = NativePeer::new(left).await.unwrap();
             let mut b = NativePeer::new(right).await.unwrap();
             let offer = a.offer().await.unwrap();
@@ -1494,6 +1611,7 @@ mod tests {
             let start = Instant::now();
             let mut connected = [false; 2];
             let mut connected_at = None;
+            let mut decoded_before = None;
             let mut tick = tokio::time::interval(Duration::from_millis(10));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut frame = 0usize;
@@ -1513,6 +1631,11 @@ mod tests {
                 }
                 if connected.iter().all(|c| *c) {
                     let since = *connected_at.get_or_insert_with(Instant::now);
+                    if decoded_before.is_none() && since.elapsed() >= for_how_long / 2 {
+                        decoded_before = Some(
+                            [&a, &b].map(|p| (p.counters.audio_nonzero, p.counters.video_received)),
+                        );
+                    }
                     if since.elapsed() >= for_how_long {
                         break;
                     }
@@ -1532,14 +1655,51 @@ mod tests {
                         while peer.take_audio().is_some() {}
                         while peer.take_video().is_some() {}
                     }
-                } else if start.elapsed() > Duration::from_secs(4) {
+                } else if start.elapsed() > connection_timeout {
+                    eprintln!(
+                        "local media connection failed: states={connected:?} ICE={:?}/{:?}",
+                        a.ice_evidence().await,
+                        b.ice_evidence().await
+                    );
+                    for peer in [&a, &b] {
+                        if let Some(sctp) = peer.pc().unwrap().sctp().await {
+                            let dtls = sctp.transport();
+                            eprintln!(
+                                "transport states: SCTP={:?}, DTLS={:?}, ICE={:?}",
+                                sctp.state().await,
+                                dtls.state().await,
+                                dtls.ice_transport().state().await
+                            );
+                        }
+                    }
                     a.close();
                     b.close();
                     continue 'attempt;
                 }
                 frame += 1;
             }
-            let result = [&a, &b].map(|p| (p.counters.audio_nonzero, p.counters.video_received));
+            for (index, peer) in [&a, &b].into_iter().enumerate() {
+                if relay[index] {
+                    let evidence = peer.ice_evidence().await.unwrap();
+                    assert_eq!(
+                        evidence.selected.map(|p| p.local),
+                        Some(CandidateKind::Relay)
+                    );
+                    assert_eq!(
+                        evidence.host_candidates, 0,
+                        "relay-only never falls back to hosts"
+                    );
+                }
+            }
+            // Initial decoded media cannot stand in for continuing playout.
+            let before = decoded_before.unwrap();
+            let result = std::array::from_fn(|index| {
+                let peer = [&a, &b][index];
+                (
+                    peer.counters.audio_nonzero - before[index].0,
+                    peer.counters.video_received - before[index].1,
+                )
+            });
             a.close();
             b.close();
             return result;
@@ -1669,11 +1829,24 @@ mod tests {
             turn_tls: Some(tls.clone()),
             ..Default::default()
         };
-        let [a, b] = converse(|| (config(), config()), Duration::from_secs(5)).await;
-        assert!(
-            a.0 > 100 && a.1 > 10 && b.0 > 100 && b.1 > 10,
-            "relayed media decodes: {a:?} {b:?}"
-        );
+        for encrypted in [false, true] {
+            let [a, b] = converse(
+                || {
+                    let (mut left, mut right) = (config(), config());
+                    if encrypted {
+                        left.e2ee = keyed(Some([1; 32]), Some([2; 32])).e2ee;
+                        right.e2ee = keyed(Some([2; 32]), Some([1; 32])).e2ee;
+                    }
+                    (left, right)
+                },
+                Duration::from_secs(5),
+            )
+            .await;
+            assert!(
+                a.0 > 100 && a.1 > 10 && b.0 > 100 && b.1 > 10,
+                "relayed media decodes, E2EE={encrypted}: {a:?} {b:?}"
+            );
+        }
     }
 
     /// The control: the same harness shows media when nothing is encrypted, so

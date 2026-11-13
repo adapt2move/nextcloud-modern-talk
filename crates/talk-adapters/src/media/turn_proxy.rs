@@ -22,7 +22,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UdpSocket,
     sync::mpsc,
-    task::JoinHandle,
+    task::{JoinHandle, JoinSet},
 };
 use tokio_rustls::TlsConnector;
 
@@ -149,7 +149,7 @@ impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin> Stream for 
 /// A loopback UDP face for one TCP/TLS TURN server. Dropping it closes both.
 pub(super) struct Bridge {
     address: SocketAddr,
-    tasks: [JoinHandle<()>; 1],
+    task: JoinHandle<()>,
 }
 impl Bridge {
     /// The `host:port` to give the engine instead of the real server.
@@ -170,17 +170,12 @@ impl Bridge {
         let task = tokio::spawn(async move {
             let _ = relay(udp, target, tls).await;
         });
-        Ok(Self {
-            address,
-            tasks: [task],
-        })
+        Ok(Self { address, task })
     }
 }
 impl Drop for Bridge {
     fn drop(&mut self) {
-        for task in &self.tasks {
-            task.abort();
-        }
+        self.task.abort();
     }
 }
 
@@ -198,33 +193,37 @@ async fn relay(
 ) -> Result<(), Error> {
     use std::collections::HashMap;
     let mut sessions: HashMap<SocketAddr, mpsc::Sender<Vec<u8>>> = HashMap::new();
+    // The bridge owns every session, including incomplete TLS handshakes.
+    // Cancelling this task drops the JoinSet and aborts all children; no detached
+    // reader or connection task can retain a socket after call revocation.
+    let mut clients: JoinSet<SocketAddr> = JoinSet::new();
     let mut datagram = vec![0_u8; MAX_FRAME + 1];
     loop {
-        let (n, from) = udp
-            .recv_from(&mut datagram)
-            .await
-            .map_err(|_| Error::Engine)?;
-        let Some(bytes) = to_stream(&datagram[..n]) else {
-            continue;
-        };
-        sessions.retain(|_, queue| !queue.is_closed());
-        if !sessions.contains_key(&from) {
-            if sessions.len() >= MAX_CLIENTS {
-                continue;
+        tokio::select! {
+            Some(completed) = clients.join_next(), if !clients.is_empty() => {
+                let client = completed.map_err(|_| Error::Engine)?;
+                sessions.remove(&client);
             }
-            let (queue, receive) = mpsc::channel(QUEUE);
-            tokio::spawn(session(
-                udp.clone(),
-                from,
-                target.clone(),
-                tls.clone(),
-                receive,
-            ));
-            sessions.insert(from, queue);
-        }
-        if let Some(queue) = sessions.get(&from) {
-            // A full queue drops the datagram, as a congested UDP path would.
-            let _ = queue.try_send(bytes);
+            received = udp.recv_from(&mut datagram) => {
+                let (n, from) = received.map_err(|_| Error::Engine)?;
+                let Some(bytes) = to_stream(&datagram[..n]) else { continue; };
+                if !sessions.contains_key(&from) {
+                    if sessions.len() >= MAX_CLIENTS { continue; }
+                    let (queue, receive) = mpsc::channel(QUEUE);
+                    let udp = udp.clone();
+                    let target = target.clone();
+                    let tls = tls.clone();
+                    clients.spawn(async move {
+                        session(udp, from, target, tls, receive).await;
+                        from
+                    });
+                    sessions.insert(from, queue);
+                }
+                if let Some(queue) = sessions.get(&from) {
+                    // Full or retiring sessions drop the datagram, as UDP does.
+                    let _ = queue.try_send(bytes);
+                }
+            }
         }
     }
 }
@@ -242,7 +241,7 @@ async fn session(
         return;
     };
     let (mut read, mut write) = tokio::io::split(stream);
-    let reader = tokio::spawn(async move {
+    let reader = async {
         let mut buffer: Vec<u8> = Vec::with_capacity(READ_CHUNK);
         let mut chunk = vec![0_u8; READ_CHUNK];
         loop {
@@ -264,13 +263,23 @@ async fn session(
                 return;
             }
         }
-    });
-    while let Some(bytes) = outgoing.recv().await {
-        if write.write_all(&bytes).await.is_err() {
-            break;
+    };
+    let writer = async {
+        while let Some(bytes) = outgoing.recv().await {
+            if !matches!(
+                tokio::time::timeout(CONNECT_TIMEOUT, write.write_all(&bytes)).await,
+                Ok(Ok(()))
+            ) {
+                return;
+            }
         }
+    };
+    // EOF and write failure both retire the whole session. This also closes the
+    // queue, so the bridge can admit a fresh connection for that source address.
+    tokio::select! {
+        () = reader => {},
+        () = writer => {},
     }
-    reader.abort();
 }
 
 #[cfg(test)]
@@ -416,6 +425,79 @@ mod tests {
         exchange(&bridge).await;
     }
 
+    #[tokio::test]
+    async fn server_eof_retires_a_session_even_while_its_input_queue_is_open() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            drop(stream);
+        });
+        let udp = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let (_keep_open, receive) = mpsc::channel(QUEUE);
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            session(
+                udp.clone(),
+                udp.local_addr().unwrap(),
+                Target {
+                    host: "127.0.0.1".into(),
+                    port,
+                    tls: false,
+                },
+                None,
+                receive,
+            ),
+        )
+        .await
+        .expect("EOF must close both halves without another outgoing packet");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dropping_a_bridge_aborts_an_incomplete_tls_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let bridge = Bridge::start(
+            Target {
+                host: "localhost".into(),
+                port,
+                tls: true,
+            },
+            Some(trusting(Some(fixtures().0))),
+        )
+        .await
+        .unwrap();
+        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        client
+            .send_to(&stun(&[0, 0x19, 0, 4, 17, 0, 0, 0]), bridge.address())
+            .await
+            .unwrap();
+        let (mut server, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        // The server deliberately never completes TLS. Observe ClientHello so
+        // cancellation cannot accidentally pass before the child task starts.
+        let mut first = [0_u8; 1];
+        tokio::time::timeout(Duration::from_secs(2), server.read_exact(&mut first))
+            .await
+            .unwrap()
+            .unwrap();
+        drop(bridge);
+        let mut remaining = Vec::new();
+        let mut bounded = server.take(16 * 1024);
+        let read = bounded.read_to_end(&mut remaining);
+        tokio::time::timeout(Duration::from_secs(2), read)
+            .await
+            .expect("bridge drop must abort TLS before the five-second connect deadline")
+            .unwrap();
+        assert!(
+            remaining.len() < 16 * 1024,
+            "connection ended, not the read bound"
+        );
+    }
+
     fn fixtures() -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
         (
             CertificateDer::from(include_bytes!("fixtures/turn-test-cert.der").to_vec()),
@@ -428,6 +510,9 @@ mod tests {
         Arc::new(rustls::crypto::aws_lc_rs::default_provider())
     }
     async fn tls_server() -> u16 {
+        tls_server_on("127.0.0.1").await
+    }
+    async fn tls_server_on(address: &str) -> u16 {
         let (certificate, key) = fixtures();
         let config = rustls::ServerConfig::builder_with_provider(provider())
             .with_safe_default_protocol_versions()
@@ -436,7 +521,7 @@ mod tests {
             .with_single_cert(vec![certificate], key)
             .unwrap();
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TcpListener::bind((address, 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             while let Ok((tcp, _)) = listener.accept().await {
@@ -508,10 +593,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_name_the_certificate_does_not_cover_is_refused() {
-        let port = tls_server().await;
+        // Reach an actual TLS listener: an unresolvable turn.invalid hostname
+        // would only prove DNS failure, not certificate name verification.
+        // The trusted fixture covers 127.0.0.1, but not this loopback address.
+        let port = tls_server_on("127.0.0.2").await;
         let bridge = Bridge::start(
             Target {
-                host: "turn.invalid".into(),
+                host: "127.0.0.2".into(),
                 port,
                 tls: true,
             },

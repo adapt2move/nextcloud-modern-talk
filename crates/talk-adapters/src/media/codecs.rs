@@ -14,7 +14,7 @@ pub(super) struct Codec {
     pub(super) dimensions: Option<(u32, u32)>,
 }
 impl Codec {
-    fn new(description: &str, buffers: u64, bytes: u64) -> Result<Self, Error> {
+    pub(super) fn new(description: &str, buffers: u64, bytes: u64) -> Result<Self, Error> {
         gst::init().map_err(|_| Error::Engine)?;
         let pipeline = gst::parse::launch(description)
             .map_err(|_| Error::Engine)?
@@ -45,12 +45,19 @@ impl Codec {
         Ok(result)
     }
     pub(super) fn audio_encoder() -> Result<Self, Error> {
+        Self::audio_encoder_duration(10)
+    }
+    // Tests feed real 10/20/40/60 ms packets without adding a public call option.
+    pub(super) fn audio_encoder_duration(milliseconds: u32) -> Result<Self, Error> {
         Self::new(
-            concat!(
-                "appsrc name=input is-live=true format=time block=false ",
-                "caps=audio/x-raw,format=S16LE,layout=interleaved,rate=48000,channels=1 ! ",
-                "opusenc frame-size=10 bitrate=32000 inband-fec=true ! ",
-                "appsink name=output sync=false max-buffers=3 drop=true enable-last-sample=false"
+            &format!(
+                concat!(
+                    "appsrc name=input is-live=true format=time block=false ",
+                    "caps=audio/x-raw,format=S16LE,layout=interleaved,rate=48000,channels=1 ! ",
+                    "opusenc frame-size={} bitrate=32000 inband-fec=true ! ",
+                    "appsink name=output sync=false max-buffers=3 drop=true enable-last-sample=false"
+                ),
+                milliseconds
             ),
             3,
             2880,
@@ -94,16 +101,20 @@ impl Codec {
                 "audio",
                 "OPUS",
                 48_000,
-                "rtpopusdepay name=depay ! opusdec plc=true ! audioconvert ! audioresample ! audio/x-raw,format=S16LE,layout=interleaved,rate=48000,channels=1",
+                "rtpopusdepay name=depay ! opusdec plc=true ! audioconvert ! audioresample ! audio/x-raw,format=S16LE,layout=interleaved,rate=48000,channels=1 ! audiobuffersplit output-buffer-duration=1/100 strict-buffer-size=true",
             )
         };
         let latency = if video && screen { 100 } else { 30 };
+        // A legal Opus packet can decode to 120 ms in one streaming-thread
+        // burst. Retain twelve 10 ms blocks so splitting does not itself discard
+        // half of a normal 60 ms packet before the device's next tick.
+
         // A static screen may supply one complete frame. Sink preroll must not
         // hold that frame waiting for further input before samples can be read.
         let result = Self::new(
             &format!(
                 "appsrc name=input is-live=true format=time do-timestamp=true block=false caps=application/x-rtp,media={media},encoding-name={name},clock-rate={clock},payload={payload} ! rtpjitterbuffer latency={latency} drop-on-latency=true max-dropout-time=1000 max-misorder-time=100 ! {tail} ! appsink name=output sync=false async=false max-buffers={} drop=true enable-last-sample=false",
-                if video { 2 } else { 3 }
+                if video { 2 } else { 12 }
             ),
             if video && screen {
                 1024
@@ -406,6 +417,55 @@ mod tests {
             })
         })
         .is_some()
+    }
+
+    #[test]
+    fn opus_packet_bursts_retain_every_ten_ms_block_within_the_output_bound() {
+        for milliseconds in [10_u32, 20, 40, 60] {
+            let encoder = Codec::audio_encoder_duration(milliseconds).unwrap();
+            let decoder = Codec::decoder(false, 111, false, None).unwrap();
+            for frame in 0..milliseconds / 10 {
+                let pcm = (0..480)
+                    .flat_map(|n| {
+                        ((((frame * 480 + n) as f64 * 0.06).sin() * 6000.0) as i16).to_le_bytes()
+                    })
+                    .collect();
+                encoder
+                    .push(
+                        pcm,
+                        Some(Duration::from_millis(u64::from(frame * 10))),
+                        Some(Duration::from_millis(10)),
+                    )
+                    .unwrap();
+                // Keep the finite capture queue from dropping unprocessed input.
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let (opus, _) = wait(|| encoder.encoded(4096).unwrap()).unwrap();
+            let payloads = OpusPayloader.payload(1200, &opus.into()).unwrap();
+            let mut sequence = 0_u16;
+            for packet in rtp!(payloads, 111, sequence, 0) {
+                decoder.push(packet, None, None).unwrap();
+            }
+            let blocks = u64::from(milliseconds / 10);
+            // Observe native completion before draining: a three-block appsink
+            // would already have discarded half of a 60 ms packet here.
+            wait(|| {
+                (decoder
+                    .sink
+                    .property::<gst::Structure>("stats")
+                    .get::<u64>("rendered")
+                    .unwrap()
+                    >= blocks)
+                    .then_some(())
+            })
+            .unwrap();
+            let mut received = 0;
+            while let Some(sample) = decoder.sample().unwrap() {
+                assert_eq!(sample.buffer().unwrap().size(), 960);
+                received += 1;
+            }
+            assert_eq!(received, blocks, "all blocks of a {milliseconds} ms packet");
+        }
     }
 
     #[test]

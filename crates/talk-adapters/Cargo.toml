@@ -83,6 +83,9 @@ path = "../../tools/media/talk_bridge.rs"
 required-features = ["backend-test"]
 
 [dev-dependencies]
+# Migration acceptance probes only; not linked into the shipping engine.
+gstreamer-webrtc.workspace = true
+gst-plugin-rtp.workspace = true
 nextcloud-talk-api = { workspace = true, features = ["backend-test"] }
 
 [lints]

@@ -81,7 +81,31 @@ class RepositoryTests(unittest.TestCase):
     def add(self, subject, body=""):
         (self.root / "f").write_text(subject)
         self.git("add", "f")
-        self.git("commit", "-q", "-m", subject, "-m", body or "body")
+        arguments = ["commit", "-q", "-m", subject]
+        if body:
+            arguments += ["-m", body]
+        self.git(*arguments)
+
+    def test_subject_only_commit_lints_and_plans_without_losing_its_empty_body(self):
+        self.add("fix(media): preserve packet boundaries")
+        rows = plan.commits("v0.0.1..HEAD")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["body"], "")
+        self.assertEqual(plan.lint("v0.0.1", "HEAD"), 0)
+        self.assertEqual(plan.plan()[2], "0.0.2")
+        self.assertIn("Preserve packet boundaries", plan.notes("0.0.2", [plan.classify(rows[0])]))
+
+    def test_mixed_bodies_preserve_every_commit_in_a_multi_commit_range(self):
+        self.add("fix: oldest without a body")
+        self.add("feat: middle", "Details\n\nBREAKING CHANGE: protocol changed")
+        self.add("docs: newest without a body")
+        rows = plan.commits("v0.0.1..HEAD")
+        self.assertEqual([row["subject"] for row in rows], [
+            "docs: newest without a body", "feat: middle", "fix: oldest without a body"])
+        self.assertEqual((rows[0]["body"], rows[2]["body"]), ("", ""))
+        self.assertIn("BREAKING CHANGE: protocol changed", rows[1]["body"])
+        self.assertEqual(plan.lint("v0.0.1", "HEAD"), 0)
+        self.assertEqual(plan.plan()[2], "0.1.0")
 
     def test_only_commits_after_the_newest_stable_tag_count(self):
         self.assertEqual(plan.last_tag(), "v0.0.1")

@@ -52,6 +52,8 @@ PLUGINS = {
     "rtp": ["rtpopusdepay", "rtpvp8depay"],
     "audioconvert": ["audioconvert"],
     "audioresample": ["audioresample"],
+    "audiobuffersplit": ["audiobuffersplit"],
+    "rtpmanager": ["rtpjitterbuffer"],
     "videoconvertscale": ["videoconvert", "videoscale"],
     "videorate": ["videorate"],
     "applemedia": ["avfvideosrc", "avfdeviceprovider", "vtdec"],

@@ -39,11 +39,24 @@ of complete parity with the official clients.
   certificate is verified by the operating system's trust store, so a company CA
   installed in the system is honoured, and an unverified relay carries nothing.
   TLS TURN was checked against a real coturn server with relayed audio and video
-  decoding on both sides, not against a Talk deployment's own TURN. STUN over TLS
+  decoding on both sides, including Talk frame E2EE, in an isolated Linux IPv4
+  fixture, not against a Talk deployment's own TURN. Host firewall policy must
+  permit the interface-bound UDP hop to the loopback bridge; rules blocking that
+  hop prevent relay allocation despite a reachable TLS endpoint. STUN over TLS
   or TCP and live TURN credential rotation in established peers are unavailable.
   The bridge is a separate TCP connection per local interface the engine
   allocates on, which a TLS-only TURN server may count against per-user quotas.
   Relay-required calls never fall back to host candidates.
+- The integrated GStreamer `webrtcbin` migration is incomplete: the native
+  `rtpvp8pay` rejects valid Talk-encrypted VP8 frames because it parses encrypted
+  partition data, and `ice-restart=true` reuses old credentials in the exercised
+  `webrtcbin` path. An alternative test-only Rust payloader does not establish a
+  qualified replacement transport. The shipping Rust WebRTC transport/packetizer and verified
+  TURN bridge remain in use. The test-only bindings and opt-in probes do not
+  establish Talk/Janus interoperability for a new transport. See
+  [native media architecture](architecture/README.md#native-media).
+  Opus reception uses bounded native 10 ms PCM blocks, including for 40/60 ms
+  packets. This does not qualify physical audio devices or another platform.
 - Recovery is bounded and revalidates policy. HPB resume retains microphone/camera
   intent, but full network handover and Janus ICE recovery remain unqualified.
   Full HPB process replacement with an existing Talk 25 web peer can leave its

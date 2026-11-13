@@ -105,6 +105,45 @@ Selecting a conversation or ringing never opens devices. Explicit preview is sep
 from call publication. Required E2EE and unsupported profiles fail closed. See
 [known limitations](../limitations.md) for the actual supported profile.
 
+Audio reception converts decoded Opus to mono S16LE at 48 kHz, then
+`audiobuffersplit` forms exact 10 ms (480 sample) blocks. The appsink retains at
+most twelve blocks (120 ms, enough for one maximum-duration Opus packet) and
+drops the oldest under overload. Packet durations of
+10/20/40/60 ms do not change the device contract. There is no second Rust PCM
+splitter or intermediate PCM queue.
+
+The migration to a connected `webrtcbin` pipeline is **incomplete**. Its
+acceptance probes use the exact `gstreamer-webrtc` 0.25.4 bindings only in tests;
+production still uses Rust WebRTC. Talk E2EE must seal whole encoded frames
+before RTP fragmentation and open them after depayloading, retaining the clear
+Opus TOC or VP8 10/3-byte header. GStreamer's `rtpvp8pay` parses the encrypted
+VP8 partition header and rejects valid sealed frames. Moving encryption after
+packetization would change Talk's frame protocol. The ignored
+[`talk_e2ee_vp8_survives_gstreamer_payloader`](../../crates/talk-adapters/src/media/gstreamer_probe.rs)
+acceptance test exposes this blocker with an unencrypted control. The test-only
+`gst-plugin-rtp` 0.15.4 alternative (`rtpvp8pay2`) preserves sealed keyframes
+and delta frames in the exercised pay/depay probe; it is not selected for
+production. A compatible frame packetizer integration and
+its packaged dependencies need qualification before replacing the shipping path.
+The separate `webrtcbin_ice_restart_rotates_credentials` gate also rejects an
+`ice-restart=true` offer that reuses both credentials. The pinned
+[1.28.4 offer path](https://github.com/GStreamer/gstreamer/blob/1.28.4/subprojects/gst-plugins-bad/ext/webrtc/gstwebrtcbin.c#L3578)
+still reuses previous credentials; replacing a peer instead would need a deliberate
+signaling/lifetime design and recovery qualification. Key exchange, rotation, publication
+gates and call/account generations remain with their existing owners.
+
+The verified TURN TCP/TLS bridge remains required. The inspected
+[libnice 0.1.23 RFC relay path](https://github.com/libnice/libnice/blob/0.1.23/agent/agent.c#L2913)
+does not supply a TLS handshake or system certificate verification; its pseudo-SSL
+branches are for older Google/MS compatibility modes. The macOS SDK recipe pins
+0.1.23; Windows pins 0.1.22 with the same limitation. A `turns` URI alone is not
+proof of equivalent TLS support. Each bridge owns a bounded task set for its
+connections; EOF retires both stream halves, and call close aborts even an
+incomplete TLS handshake instead of leaving detached reader/connection tasks.
+A required TLS verifier that cannot initialize fails peer construction closed.
+Native `webrtcbin`, ICE, DTLS/SRTP and RTP plugins
+are prerequisites of the opt-in probes, not a shipping-backend selection.
+
 The [legacy native helper](../../native/media/README.md) is diagnostic-only. Its
 process isolation and allocation model do not apply to the shipping engine.
 Application frame/queue bounds do not cap decoder, OS or GPU allocations. Complete

@@ -33,7 +33,9 @@ MAX_SUBJECT = 100
 
 
 def git(*args):
-    return subprocess.check_output(["git", *args], cwd=ROOT, text=True, timeout=60).strip()
+    # strip() also consumes the control-character field/record separators used
+    # by commits(), losing the final empty body of a subject-only commit.
+    return subprocess.check_output(["git", *args], cwd=ROOT, text=True, timeout=60).rstrip("\n")
 
 
 def workspace_version():

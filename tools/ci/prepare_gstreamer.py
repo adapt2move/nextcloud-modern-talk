@@ -28,6 +28,26 @@ PACKAGES = {
          ("gstreamer-1.0-devel-msvc-x86_64-1.26.11.msi", "af0a0720692052aaf5fb0cf2847ef34a87016ef0f914328d516f049e6c86f587")]),
 }
 
+# The complete development SDK supports production codecs/block formation and
+# opt-in webrtcbin integration probes. Presence is a layout check, not proof of
+# plugin loading, ICE, DTLS or TLS certificate verification on a native host.
+REQUIRED_PC = ("gstreamer-1.0", "gstreamer-app-1.0", "gstreamer-audio-1.0",
+               "gstreamer-video-1.0", "gstreamer-rtp-1.0", "gstreamer-net-1.0",
+               "gstreamer-sdp-1.0", "gstreamer-webrtc-1.0")
+REQUIRED_PLUGINS = ("app", "opus", "vpx", "audioconvert", "audioresample",
+                    "audiobuffersplit", "rtp", "rtpmanager", "webrtc", "nice", "dtls", "srtp")
+
+
+def verify_sdk(destination, mac):
+    required = [destination / "lib/pkgconfig" / (name + ".pc") for name in REQUIRED_PC]
+    prefix, suffix = ("libgst", ".dylib") if mac else ("gst", ".dll")
+    required += [destination / "lib/gstreamer-1.0" / (prefix + name + suffix)
+                 for name in REQUIRED_PLUGINS]
+    for path in required:
+        if not path.is_file():
+            raise ValueError(f"Installed SDK is missing required media input: {path}")
+
+
 MAX_RANGE_BYTES = 16 * 1024 * 1024
 
 
@@ -199,6 +219,7 @@ def install(target):
     if not pkg_config.is_file():
         detail = "" if mac else f"; MSI logs: {log_dir}"
         raise ValueError(f"Installed SDK has no GStreamer pkg-config file at {pkg_config}{detail}")
+    verify_sdk(destination, mac)
     with Path(os.environ["GITHUB_PATH"]).open("a") as output:
         output.write(str(binary) + "\n")
     with Path(os.environ["GITHUB_ENV"]).open("a") as output:
