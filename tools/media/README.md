@@ -24,6 +24,14 @@ python3 tools/media/normal_talk.py --manifest /run/LAB/manifest.json \
   --scenario native-screen --participants 3 --output /tmp/native-screen.json
 ```
 
+Use `--scenario media --participants 3 --join-third-after-media` to join a third
+browser participant after five seconds of established bidirectional media. The
+native driver observes another 50 seconds after initial media readiness, including
+time for an outstanding internal-signaling poll. A pass requires the same call
+generation, continuing audio/video, two flowing remote cameras and media decoded
+by the third browser. Add `--hpb-target` for the owned HPB adjunct. Generated media
+does not reproduce every real participant's codec or network.
+
 The participant count is two or three. Cases include `media`, `native-screen`,
 `native-static-screen`, `portal-screen`, `web-screen`, explicit `reconnect`,
 `network-resume`, `web-screen-resume` and `session-replaced` (replacement

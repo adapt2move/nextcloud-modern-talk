@@ -46,13 +46,19 @@ class FreshDirect(FreshRoom):
    body=json.loads(raw)['ocs'];record['status']=response.status
    if body['meta']['status']!='ok' or body['meta']['statuscode'] not in (100,200,201):raise RuntimeError('direct setup status')
    return body['data']
-async def spawn_native(executable,fixture,output,scenario,recovery_window):
- process=await asyncio.create_subprocess_exec(str(executable),str(fixture),str(output),('web-screen' if scenario=='web-screen-resume' else scenario),stdout=asyncio.subprocess.DEVNULL,stderr=asyncio.subprocess.PIPE,env={**os.environ,'NMT_MEDIA_RECOVERY_SECONDS':str(recovery_window),'NMT_MEDIA_RECOVERY_PROBE':str(scenario in ('network-resume','session-replaced','web-screen-resume')).lower()})
+async def spawn_native(executable,fixture,output,scenario,recovery_window,late_join=False):
+ process=await asyncio.create_subprocess_exec(str(executable),str(fixture),str(output),('participant-join' if late_join else 'web-screen' if scenario=='web-screen-resume' else scenario),stdout=asyncio.subprocess.DEVNULL,stderr=asyncio.subprocess.PIPE,env={**os.environ,'NMT_MEDIA_RECOVERY_SECONDS':str(recovery_window),'NMT_MEDIA_RECOVERY_PROBE':str(scenario in ('network-resume','session-replaced','web-screen-resume')).lower()})
  errors=bytearray()
  async def drain():
   while block:=await process.stderr.read(4096):
    if len(errors)<16384:errors.extend(block[:16384-len(errors)])
  return process,errors,asyncio.create_task(drain())
+async def join_third(page,url):
+ await page.goto(url,wait_until='domcontentloaded',timeout=30000);await page.wait_for_timeout(1800);await press(page,['Close','Dismiss','Skip'])
+ for _ in range(5):
+  if await page.get_by_role('button',name='Leave call',exact=True).count():return True
+  await press(page,['Start call','Join call','Join the call','Join']);await page.wait_for_timeout(1000)
+ return bool(await page.get_by_role('button',name='Leave call',exact=True).count())
 async def run(args,report):
  m=private_json(args.manifest);c=private_json(m['credentials_file']);origin=urlparse(m['client_url']);target=urlparse(m['vm_url'])
  if not m['ready'] or origin.hostname!='127.0.0.1' or origin.scheme not in ('http','https'):raise RuntimeError('fixture origin')
@@ -83,11 +89,8 @@ async def run(args,report):
      await asyncio.to_thread(room.request,'POST','/'+token+'/participants',{'newParticipant':'lab_outsider','source':'users'})
      extra_context=await browser.new_context(viewport={'width':1280,'height':900},locale='en-US',permissions=['camera','microphone']);await extra_context.add_init_script('('+INSTRUMENT+')()');extra_page=await extra_context.new_page()
      await extra_page.goto(m['client_url']+'/login',wait_until='domcontentloaded',timeout=30000);await extra_page.locator('#user').fill('lab_outsider');await extra_page.locator('#password').fill(c['users']['lab_outsider']);await extra_page.get_by_role('button',name='Log in',exact=True).click();await extra_page.wait_for_url(lambda url:'/login' not in urlparse(url).path,timeout=30000)
-     await extra_page.goto(m['client_url']+'/index.php/call/'+token,wait_until='domcontentloaded',timeout=30000);await extra_page.wait_for_timeout(1800);await press(extra_page,['Close','Dismiss','Skip'])
-     for _ in range(5):
-      if await extra_page.get_by_role('button',name='Leave call',exact=True).count():break
-      await press(extra_page,['Start call','Join call','Join the call','Join']);await extra_page.wait_for_timeout(1000)
-    if args.order=='native-first':process,native_errors,error_task=await spawn_native(args.executable,fixture,output,args.scenario,recovery_window)
+     if not args.join_third_after_media:await join_third(extra_page,m['client_url']+'/index.php/call/'+token)
+    if args.order=='native-first':process,native_errors,error_task=await spawn_native(args.executable,fixture,output,args.scenario,recovery_window,args.join_third_after_media)
     report['stage']='browser call';await page.goto(m['client_url']+'/index.php/call/'+token,wait_until='domcontentloaded',timeout=30000);await page.wait_for_timeout(1800);await press(page,['Close','Dismiss','Skip']);report['ui_actions']=[]
     for _ in range(5):
      if await page.get_by_role('button',name='Leave call',exact=True).count():break
@@ -96,16 +99,19 @@ async def run(args,report):
      await page.wait_for_timeout(1000)
     report['browser_pre_call']=await page.evaluate("({buttons:[...document.querySelectorAll('button')].slice(0,32).map(b=>(b.getAttribute('aria-label')||b.innerText||'').slice(0,80)),text:document.body.innerText.slice(0,1800)})")
     report['stage']='normal native exchange'
-    if process is None:process,native_errors,error_task=await spawn_native(args.executable,fixture,output,args.scenario,recovery_window)
-    samples=[];start=time.monotonic();policy_changed=False;screen_started=False;screen_stopped=False;network_cut=False;peer_rejoined=False;fault_sample=None;extra_samples=[]
-    while process.returncode is None and time.monotonic()-start<100:
+    if process is None:process,native_errors,error_task=await spawn_native(args.executable,fixture,output,args.scenario,recovery_window,args.join_third_after_media)
+    samples=[];start=time.monotonic();policy_changed=False;screen_started=False;screen_stopped=False;network_cut=False;peer_rejoined=False;fault_sample=None;extra_samples=[];third_join=None
+    while process.returncode is None and time.monotonic()-start<(130 if args.join_third_after_media else 100):
      progress={}
      try:
       if output.exists():progress=json.loads(output.read_text())
      except (OSError,ValueError):pass
      ready=progress.get('media_ready_ms');timeline=progress.get('samples',[]);elapsed=(timeline[-1]['ms']-ready)/1000 if ready is not None and timeline else None
-     if len(samples)<192:samples.append(await page.evaluate('window.__nmt_stats()'))
-     if extra_page and len(extra_samples)<192:extra_samples.append(await extra_page.evaluate('window.__nmt_stats()'))
+     if len(samples)<(256 if args.join_third_after_media else 192):samples.append(await page.evaluate('window.__nmt_stats()'))
+     if extra_page and len(extra_samples)<(256 if args.join_third_after_media else 192):extra_samples.append(await extra_page.evaluate('window.__nmt_stats()'))
+     if args.join_third_after_media and third_join is None and elapsed is not None and elapsed>=5 and all(media_checks(samples).values()):
+      third_join=dict(timeline[-1]);report['third_join_after_media']=True;report['third_join_native_ms']=third_join['ms']
+      report['third_joined']=await join_third(extra_page,m['client_url']+'/index.php/call/'+token)
      if args.scenario in ('network-resume','session-replaced','web-screen-resume') and not network_cut and elapsed is not None and elapsed>=9 and all(media_checks(samples).values()) and (not extra_page or all(media_checks(extra_samples).values())):
       report['fault_after_initial_media']=True;fault_sample=len(samples)-1;report['fault_native_ms']=timeline[-1]['ms']
       if args.scenario=='session-replaced':
@@ -153,6 +159,12 @@ async def run(args,report):
     if args.rejoin_web_peer_after_replacement:checks['explicit_browser_rejoin_complete']=report.get('explicit_browser_rejoin_fixture',{}).get('joined',False)
     if args.refresh_web_peer_flags_after_replacement:checks['explicit_browser_flags_refresh_complete']=report.get('explicit_browser_flags_refresh_fixture',{}).get('status')==200
     if args.scenario=='policy-loss':checks['policy_changed_after_media']=policy_changed
+    if args.join_third_after_media:
+     after=[s for s in report['native'].get('samples',[]) if third_join is not None and s['ms']>third_join['ms']]
+     checks['third_join_after_media']=report.get('third_join_after_media',False) and report.get('third_joined',False)
+     checks['same_generation_after_join']=bool(after) and all(s['generation']==third_join['generation'] for s in after)
+     checks['native_media_after_join']=bool(after) and after[-1]['phase']=='Active' and after[-1]['peers']==2 and after[-1]['audio_received']>third_join['audio_received']+100 and after[-1]['video_received']>third_join['video_received']+10
+     checks['both_remote_cameras_flowing']=sum(s.get('kind')=='Camera' and s.get('flowing',False) for s in report['native'].get('remote_streams',[]))==2
     if extra_page:checks['third_party_av']=all(media_checks(extra_samples).values());report['third_party_samples']=extra_samples
     report['browser_checks']=checks;report['result']='pass' if (all(checks.values()) or args.scenario=='incoming-decline') and report['native'].get('result')=='pass' else 'fail'
     if policy_changed:await asyncio.to_thread(room.request,'PUT','/'+token+'/read-only',{'state':0})
@@ -172,9 +184,10 @@ async def run(args,report):
     await context.close();await browser.close();report['room_cleanup']=await room.close();report['private_fixture_removed']=True
     if report['room_cleanup']!='absence_confirmed':report['result']='fail'
 def main():
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('--manifest',type=Path,required=True);p.add_argument('--executable',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--scenario',choices=['media','reconnect','policy-loss','incoming-accept','incoming-decline','native-screen','native-static-screen','portal-screen','web-screen','network-resume','session-replaced','web-screen-resume'],default='media');p.add_argument('--participants',type=int,choices=[2,3],default=2);p.add_argument('--hpb-target');p.add_argument('--lab-state',type=Path);p.add_argument('--rejoin-web-peer-after-replacement',action='store_true',help='Qualification only: explicitly leave/rejoin the web peer after HPB replacement');p.add_argument('--refresh-web-peer-flags-after-replacement',action='store_true',help='Diagnostic only: reassert the owned web peer call flags after native fresh admission');p.add_argument('--order',choices=['browser-first','native-first'],default='browser-first');args=p.parse_args()
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--manifest',type=Path,required=True);p.add_argument('--executable',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--scenario',choices=['media','reconnect','policy-loss','incoming-accept','incoming-decline','native-screen','native-static-screen','portal-screen','web-screen','network-resume','session-replaced','web-screen-resume'],default='media');p.add_argument('--participants',type=int,choices=[2,3],default=2);p.add_argument('--hpb-target');p.add_argument('--lab-state',type=Path);p.add_argument('--rejoin-web-peer-after-replacement',action='store_true',help='Qualification only: explicitly leave/rejoin the web peer after HPB replacement');p.add_argument('--refresh-web-peer-flags-after-replacement',action='store_true',help='Diagnostic only: reassert the owned web peer call flags after native fresh admission');p.add_argument('--join-third-after-media',action='store_true',help='Join a third browser participant after established bidirectional AV');p.add_argument('--order',choices=['browser-first','native-first'],default='browser-first');args=p.parse_args()
  if (args.rejoin_web_peer_after_replacement or args.refresh_web_peer_flags_after_replacement) and (args.scenario!='session-replaced' or not args.hpb_target):p.error('web peer intervention requires session-replaced with an owned HPB target')
  if args.rejoin_web_peer_after_replacement and args.refresh_web_peer_flags_after_replacement:p.error('choose only one web peer intervention')
+ if args.join_third_after_media and (args.scenario!='media' or args.participants!=3):p.error('late third join requires media with three participants')
  report={'workflow':'normal-talk-browser','result':'fail','harness_sha256':digest(__file__),'physical_devices':False,'scenario':args.scenario,'order':args.order,'automatic_recovery_fixture':not (args.rejoin_web_peer_after_replacement or args.refresh_web_peer_flags_after_replacement)}
  try:asyncio.run(run(args,report))
  except Exception as error:

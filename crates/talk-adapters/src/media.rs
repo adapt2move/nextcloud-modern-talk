@@ -31,6 +31,19 @@ pub(crate) fn note_call_stop(step: &'static str) {
         slot.0.get_or_insert(step);
     }
 }
+/// Commit a media failure together with its stop, so a concurrent successful
+/// policy refresh cannot clear the cause before composition observes it.
+pub(crate) fn note_call_stop_failure(
+    step: &'static str,
+    source: &'static str,
+    error: talk_core::ports::ErrorKind,
+) {
+    if let Ok(mut slot) = CALL_STOP.lock()
+        && slot.0.is_none()
+    {
+        *slot = (Some(step), Some((source, error)));
+    }
+}
 /// Remember the request whose failure led to a stop; `None` clears it once
 /// that request succeeds again. Fixed labels only.
 pub(crate) fn note_call_failure(failure: Option<CallFailure>) {

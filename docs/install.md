@@ -138,6 +138,12 @@ Process-local request numbers connect an operation to its result.
 Message text, account and conversation names, server addresses, credentials and
 raw backend responses are excluded. Nothing is uploaded automatically.
 
+Call stops record `operation: "call_stop"`. Media failures distinguish closed,
+overloaded, malformed and unsupported peers. The `detail` field names the fixed
+operation that failed, such as `VP8 header`, `video decoder input` or `data channel`;
+it contains no packet data or dependency error text. A media stop preserves its
+cause even if a concurrent policy refresh succeeds.
+
 Every run writes an `environment` line first (platform and detail level), records a
 `panic` line with only the source file and line if the app crashes, logs call phase
 changes, download results and the outcome of each desktop notification
