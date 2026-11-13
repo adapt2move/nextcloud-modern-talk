@@ -286,15 +286,35 @@ See [performance](quality/performance.md) for boundaries and qualification limit
 
 ## TURN over TLS check
 
-The `media_flows_through_a_real_turn_server_over_tls` test is ignored by default because it needs a TURN server the test cannot start. The server must present the throwaway certificate in `crates/talk-adapters/src/media/fixtures/turn-test-cert.der` (CN `nmt-turn-test`, SAN `localhost` and `127.0.0.1`; its key sits beside it and is test-only). With Docker, convert both files to PEM with `openssl`, mount them and start coturn on the TLS port only:
+The `media_flows_through_a_real_turn_server_over_tls` test is ignored by default:
+it requires a real TLS TURN server and the throwaway certificate/key in
+`crates/talk-adapters/src/media/fixtures`. On an owned disposable Linux media VM,
+run the bounded fixture:
 
 ```sh
-docker run -d --name nmt-coturn -p 5349:5349 -v "$PEM_DIR:/certs:ro" coturn/coturn:latest \
-  -n --lt-cred-mech --user nmt:secret --realm nmt.test --cert /certs/cert.pem \
-  --pkey /certs/key.pem --no-udp --no-tcp --tls-listening-port 5349 \
-  --min-port 49160 --max-port 49200 --allow-loopback-peers
-NMT_TURNS_URL='turns:127.0.0.1:5349?transport=tcp' NMT_TURN_USER=nmt NMT_TURN_PASS=secret \
-  python3 tools/cargo.py test --locked -p talk-adapters --lib -- media_flows_through_a_real_turn_server --ignored
+sudo apt-get install -y --no-install-recommends coturn iproute2 util-linux openssl
+sudo python3 tools/media/turn_tls.py
 ```
 
-Local ICE across many interfaces is not always reliable on a workstation; the test retries with fresh peers.
+The runner builds with the pinned toolchain/lockfile before entering a private
+IPv4 network namespace, starts coturn with TLS-only client access, verifies
+certificate/name readiness, and requires selected relay candidates plus fresh
+bidirectional decoded audio/video with and without Talk E2EE. It also runs the
+bridge certificate and cancellation regressions. The private network supplies
+real non-loopback veth addresses and multicast support for the engine's mDNS
+socket, with no connection to the host network or Internet. No host firewall or
+trust-store settings change. Synthetic relay credentials and private logs are
+removed when the fixture ends. A pass is an in-process Linux transport/codec
+result, not physical-device, public-network or native macOS/Windows qualification.
+
+Host network policies can block interface-bound UDP sent to the engine's
+loopback bridge even when a direct TLS handshake to coturn succeeds. This is
+why the fixture owns a namespace instead of weakening a firewall rule. The
+TURN path also needs a longer bounded negotiation window than direct host ICE:
+the test allows 15 seconds per relay connection attempt, then observes decoded
+media for five seconds and counts only its second half.
+
+For a separately owned server, the existing `NMT_TURNS_URL`, `NMT_TURN_USER` and
+`NMT_TURN_PASS` environment inputs remain available. That test explicitly trusts
+the fixture certificate; ordinary calls use the system verifier. Never disable
+certificate validation to substitute a different relay certificate.

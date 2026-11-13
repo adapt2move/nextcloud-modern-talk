@@ -39,7 +39,10 @@ of complete parity with the official clients.
   certificate is verified by the operating system's trust store, so a company CA
   installed in the system is honoured, and an unverified relay carries nothing.
   TLS TURN was checked against a real coturn server with relayed audio and video
-  decoding on both sides, not against a Talk deployment's own TURN. STUN over TLS
+  decoding on both sides, including Talk frame E2EE, in an isolated Linux IPv4
+  fixture, not against a Talk deployment's own TURN. Host firewall policy must
+  permit the interface-bound UDP hop to the loopback bridge; rules blocking that
+  hop prevent relay allocation despite a reachable TLS endpoint. STUN over TLS
   or TCP and live TURN credential rotation in established peers are unavailable.
   The bridge is a separate TCP connection per local interface the engine
   allocates on, which a TLS-only TURN server may count against per-user quotas.

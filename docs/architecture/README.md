@@ -137,7 +137,11 @@ The verified TURN TCP/TLS bridge remains required. The inspected
 does not supply a TLS handshake or system certificate verification; its pseudo-SSL
 branches are for older Google/MS compatibility modes. The macOS SDK recipe pins
 0.1.23; Windows pins 0.1.22 with the same limitation. A `turns` URI alone is not
-proof of equivalent TLS support. Native `webrtcbin`, ICE, DTLS/SRTP and RTP plugins
+proof of equivalent TLS support. Each bridge owns a bounded task set for its
+connections; EOF retires both stream halves, and call close aborts even an
+incomplete TLS handshake instead of leaving detached reader/connection tasks.
+A required TLS verifier that cannot initialize fails peer construction closed.
+Native `webrtcbin`, ICE, DTLS/SRTP and RTP plugins
 are prerequisites of the opt-in probes, not a shipping-backend selection.
 
 The [legacy native helper](../../native/media/README.md) is diagnostic-only. Its

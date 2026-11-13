@@ -189,3 +189,25 @@ handoff. It changes real Opus packet durations through 10/20/40/60 ms during a
 live video stream, with and without E2EE, and checks fresh decoded media in
 every phase. The native appsink drops oldest blocks beyond its twelve-block cap;
 packet duration does not enlarge an application PCM queue.
+
+## TLS TURN and cancellation
+
+On an owned disposable Linux VM with coturn, OpenSSL, iproute2 and util-linux,
+run `python3 tools/media/turn_tls.py` as root after preparing the native build
+prerequisites. The runner builds outside a private network namespace, then uses
+a veth pair and a real TLS-only coturn listener inside it. It changes no host
+firewall or trust settings, accepts no production credentials, and removes its
+throwaway files and server. Output records fixed outcomes only.
+
+Success requires a selected relay pair and continuing decoded audio/video in
+both directions, with and without Talk E2EE. Initial decoded frames do not
+qualify the final observation window. Certificate rejection and connection
+lifetime tests run separately from the positive media case. These are generated
+media and local-network checks; public TURN deployments and macOS/Windows are
+not thereby qualified.
+
+The local UDP hop from an interface-bound WebRTC socket to the loopback bridge
+must be permitted by the host. For example, Kubernetes localnet firewall rules
+can prevent relay allocation before TLS is even attempted. The fixture isolates
+that hop rather than changing firewall policy. A verified TLS endpoint alone
+must never be reported as relayed media.

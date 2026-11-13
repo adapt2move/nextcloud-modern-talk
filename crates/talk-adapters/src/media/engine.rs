@@ -512,7 +512,7 @@ pub struct NativePeer {
     local_candidates: u16,
     role: Role,
     e2ee: Option<crate::media::e2ee::Keys>,
-    _bridges: Vec<turn_proxy::Bridge>,
+    bridges: Vec<turn_proxy::Bridge>,
     ice_support: IceSupport,
     ice_evidence: IceEvidence,
 }
@@ -584,9 +584,13 @@ impl NativePeer {
         // TURN over TCP/TLS is carried by loopback bridges the peer owns.
         let mut bridges = Vec::with_capacity(relays.len());
         if !relays.is_empty() {
-            let tls = turn_proxy::system_tls().ok();
             #[cfg(test)]
-            let tls = config.turn_tls.clone().or(tls);
+            let mut tls = config.turn_tls.clone();
+            #[cfg(not(test))]
+            let mut tls = None;
+            if tls.is_none() && relays.iter().any(|relay| relay.target.tls) {
+                tls = Some(turn_proxy::system_tls()?);
+            }
             for relay in relays {
                 let bridge = turn_proxy::Bridge::start(relay.target, tls.clone()).await?;
                 ice_servers[relay.server].urls[relay.url] =
@@ -710,7 +714,7 @@ impl NativePeer {
             local_candidates: 0,
             role,
             e2ee: config.e2ee,
-            _bridges: bridges,
+            bridges,
             ice_support,
             ice_evidence: IceEvidence::default(),
         };
@@ -1244,6 +1248,7 @@ impl NativePeer {
         self.channels.clear();
         // Pooled PeerConnection Drop sets the driver's irreversible close latch.
         self.pc = None;
+        self.bridges.clear();
         while self.events.try_recv().is_ok() {}
     }
 }
@@ -1417,6 +1422,26 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn close_releases_turn_bridges_without_waiting_for_peer_drop() {
+        let mut peer = NativePeer::new(RtcConfiguration {
+            ice_servers: vec![IceServer {
+                urls: vec!["turn:localhost:3478?transport=tcp".into()],
+                username: "fixture".into(),
+                password: "fixture".into(),
+            }],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        assert_eq!(peer.bridges.len(), 1);
+        peer.close();
+        assert!(peer.bridges.is_empty());
+        assert_eq!(peer.publish(true, true), Err(Error::Closed));
+        peer.close();
+        assert!(peer.bridges.is_empty(), "close stays idempotent");
+    }
+
     /// Exercise the production transport, decryptor, splitter and device handoff.
     /// A 40/60 ms Opus packet used to close the peer in take_audio().
     #[tokio::test]
@@ -1570,6 +1595,12 @@ mod tests {
         let _turn = TURN.lock().await;
         'attempt: for _ in 0..6 {
             let (left, right) = configs();
+            let relay = [
+                left.ice_policy == IcePolicy::Relay,
+                right.ice_policy == IcePolicy::Relay,
+            ];
+            let connection_timeout =
+                Duration::from_secs(if relay.iter().any(|v| *v) { 15 } else { 4 });
             let mut a = NativePeer::new(left).await.unwrap();
             let mut b = NativePeer::new(right).await.unwrap();
             let offer = a.offer().await.unwrap();
@@ -1580,6 +1611,7 @@ mod tests {
             let start = Instant::now();
             let mut connected = [false; 2];
             let mut connected_at = None;
+            let mut decoded_before = None;
             let mut tick = tokio::time::interval(Duration::from_millis(10));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut frame = 0usize;
@@ -1599,6 +1631,11 @@ mod tests {
                 }
                 if connected.iter().all(|c| *c) {
                     let since = *connected_at.get_or_insert_with(Instant::now);
+                    if decoded_before.is_none() && since.elapsed() >= for_how_long / 2 {
+                        decoded_before = Some(
+                            [&a, &b].map(|p| (p.counters.audio_nonzero, p.counters.video_received)),
+                        );
+                    }
                     if since.elapsed() >= for_how_long {
                         break;
                     }
@@ -1618,14 +1655,51 @@ mod tests {
                         while peer.take_audio().is_some() {}
                         while peer.take_video().is_some() {}
                     }
-                } else if start.elapsed() > Duration::from_secs(4) {
+                } else if start.elapsed() > connection_timeout {
+                    eprintln!(
+                        "local media connection failed: states={connected:?} ICE={:?}/{:?}",
+                        a.ice_evidence().await,
+                        b.ice_evidence().await
+                    );
+                    for peer in [&a, &b] {
+                        if let Some(sctp) = peer.pc().unwrap().sctp().await {
+                            let dtls = sctp.transport();
+                            eprintln!(
+                                "transport states: SCTP={:?}, DTLS={:?}, ICE={:?}",
+                                sctp.state().await,
+                                dtls.state().await,
+                                dtls.ice_transport().state().await
+                            );
+                        }
+                    }
                     a.close();
                     b.close();
                     continue 'attempt;
                 }
                 frame += 1;
             }
-            let result = [&a, &b].map(|p| (p.counters.audio_nonzero, p.counters.video_received));
+            for (index, peer) in [&a, &b].into_iter().enumerate() {
+                if relay[index] {
+                    let evidence = peer.ice_evidence().await.unwrap();
+                    assert_eq!(
+                        evidence.selected.map(|p| p.local),
+                        Some(CandidateKind::Relay)
+                    );
+                    assert_eq!(
+                        evidence.host_candidates, 0,
+                        "relay-only never falls back to hosts"
+                    );
+                }
+            }
+            // Initial decoded media cannot stand in for continuing playout.
+            let before = decoded_before.unwrap();
+            let result = std::array::from_fn(|index| {
+                let peer = [&a, &b][index];
+                (
+                    peer.counters.audio_nonzero - before[index].0,
+                    peer.counters.video_received - before[index].1,
+                )
+            });
             a.close();
             b.close();
             return result;
@@ -1755,11 +1829,24 @@ mod tests {
             turn_tls: Some(tls.clone()),
             ..Default::default()
         };
-        let [a, b] = converse(|| (config(), config()), Duration::from_secs(5)).await;
-        assert!(
-            a.0 > 100 && a.1 > 10 && b.0 > 100 && b.1 > 10,
-            "relayed media decodes: {a:?} {b:?}"
-        );
+        for encrypted in [false, true] {
+            let [a, b] = converse(
+                || {
+                    let (mut left, mut right) = (config(), config());
+                    if encrypted {
+                        left.e2ee = keyed(Some([1; 32]), Some([2; 32])).e2ee;
+                        right.e2ee = keyed(Some([2; 32]), Some([1; 32])).e2ee;
+                    }
+                    (left, right)
+                },
+                Duration::from_secs(5),
+            )
+            .await;
+            assert!(
+                a.0 > 100 && a.1 > 10 && b.0 > 100 && b.1 > 10,
+                "relayed media decodes, E2EE={encrypted}: {a:?} {b:?}"
+            );
+        }
     }
 
     /// The control: the same harness shows media when nothing is encrypted, so

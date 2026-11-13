@@ -1,10 +1,18 @@
 //! Opt-in migration acceptance probes. These do not select a shipping backend.
 //! Keep encrypted-frame acceptance executable: rtpvp8pay parses compressed VP8
 //! partitions, whereas Talk leaves only the 10/3-byte codec prefix readable.
-use super::{codecs::Codec, *};
+use super::codecs::Codec;
 use gstreamer::{self as gst, prelude::*};
 use gstreamer_app::AppSrc;
 use gstreamer_webrtc as wr;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver},
+    },
+    time::{Duration, Instant},
+};
 
 struct Peer {
     pipeline: gst::Pipeline,
@@ -43,23 +51,16 @@ impl Peer {
         let weak = pipeline.downgrade();
         let flag = failed.clone();
         rtc.connect_pad_added(move |_, pad| {
-            if pad.direction() != gst::PadDirection::Src { return; }
-            let Some(pipeline) = weak.upgrade() else { return; };
-            let result = (|| {
-                let caps = pad.current_caps()?;
-                let video = caps.structure(0)?.get::<String>("media").ok()? == "video";
-                let description = if video {
-                    "queue max-size-buffers=64 max-size-bytes=131072 max-size-time=100000000 leaky=downstream ! rtpvp8depay ! vp8dec ! videoconvert ! video/x-raw,format=RGBA ! appsink name=remote_video sync=false async=false max-buffers=2 drop=true enable-last-sample=false"
-                } else {
-                    "queue max-size-buffers=5 max-size-bytes=20480 max-size-time=100000000 leaky=downstream ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! audio/x-raw,format=S16LE,rate=48000,channels=1 ! audiobuffersplit output-buffer-duration=1/100 strict-buffer-size=true ! appsink name=remote_audio sync=false async=false max-buffers=3 drop=true enable-last-sample=false"
-                };
-                let bin = gst::parse::bin_from_description(description, true).ok()?;
-                pipeline.add(&bin).ok()?;
-                pad.link(&bin.static_pad("sink")?).ok()?;
-                bin.sync_state_with_parent().ok()?;
-                Some(())
-            })();
-            if result.is_none() { flag.store(true, Ordering::Release); }
+            if pad.direction() != gst::PadDirection::Src {
+                return;
+            }
+            let Some(pipeline) = weak.upgrade() else {
+                return;
+            };
+            let result = link_receiver(&pipeline, pad);
+            if result.is_none() {
+                flag.store(true, Ordering::Release);
+            }
         });
         for name in ["audio", "video"] {
             let src = pipeline
@@ -71,14 +72,25 @@ impl Peer {
             src.set_max_bytes(if name == "audio" { 2880 } else { 320 * 240 * 8 });
             src.set_leaky_type(gstreamer_app::AppLeakyType::Downstream);
         }
-        pipeline.set_state(gst::State::Playing).unwrap();
-        Self {
+        let result = Self {
             pipeline,
             rtc,
             candidates,
             failed,
-        }
+        };
+        result.pipeline.set_state(gst::State::Playing).unwrap();
+        result
     }
+    async fn negotiate(&self, other: &Self) -> wr::WebRTCSessionDescription {
+        let offer = self.description("create-offer", "offer").await;
+        self.set("set-local-description", &offer).await;
+        other.set("set-remote-description", &offer).await;
+        let answer = other.description("create-answer", "answer").await;
+        other.set("set-local-description", &answer).await;
+        self.set("set-remote-description", &answer).await;
+        offer
+    }
+
     async fn description(&self, action: &str, field: &'static str) -> wr::WebRTCSessionDescription {
         self.description_options(action, field, None).await
     }
@@ -182,17 +194,38 @@ impl Drop for Peer {
     }
 }
 
+// The signal callback performs only the native branch attachment and reports a
+// bounded failure flag. The owning test retains and tears down the pipeline.
+fn link_receiver(pipeline: &gst::Pipeline, pad: &gst::Pad) -> Option<()> {
+    let caps = pad.current_caps()?;
+    let media = caps.structure(0)?.get::<String>("media").ok()?;
+    let description = match media.as_str() {
+        "video" => concat!(
+            "queue max-size-buffers=64 max-size-bytes=131072 max-size-time=100000000 leaky=downstream ! ",
+            "rtpvp8depay ! vp8dec ! videoconvert ! video/x-raw,format=RGBA ! ",
+            "appsink name=remote_video sync=false async=false max-buffers=2 drop=true enable-last-sample=false"
+        ),
+        "audio" => concat!(
+            "queue max-size-buffers=5 max-size-bytes=20480 max-size-time=100000000 leaky=downstream ! ",
+            "rtpopusdepay ! opusdec ! audioconvert ! audioresample ! audio/x-raw,format=S16LE,rate=48000,channels=1 ! ",
+            "audiobuffersplit output-buffer-duration=1/100 strict-buffer-size=true ! ",
+            "appsink name=remote_audio sync=false async=false max-buffers=12 drop=true enable-last-sample=false"
+        ),
+        _ => return None,
+    };
+    let bin = gst::parse::bin_from_description(description, true).ok()?;
+    pipeline.add(&bin).ok()?;
+    pad.link(&bin.static_pad("sink")?).ok()?;
+    bin.sync_state_with_parent().ok()?;
+    Some(())
+}
+
 #[tokio::test]
 #[ignore = "migration probe: requires webrtcbin, libnice, DTLS/SRTP and local ICE"]
 async fn webrtcbin_sdp_ice_and_connected_codecs_exchange_fresh_av() {
     let a = Peer::new();
     let b = Peer::new();
-    let offer = a.description("create-offer", "offer").await;
-    a.set("set-local-description", &offer).await;
-    b.set("set-remote-description", &offer).await;
-    let answer = b.description("create-answer", "answer").await;
-    b.set("set-local-description", &answer).await;
-    a.set("set-remote-description", &answer).await;
+    a.negotiate(&b).await;
     let start = Instant::now();
     let mut counts = [[0_u64; 2]; 2];
     let mut at_three_seconds = None;
@@ -334,12 +367,7 @@ fn sealed_vp8_payloader(payloader: &str) {
 async fn webrtcbin_ice_restart_rotates_credentials() {
     let a = Peer::new();
     let b = Peer::new();
-    let offer = a.description("create-offer", "offer").await;
-    a.set("set-local-description", &offer).await;
-    b.set("set-remote-description", &offer).await;
-    let answer = b.description("create-answer", "answer").await;
-    b.set("set-local-description", &answer).await;
-    a.set("set-remote-description", &answer).await;
+    let offer = a.negotiate(&b).await;
     let options = gst::Structure::builder("application/x-gst-webrtc-offer-options")
         .field("ice-restart", true)
         .build();
