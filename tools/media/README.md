@@ -32,6 +32,11 @@ generation, continuing audio/video, two flowing remote cameras and media decoded
 by the third browser. Add `--hpb-target` for the owned HPB adjunct. Generated media
 does not reproduce every real participant's codec or network.
 
+The `camera-only` scenario keeps the native microphone disabled, requires fresh
+browser-decoded camera video plus received browser audio/video, and asserts that
+no native audio capture was submitted. It isolates camera publication from a
+missing or unavailable microphone; it does not emulate a physical headset.
+
 The participant count is two or three. Cases include `media`, `native-screen`,
 `native-static-screen`, `portal-screen`, `web-screen`, explicit `reconnect`,
 `network-resume`, `web-screen-resume` and `session-replaced` (replacement

@@ -105,6 +105,18 @@ Selecting a conversation or ringing never opens devices. Explicit preview is sep
 from call publication. Required E2EE and unsupported profiles fail closed. See
 [known limitations](../limitations.md) for the actual supported profile.
 
+The device owner accepts supported mono/stereo rates from 8 to 192 kHz,
+preferring 48 kHz when the device offers it. Other rates (including Bluetooth
+telephone profiles) use bounded GStreamer `audioresample`/`audiobuffersplit`
+pipelines in both directions. CPAL callbacks never wait for converter output;
+an underflow renders silence and overload drops old buffers. Native input
+buffers bind to a microphone epoch, retired synchronously on mute; playback
+buffers bind to a separate epoch retired on suspension. A rapid regrant cannot
+reuse buffered PCM from a retired epoch. The device owner replaces the affected
+stream without treating this intentional retirement as a device failure.
+Explicit device retry clears only the failure latch; publication still requires
+a fresh call grant. Explicit retry cannot grant OS permissions or bypass call policy.
+
 Audio reception converts decoded Opus to mono S16LE at 48 kHz, then
 `audiobuffersplit` forms exact 10 ms (480 sample) blocks. The appsink retains at
 most twelve blocks (120 ms, enough for one maximum-duration Opus packet) and

@@ -78,7 +78,10 @@ impl Desktop {
             !call.end_pending
                 && matches!(
                     state,
-                    MediaState::Off | MediaState::Active | MediaState::Requested
+                    MediaState::Off
+                        | MediaState::Active
+                        | MediaState::Requested
+                        | MediaState::Unavailable
                 )
         };
         // A calm indicator that you are being heard: a ring around your own

@@ -1,6 +1,6 @@
 """Regression checks for interpreting real outage timelines, not media qualification."""
 import unittest
-from recovery_checks import native_recovery
+from recovery_checks import native_recovery, fresh_camera_progress
 
 
 def row(ms, phase, audio=0, video=0, screen=False, generation=1):
@@ -9,6 +9,16 @@ def row(ms, phase, audio=0, video=0, screen=False, generation=1):
 
 
 class RecoveryChecks(unittest.TestCase):
+    def test_camera_progress_ignores_the_empty_stats_after_explicit_leave(self):
+        def samples(values):
+            return [[dict(rows=[dict(type="inbound-rtp", codec="video/VP8", framesDecoded=n)])]
+                    if n is not None else [] for n in values]
+        self.assertTrue(fresh_camera_progress(samples([0, 10, 20, 35, 50, 65, 90, None])))
+        self.assertFalse(fresh_camera_progress(samples([0, 10, 30, 30, 30, 30, 30, None])))
+        self.assertFalse(fresh_camera_progress(samples([0, 0, 0, None])))
+        self.assertFalse(fresh_camera_progress([]))
+        self.assertFalse(fresh_camera_progress(samples([100])))
+
     def test_later_share_stop_cannot_erase_observed_outage_recovery(self):
         timeline = [row(1000, "Active", 100, 20),
                     row(2000, "Reconnecting", 150, 25),

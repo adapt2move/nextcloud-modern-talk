@@ -98,10 +98,14 @@ impl Calls {
             .enumerate()
         {
             let resolved = inventory.effective(selection(preferences, index), KINDS[index]);
+            let restart = self.audio[index]
+                .as_ref()
+                .is_some_and(|(c, _)| c.epoch() != handle.audio_epoch(index == 0));
             let invalid = self.audio[index].as_ref().is_some_and(|(c, s)| {
                 !requested
                     || resolved.as_ref() != Ok(c.id())
                     || !s.valid()
+                    || restart
                     || s.error.load(Ordering::Acquire) != 0
                     || s.stalled()
             });
@@ -113,10 +117,21 @@ impl Calls {
                     .is_some_and(|(c, _)| resolved.as_ref().is_ok_and(|id| id != c.id()));
             if invalid {
                 if let Some((_, s)) = self.audio[index].as_ref() {
+                    if requested && !switched && !restart {
+                        note_failure(
+                            if index == 0 {
+                                "call_microphone"
+                            } else {
+                                "call_speaker"
+                            },
+                            decode_error(s.error.load(Ordering::Acquire))
+                                .unwrap_or(DeviceError::Removed),
+                        );
+                    }
                     s.revoke();
                 }
                 self.audio[index] = None;
-                if requested && !switched {
+                if requested && !switched && !restart {
                     if index == 0 {
                         handle.device_failed(true, false);
                     } else {
@@ -139,7 +154,15 @@ impl Calls {
                 });
                 match result {
                     Ok(c) => self.audio[index] = Some((c, signal)),
-                    Err(_) => {
+                    Err(error) => {
+                        note_failure(
+                            if index == 0 {
+                                "call_microphone"
+                            } else {
+                                "call_speaker"
+                            },
+                            error,
+                        );
                         signal.revoke();
                         if index == 0 {
                             handle.device_failed(true, false);
@@ -175,7 +198,8 @@ impl Calls {
             let signal = Arc::new(Signal::new());
             match resolved.and_then(|id| inventory.start_camera(&id, signal.clone())) {
                 Ok(c) => self.camera = Some((c, signal)),
-                Err(_) => {
+                Err(error) => {
+                    note_failure("call_camera", error);
                     signal.revoke();
                     handle.device_failed(false, true);
                 }
@@ -188,6 +212,7 @@ impl Calls {
                 }
                 Ok(None) => {}
                 Err(e) => {
+                    note_failure("call_camera", e);
                     signal.fail(e);
                     handle.device_failed(false, true);
                 }
@@ -200,4 +225,17 @@ impl Drop for Calls {
     fn drop(&mut self) {
         let _ = self.stop();
     }
+}
+
+fn note_failure(kind: &'static str, error: DeviceError) {
+    let reason = match error {
+        DeviceError::PermissionDenied => "permission_denied",
+        DeviceError::Removed => "removed",
+        DeviceError::Busy => "busy",
+        DeviceError::Unavailable => "unavailable",
+        DeviceError::InvalidSelection => "invalid_selection",
+        DeviceError::Stale => "stale",
+        DeviceError::CaptureFailed => "capture_failed",
+    };
+    crate::diagnostics::note(crate::diagnostics::Note::info(kind, "failed").detail(reason));
 }

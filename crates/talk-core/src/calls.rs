@@ -598,6 +598,7 @@ pub struct MediaCounters {
     pub audio_sent: u64,
     pub audio_received: u64,
     pub video_sent: u64,
+    pub video_transmitted: u64,
     pub video_received: u64,
     pub data_received: u64,
     pub offers_sent: u64,
