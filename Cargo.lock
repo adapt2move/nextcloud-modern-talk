@@ -253,16 +253,16 @@ dependencies = [
 
 [[package]]
 name = "ashpd"
-version = "0.13.13"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb8421aaa9644a5faf26735f258b669b15f063313ef8f8e2bdb28912a1a6f111"
+checksum = "8ba377f1fb1e3972907220f1f8e7c0a45164580905c981d872c1fb90d921cbcc"
 dependencies = [
- "enumflags2",
+ "bitflags 2.13.2",
  "futures-util",
  "getrandom 0.4.3",
  "serde",
  "serde_repr",
- "zbus 5.19.0",
+ "zbus 6.2.1",
 ]
 
 [[package]]
@@ -7655,7 +7655,7 @@ name = "talk-adapters"
 version = "0.0.25"
 dependencies = [
  "apple-native-keyring-store",
- "ashpd 0.13.13",
+ "ashpd 0.14.0",
  "async-io",
  "async-trait",
  "atomicwrites",
@@ -7726,7 +7726,7 @@ dependencies = [
 name = "talk-desktop"
 version = "0.0.25"
 dependencies = [
- "ashpd 0.13.13",
+ "ashpd 0.14.0",
  "async-io",
  "atomicwrites",
  "cpal",
@@ -10059,6 +10059,9 @@ checksum = "23ef5ed7d628cdf0af82f93dfe03330a8e37383bf7422a1d3d6eb72326680be5"
 dependencies = [
  "futures-core",
  "futures-io",
+ "rustix 1.1.5",
+ "socket2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
