@@ -56,7 +56,7 @@ zip = { version = "=9.3.0", default-features = false, features = ["deflate"] }
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11"] }
 unicode-segmentation = "=1.13.3"
 # Pure bounded message formatting; no HTML renderer or external resource loading.
-pulldown-cmark = { version = "=0.13.5", default-features = false }
+pulldown-cmark = { version = "=0.13.6", default-features = false }
 # Application-owned physical devices; native APIs remain in safe dependency bindings.
 cpal = { version = "=0.18.2", default-features = false, features = ["pulseaudio"] }
 gstreamer = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
