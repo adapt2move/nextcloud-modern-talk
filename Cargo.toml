@@ -38,7 +38,7 @@ url = { version = "=2.5.8", default-features = false, features = ["std"] }
 # TURN over TCP/TLS: the system trust store verifies the relay's certificate.
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["tls12"] }
 rustls-platform-verifier = { version = "=0.7.1", default-features = false }
-vodozemac = { version = "=0.11.1", default-features = false }
+vodozemac = { version = "=0.11.2", default-features = false }
 ring = { version = "=0.17.14", default-features = false, features = ["alloc"] }
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 getrandom = { version = "=0.4.3", default-features = false, features = ["std"] }
