@@ -76,3 +76,19 @@ Call media encryption interoperates with the Nextcloud Talk web client's protoco
 
 TURN over TCP and TLS uses [tokio-rustls 0.26.6](https://docs.rs/crate/tokio-rustls/0.26.6/source/) (Apache-2.0 OR MIT) and [rustls-platform-verifier 0.7.1](https://docs.rs/crate/rustls-platform-verifier/0.7.1/source/) (Apache-2.0 OR MIT), both already part of the networking stack, to verify relay certificates with the operating system's trust store. The test certificate and key in `crates/talk-adapters/src/media/fixtures` are throwaway development fixtures generated for this project, not credentials. Dependency licenses and notices remain applicable and are collected into release packages.
 
+## GStreamer audio blocks and migration probes
+
+Production audio block formation uses GStreamer's `audiobuffersplit` plugin
+(gst-plugins-bad, LGPL-2.1-or-later); RTP jitter buffering uses `rtpmanager`
+(gst-plugins-good, LGPL-2.1-or-later). The macOS runtime source inventory and
+license collection include both in the existing checksum-pinned 1.28.4 SDK.
+Linux uses the distribution's corresponding plugin packages. Windows retains
+the pinned 1.26.11 development SDK and has no distribution package.
+
+Test-only migration probes use [gstreamer-webrtc 0.25.4](https://docs.rs/crate/gstreamer-webrtc/0.25.4/source/)
+and the lockfile-resolved SDP/sys bindings under MIT OR Apache-2.0. The alternative
+`rtpvp8pay2` probe statically registers [gst-plugin-rtp 0.15.4](https://docs.rs/crate/gst-plugin-rtp/0.15.4/source/)
+under MPL-2.0 in tests only; it is not linked into the shipping engine. Native
+`webrtcbin`/DTLS/SRTP (gst-plugins-bad) and libnice retain their upstream licenses;
+they are not added to the shipping macOS runtime by these probes. No upstream
+payloader or libnice implementation is copied into project source.

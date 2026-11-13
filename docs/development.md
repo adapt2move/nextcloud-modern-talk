@@ -17,7 +17,13 @@ sudo apt-get install -y --no-install-recommends xdg-utils desktop-file-utils xdg
 The script supplies compiler, pkg-config/Clang, X11/XCB/xkbcommon, font, SSL, Vulkan/Mesa, Xvfb, D-Bus and capture prerequisites. `libdbus-1-dev` supports the Linux credential provider; actual Secret Service tests additionally need a session bus and service. Bundled SQLite needs a C compiler. Do not change dependency features to bypass prerequisites.
 
 The script uses Ubuntu's compiler packages. GStreamer's base/good plugins
-provide the Opus and VP8 codecs used by the Rust WebRTC engine.
+provide Opus/VP8 codecs and RTP elements; the bad plugins supply
+`audiobuffersplit` for the production 10 ms PCM boundary. The script also installs
+the bad-plugin development library and `gstreamer1.0-nice` for the test-only
+`webrtcbin` migration probes. macOS/Windows SDK preparation checks the WebRTC/SDP
+development inputs plus ICE, DTLS/SRTP, RTP and splitter plugin files before
+exporting an SDK; this checks layout only. See [media probes](../tools/media/README.md) for
+the E2EE acceptance blocker; these prerequisites do not select a new transport.
 For workspace checks without UI captures, use
 `sudo bash tools/ui/prepare-linux.sh --build-only`; it also supplies libdbus and
 GLib headers while omitting the OCR, capture and desktop-portal tools.

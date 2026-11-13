@@ -385,6 +385,8 @@ def check() -> None:
         "gstreamer": {"default-features": False, "features": ["v1_24"]},
         "gstreamer-app": {"default-features": False, "features": ["v1_24"]},
         "gstreamer-video": {"default-features": False, "features": ["v1_24"]},
+        "gstreamer-webrtc": {"default-features": False, "features": ["v1_24"]},
+        "gst-plugin-rtp": {"default-features": False, "features": ["static"]},
         "image": {"default-features": False, "features": ["png", "jpeg", "webp", "gif"]},
         "windows": {"default-features": False, "features": ["UI_ViewManagement"]},
         "objc2-app-kit": {"default-features": False, "features": ["std", "NSWorkspace", "NSAccessibility"]},
@@ -445,7 +447,7 @@ def check() -> None:
         local_features = {("talk-adapters", "tokio"): ["process"], ("nextcloud-talk-api", "futures-util"): ["sink"]}
         require(all(value == ({"workspace": True, "features": local_features[(name, dep)]} if (name, dep) in local_features else {"workspace": True}) for dep, value in deps.items()),
                 f"{name}: dependencies must use reviewed workspace definitions")
-        require("build-dependencies" not in manifest and manifest.get("dev-dependencies", {}) == ({"nextcloud-talk-api": {"workspace": True, "features": ["backend-test"]}} if name == "talk-adapters" else {}),
+        require("build-dependencies" not in manifest and manifest.get("dev-dependencies", {}) == ({"nextcloud-talk-api": {"workspace": True, "features": ["backend-test"]}, "gstreamer-webrtc": {"workspace": True}, "gst-plugin-rtp": {"workspace": True}} if name == "talk-adapters" else {}),
                 f"{name}: hidden platform/build/test edges need review")
         platform_edges = PLATFORM_EDGES if name == "talk-adapters" else DESKTOP_PLATFORM_EDGES if name == "talk-desktop" else {}
         platform = {target: {"dependencies": {dep: {"workspace": True} for dep in dependencies}}
@@ -497,7 +499,7 @@ def check() -> None:
         platform_edges = PLATFORM_EDGES if name == "talk-adapters" else DESKTOP_PLATFORM_EDGES if name == "talk-desktop" else {}
         expected_edges = GRAPH.get(name, (None, set()))[1] | set().union(*platform_edges.values())
         if name == "talk-adapters":
-            expected_edges |= {"secret-service", "zbus-secret-service-keyring-store", "ashpd", "async-io", "futures-lite"}
+            expected_edges |= {"gstreamer-webrtc", "gst-plugin-rtp", "secret-service", "zbus-secret-service-keyring-store", "ashpd", "async-io", "futures-lite"}
         require({dep.split()[0] for dep in package.get("dependencies", [])} == expected_edges,
                 f"{name}: lockfile dependency mismatch")
     for package in packages:

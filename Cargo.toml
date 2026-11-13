@@ -61,6 +61,8 @@ pulldown-cmark = { version = "=0.13.5", default-features = false }
 cpal = { version = "=0.18.2", default-features = false, features = ["pulseaudio"] }
 gstreamer = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
 gstreamer-app = { version = "=0.25.2", default-features = false, features = ["v1_24"] }
+gst-plugin-rtp = { version = "=0.15.4", default-features = false, features = ["static"] }
+gstreamer-webrtc = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
 gstreamer-video = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 # Windows' documented native emoji shortcut; OS calls stay behind safe bindings.

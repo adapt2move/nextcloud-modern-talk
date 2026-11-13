@@ -428,6 +428,9 @@ mod tests {
         Arc::new(rustls::crypto::aws_lc_rs::default_provider())
     }
     async fn tls_server() -> u16 {
+        tls_server_on("127.0.0.1").await
+    }
+    async fn tls_server_on(address: &str) -> u16 {
         let (certificate, key) = fixtures();
         let config = rustls::ServerConfig::builder_with_provider(provider())
             .with_safe_default_protocol_versions()
@@ -436,7 +439,7 @@ mod tests {
             .with_single_cert(vec![certificate], key)
             .unwrap();
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TcpListener::bind((address, 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             while let Ok((tcp, _)) = listener.accept().await {
@@ -508,10 +511,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_name_the_certificate_does_not_cover_is_refused() {
-        let port = tls_server().await;
+        // Reach an actual TLS listener: an unresolvable turn.invalid hostname
+        // would only prove DNS failure, not certificate name verification.
+        // The trusted fixture covers 127.0.0.1, but not this loopback address.
+        let port = tls_server_on("127.0.0.2").await;
         let bridge = Bridge::start(
             Target {
-                host: "turn.invalid".into(),
+                host: "127.0.0.2".into(),
                 port,
                 tls: true,
             },

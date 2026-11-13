@@ -135,3 +135,57 @@ the browser driver. The adjunct's bounded Binding-only UDP proxy supplies a
 separate mapped port for the same-host STUN probe; coturn handles actual UDP
 TURN allocations. Relay success requires selected relay pairs and decoded audio
 and video at both ends, not just an allocation.
+
+## Connected GStreamer migration gates
+
+The shipping engine has not switched to `webrtcbin`. The exact
+`gstreamer-webrtc` 0.25.4 dependency is test-only. On an owned Linux media VM,
+install the base/good/bad plugins, `gstreamer1.0-nice`, and the GStreamer WebRTC
+development library (`libgstreamer-plugins-bad1.0-dev`). In addition to the
+normal production-path media tests, run each migration gate separately:
+
+```sh
+python3 tools/cargo.py test --locked -p talk-adapters --lib \
+  webrtcbin_sdp_ice_and_connected_codecs_exchange_fresh_av -- --ignored
+python3 tools/cargo.py test --locked -p talk-adapters --lib \
+  talk_e2ee_vp8_survives_gstreamer_payloader -- --ignored
+python3 tools/cargo.py test --locked -p talk-adapters --lib \
+  talk_e2ee_vp8_survives_alternative_rust_payloader -- --ignored
+python3 tools/cargo.py test --locked -p talk-adapters --lib \
+  webrtcbin_ice_restart_rotates_credentials -- --ignored
+```
+
+The first connects two native `webrtcbin` pipelines through real SDP/ICE and
+requires continuing bidirectional decoded audio/video after an initial sample
+window. It uses generated capture and does not qualify Talk/Janus, data channels,
+TURN, publication gates or native devices for a replacement engine.
+
+The second is a deliberately unmet acceptance gate, not an expected-failure
+regression: it must pass if the replacement uses `rtpvp8pay`; a compatible
+alternative may be qualified instead. It encodes
+real VP8, seals it with the production Talk cipher, verifies decryption, and
+feeds both plain and sealed frames through `rtpvp8pay`/`rtpvp8depay`. The sealed
+frame is rejected by the current native payloader. GStreamer 1.28.4's
+[`gst_rtp_vp8_pay_parse_frame`](https://github.com/GStreamer/gstreamer/blob/1.28.4/subprojects/gst-plugins-good/gst/rtp/gstrtpvp8pay.c#L272)
+reads partition data beyond Talk's clear 10/3-byte prefix. Encrypting RTP packets
+instead would not preserve Talk's whole-frame cipher format. A native-compatible
+opaque-frame packetizer integration is still required. Do not remove the current
+packetizer or fall back to unencrypted media to make this gate pass. The separate
+alternative probe registers `gst-plugin-rtp` 0.15.4 statically and requires
+`rtpvp8pay2` to preserve keyframes and delta frames byte for byte; it does not
+validate the rest of a new production transport or its packaged native runtime.
+That alternative passes the isolated sealed keyframe/delta-frame probe on the
+exercised Linux runtime; the classic payloader does not.
+
+The ICE-restart gate negotiates two descriptions and requests a new offer with
+`ice-restart=true`. It fails if either ICE credential is unchanged, without
+printing those secrets. The exercised native path reuses both credentials.
+Replacing the peer instead is not equivalent to the existing in-place restart:
+it needs explicit signaling, generation and recovery behavior plus interop tests.
+
+The ordinary `opus_packet_duration_changes_keep_audio_and_video_alive` regression
+uses the production transport, cipher, decoder, `audiobuffersplit` and audio
+handoff. It changes real Opus packet durations through 10/20/40/60 ms during a
+live video stream, with and without E2EE, and checks fresh decoded media in
+every phase. The native appsink drops oldest blocks beyond its twelve-block cap;
+packet duration does not enlarge an application PCM queue.

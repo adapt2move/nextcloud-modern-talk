@@ -16,7 +16,8 @@ The app requires **Apple Silicon and macOS 15.7 or later**.
 4. Open NextCloud Modern Talk from Applications.
 
 The media runtime is bundled. No Homebrew packages, GStreamer framework or other
-runtime installation is needed.
+runtime installation is needed. The bundled runtime includes the RTP jitter buffer
+and `audiobuffersplit` for fixed 10 ms audio blocks.
 
 ### First launch blocked by macOS
 
@@ -101,7 +102,10 @@ sudo apt install ./nextcloud-modern-talk-VERSION-linux-x86_64.deb
 Replace `VERSION` with the downloaded version, then launch NextCloud Modern Talk
 from the application menu. Browser login needs a desktop session with a
 registered browser and portal service. The tar archive is an alternative for an
-owned installation with the native libraries recorded in its provenance.
+owned installation with the native libraries recorded in its provenance. In
+particular, media reception requires the base/good plugins plus
+`gstreamer1.0-plugins-bad` (`audiobuffersplit`); the `.deb` declares these runtime
+dependencies.
 
 ## Updates
 

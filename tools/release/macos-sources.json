@@ -20,6 +20,7 @@
         "lib/gstreamer-1.0/libgstcoreelements.dylib",
         "lib/libgstbase-1.0.0.dylib",
         "lib/libgstreamer-1.0.0.dylib",
+        "lib/libgstnet-1.0.0.dylib",
         "libexec/gstreamer-1.0/gst-plugin-scanner"
       ],
       "sha256": "f5adc7e8f448c10260b3b25aa101c9d540674c8d9a54c2b77a86d04f2b3b50dd",
@@ -60,6 +61,7 @@
         "lib/gstreamer-1.0/libgstmatroska.dylib",
         "lib/gstreamer-1.0/libgstosxaudio.dylib",
         "lib/gstreamer-1.0/libgstrtp.dylib",
+        "lib/gstreamer-1.0/libgstrtpmanager.dylib",
         "lib/gstreamer-1.0/libgstvpx.dylib",
         "lib/gstreamer-1.0/libgstwavparse.dylib"
       ],
@@ -72,6 +74,7 @@
       "name": "gst-plugins-bad",
       "runtime_files": [
         "lib/gstreamer-1.0/libgstapplemedia.dylib",
+        "lib/gstreamer-1.0/libgstaudiobuffersplit.dylib",
         "lib/gstreamer-1.0/libgstvideoparsersbad.dylib",
         "lib/libgstcodecparsers-1.0.0.dylib",
         "lib/libgstvulkan-1.0.0.dylib"

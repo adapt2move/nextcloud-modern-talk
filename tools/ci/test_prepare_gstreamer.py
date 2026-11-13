@@ -3,6 +3,7 @@
 import hashlib
 import io
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -23,6 +24,7 @@ class WindowsSdkInstall(unittest.TestCase):
         self.path_file = self.root / "github-path"
         self.env_file = self.root / "github-env"
         self.write_pkg_config = True
+        self.omit_media_input = None
         self.exit_codes = iter((0, 3010))
         self.target = "x86_64-pc-windows-msvc"
         payload = b"synthetic MSI download"
@@ -57,6 +59,14 @@ class WindowsSdkInstall(unittest.TestCase):
             pc = install_dir / "1.0/msvc_x86_64/lib/pkgconfig/gstreamer-1.0.pc"
             pc.parent.mkdir(parents=True)
             pc.write_text("Version: 1.26.11\n")
+            for name in prepare_gstreamer.REQUIRED_PC:
+                (pc.parent / (name + ".pc")).write_text("Version: 1.26.11\n")
+            plugins = self.sdk / "lib/gstreamer-1.0"
+            plugins.mkdir(parents=True)
+            for name in prepare_gstreamer.REQUIRED_PLUGINS:
+                (plugins / ("gst" + name + ".dll")).write_bytes(b"synthetic plugin")
+            if self.omit_media_input is not None:
+                (self.sdk / self.omit_media_input).unlink()
         return subprocess.CompletedProcess(command, code)
 
     def test_released_layout_exports_sdk_prefix_and_retains_logs(self):
@@ -86,6 +96,18 @@ class WindowsSdkInstall(unittest.TestCase):
         self.assertEqual(self.run.call_count, 1)
         self.assertEqual(len(list((self.root / "gstreamer-installer-logs").glob("*.log"))), 1)
         self.assertFalse(self.env_file.exists())
+
+    def test_missing_splitter_or_ice_plugin_exports_no_partial_sdk(self):
+        for missing in ("audiobuffersplit", "nice", "webrtc", "srtp", "dtls", "rtp", "rtpmanager"):
+            with self.subTest(plugin=missing):
+                # Every case starts with an independent mocked SDK installation.
+                self.exit_codes = iter((0, 0))
+                self.omit_media_input = f"lib/gstreamer-1.0/gst{missing}.dll"
+                with self.assertRaisesRegex(ValueError, f"gst{missing}.dll"):
+                    prepare_gstreamer.install(self.target)
+                self.assertFalse(self.path_file.exists())
+                self.assertFalse(self.env_file.exists())
+                shutil.rmtree(self.install_dir)
 
     def test_bad_checksum_never_runs_installer(self):
         with mock.patch.object(prepare_gstreamer.urllib.request, "urlopen",
