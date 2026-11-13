@@ -1229,10 +1229,10 @@ impl Desktop {
             ),
         ] {
             let available = !call.end_pending
-                && matches!(
+                && (matches!(
                     state,
                     MediaState::Off | MediaState::Active | MediaState::Requested
-                );
+                ) || id != "screen-share" && state == MediaState::Unavailable);
             let control = self
                 .round_icon_button(
                     id,
@@ -1251,11 +1251,12 @@ impl Desktop {
                 .when(id != "screen-share" && state == MediaState::Off, |d| {
                     d.bg(gpui::rgb(0x9e3e32)).text_color(gpui::white())
                 });
-            // No permission or no device: the whole control is greyed out and
-            // explains itself in its tooltip and in the notice above the stage.
+            // A missing permission remains disabled. A failed device can be
+            // retried explicitly; fresh policy still gates publication.
             // The dimming stays on the buttons: on the group it also faded the
             // popover that opens from it.
-            let blocked = matches!(state, MediaState::Denied | MediaState::Unavailable);
+            let blocked = state == MediaState::Denied
+                || id == "screen-share" && state == MediaState::Unavailable;
             let control = control.when(blocked, |d| d.opacity(0.45));
             let mut group = div()
                 .relative()

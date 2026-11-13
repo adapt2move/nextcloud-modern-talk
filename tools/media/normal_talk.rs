@@ -152,7 +152,7 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
                 call,
                 entry,
                 wishes: MediaWishes {
-                    microphone: mode != "incoming-accept",
+                    microphone: mode != "incoming-accept" && mode != "camera-only",
                     camera: mode != "incoming-accept",
                     screen: false,
                 },
@@ -574,7 +574,11 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
     report["duration_ms"] = json!(started.elapsed().as_millis());
     let exchanged = current.phase == Phase::Active
         && current.counters.data_received > 0
-        && current.counters.audio_sent > 100
+        && if mode == "camera-only" {
+            current.counters.audio_sent == 0
+        } else {
+            current.counters.audio_sent > 100
+        }
         && current.counters.audio_received > 100
         && current.counters.video_sent > 20
         && current.counters.video_received > 20
@@ -705,6 +709,7 @@ fn main() {
     if args.len() != 4
         || ![
             "media",
+            "camera-only",
             "participant-join",
             "reconnect",
             "policy-loss",

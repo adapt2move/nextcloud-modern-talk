@@ -1328,6 +1328,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn camera_at_device_cadence_flows_without_a_microphone() {
+        let mut sender = NativePeer::new(RtcConfiguration::default()).await.unwrap();
+        let mut receiver = NativePeer::new(RtcConfiguration::default()).await.unwrap();
+        let offer = sender.offer().await.unwrap();
+        let answer = receiver.remote(&offer).await.unwrap().unwrap();
+        sender.remote(&answer).await.unwrap();
+        sender.publish(false, true).unwrap();
+        let mut connected = [false; 2];
+        let started = Instant::now();
+        let mut tick = tokio::time::interval(Duration::from_millis(10));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut next_frame = Duration::ZERO;
+        let mut decoded = 0;
+        let mut fresh = 0;
+        while started.elapsed() < Duration::from_secs(5) {
+            tick.tick().await;
+            while let Some(event) = sender.event().await.unwrap() {
+                match event {
+                    Event::Candidate(c) => receiver.candidate(&c).await.unwrap(),
+                    Event::Connection(s) => connected[0] = s == PeerConnectionState::Connected,
+                }
+            }
+            while let Some(event) = receiver.event().await.unwrap() {
+                match event {
+                    Event::Candidate(c) => sender.candidate(&c).await.unwrap(),
+                    Event::Connection(s) => connected[1] = s == PeerConnectionState::Connected,
+                }
+            }
+            if connected.iter().all(|v| *v) && started.elapsed() >= next_frame {
+                next_frame = started.elapsed() + Duration::from_millis(67);
+                // Match native camera capture (640x480, 15 fps), including
+                // texture and moving content rather than a solid codec fixture.
+                let mut rgba = vec![0; 640 * 480 * 4];
+                for (n, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                    let x = n % 640;
+                    let y = n / 640;
+                    pixel.copy_from_slice(&[
+                        (x + started.elapsed().as_millis() as usize / 10) as u8,
+                        (y + x / 4) as u8,
+                        (x ^ y) as u8,
+                        255,
+                    ]);
+                }
+                sender
+                    .video(
+                        VideoFrame {
+                            width: 640,
+                            height: 480,
+                            rgba,
+                        },
+                        started.elapsed().as_micros() as i64,
+                    )
+                    .unwrap();
+            }
+            while receiver.take_video().is_some() {
+                decoded += 1;
+                fresh += usize::from(started.elapsed() >= Duration::from_secs(3));
+            }
+        }
+        assert!(connected.iter().all(|v| *v));
+        assert!(
+            decoded > 15 && fresh > 10,
+            "decoded={decoded}, fresh={fresh}"
+        );
+        assert_eq!(sender.counters.audio_sent, 0);
+        assert!(sender.counters.video_transmitted > 15);
+        sender.close();
+        receiver.close();
+    }
+
+    #[tokio::test]
     async fn damaged_vp8_frames_do_not_end_audio_or_later_video() {
         let mut sender = NativePeer::new(RtcConfiguration::default()).await.unwrap();
         let mut receiver = NativePeer::new(RtcConfiguration::default()).await.unwrap();

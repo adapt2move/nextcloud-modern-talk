@@ -42,10 +42,12 @@ pub(crate) struct Session {
     blocked: AtomicU8,
     deadline: AtomicU64,
     pub(crate) snapshot: Mutex<Snapshot>,
-    audio: Mutex<VecDeque<[i16; 480]>>,
+    audio: Mutex<VecDeque<(u64, [i16; 480])>>,
     video: Mutex<Option<VideoFrame>>,
     output: Mutex<VecDeque<[i16; 480]>>,
     received: Mutex<Vec<VideoImage>>,
+    microphone_epoch: AtomicU64,
+    playback_epoch: AtomicU64,
     microphone_seen: AtomicBool,
     camera_seen: AtomicBool,
     control_degraded: AtomicBool,
@@ -110,6 +112,8 @@ impl MediaService {
             video: Mutex::new(None),
             output: Mutex::new(VecDeque::with_capacity(4)),
             received: Mutex::new(Vec::with_capacity(16)),
+            microphone_epoch: AtomicU64::new(1),
+            playback_epoch: AtomicU64::new(1),
             microphone_seen: AtomicBool::new(false),
             camera_seen: AtomicBool::new(false),
             control_degraded: AtomicBool::new(false),
@@ -189,7 +193,11 @@ impl Session {
         } else if !w.screen && self.screen_pending.load(Ordering::Acquire) {
             self.stop_screen();
         }
-        if self.publish.swap(publication, Ordering::AcqRel) != publication {
+        let previous = self.publish.swap(publication, Ordering::AcqRel);
+        if previous & 1 != 0 && publication & 1 == 0 {
+            self.microphone_epoch.fetch_add(1, Ordering::AcqRel);
+        }
+        if previous != publication {
             self.wake.notify();
         }
         if !w.microphone {
@@ -211,6 +219,7 @@ impl Session {
             | (u8::from(wishes.screen) * 4);
         self.publish.fetch_and(keep, Ordering::AcqRel);
         if !wishes.microphone {
+            self.microphone_epoch.fetch_add(1, Ordering::AcqRel);
             if let Ok(mut q) = self.audio.lock() {
                 q.clear();
             }
@@ -227,8 +236,16 @@ impl Session {
         }
         self.wake.notify();
     }
+    pub(crate) fn retry_devices(&self, wishes: MediaWishes) {
+        if self.live() {
+            let bits = u8::from(wishes.microphone) | (u8::from(wishes.camera) * 2);
+            self.blocked.fetch_and(!bits, Ordering::AcqRel);
+        }
+    }
     pub(crate) fn suspend(&self) {
         self.publish.store(0, Ordering::Release);
+        self.microphone_epoch.fetch_add(1, Ordering::AcqRel);
+        self.playback_epoch.fetch_add(1, Ordering::AcqRel);
         self.deadline.store(0, Ordering::Release);
         if let Ok(mut v) = self.video.lock() {
             *v = None;
@@ -349,11 +366,20 @@ impl Session {
         (generation == self.screen_epoch() && self.publication().screen)
             .then_some((generation, frame))
     }
+    pub(crate) fn microphone_epoch(&self) -> u64 {
+        self.microphone_epoch.load(Ordering::Acquire)
+    }
     pub(crate) fn take_audio(&self) -> Option<[i16; 480]> {
         if !self.publication().microphone {
             return None;
         }
-        self.audio.try_lock().ok()?.pop_front()
+        let mut queue = self.audio.try_lock().ok()?;
+        while let Some((epoch, frame)) = queue.pop_front() {
+            if epoch == self.microphone_epoch() && self.publication().microphone {
+                return Some(frame);
+            }
+        }
+        None
     }
     pub(crate) fn take_video(&self) -> Option<VideoFrame> {
         if !self.publication().camera {
@@ -454,6 +480,13 @@ impl CaptureHandle {
             let bits = u8::from(microphone) | (u8::from(camera) * 2);
             s.blocked.fetch_or(bits, Ordering::AcqRel);
             s.publish.fetch_and(!bits, Ordering::AcqRel);
+            if microphone {
+                s.microphone_epoch.fetch_add(1, Ordering::AcqRel);
+                s.microphone_seen.store(false, Ordering::Release);
+            }
+            if camera {
+                s.camera_seen.store(false, Ordering::Release);
+            }
         }
     }
     /// Lift a device failure after the selected device changed. Publication
@@ -469,11 +502,27 @@ impl CaptureHandle {
             .upgrade()
             .map_or(MediaWishes::default(), |s| s.publication())
     }
+    /// A native audio stream binds its PCM and converter state to this epoch.
+    /// Mute/suspension retires old buffered PCM even after a rapid regrant.
+    pub fn audio_epoch(&self, input: bool) -> Option<u64> {
+        let s = self.session.upgrade()?;
+        s.valid().then(|| {
+            if input {
+                s.microphone_epoch.load(Ordering::Acquire)
+            } else {
+                s.playback_epoch.load(Ordering::Acquire)
+            }
+        })
+    }
     pub fn microphone(&self, samples: &[i16; 480]) -> bool {
+        self.audio_epoch(true)
+            .is_some_and(|epoch| self.microphone_at(epoch, samples))
+    }
+    pub fn microphone_at(&self, epoch: u64, samples: &[i16; 480]) -> bool {
         let Some(s) = self.session.upgrade() else {
             return false;
         };
-        if !s.publication().microphone {
+        if !s.publication().microphone || s.microphone_epoch.load(Ordering::Acquire) != epoch {
             return false;
         }
         let Ok(mut audio) = s.audio.try_lock() else {
@@ -482,10 +531,10 @@ impl CaptureHandle {
         if audio.len() == 4 {
             audio.pop_front();
         }
-        if !s.publication().microphone {
+        if !s.publication().microphone || s.microphone_epoch.load(Ordering::Acquire) != epoch {
             return false;
         }
-        audio.push_back(*samples);
+        audio.push_back((epoch, *samples));
         s.microphone_seen.store(true, Ordering::Release);
         true
     }
@@ -601,14 +650,24 @@ impl CaptureHandle {
         true
     }
     pub fn output_audio(&self, out: &mut [i16; 480]) -> bool {
+        let Some(epoch) = self.audio_epoch(false) else {
+            out.fill(0);
+            return false;
+        };
+        self.output_audio_at(epoch, out)
+    }
+    pub fn output_audio_at(&self, epoch: u64, out: &mut [i16; 480]) -> bool {
         out.fill(0);
         let Some(s) = self.session.upgrade() else {
             return false;
         };
-        if !s.valid() {
+        if !s.valid() || s.playback_epoch.load(Ordering::Acquire) != epoch {
             return false;
         }
         if let Some(frame) = s.output.try_lock().ok().and_then(|mut q| q.pop_front()) {
+            if !s.valid() || s.playback_epoch.load(Ordering::Acquire) != epoch {
+                return false;
+            }
             *out = frame;
             true
         } else {
@@ -712,6 +771,83 @@ mod screen_tests {
         session.show_local(2, 2, &pixels);
         assert!(handle.take_video().is_some());
     }
+    #[test]
+    fn mute_and_recovery_retire_native_audio_converter_epochs() {
+        let (_service, session, handle) = admitted();
+        session.publish.store(3, Ordering::Release);
+        let microphone = handle.audio_epoch(true).unwrap();
+        let playback = handle.audio_epoch(false).unwrap();
+        assert!(handle.microphone_at(microphone, &[1; 480]));
+        session.narrow(MediaWishes {
+            microphone: false,
+            camera: true,
+            screen: false,
+        });
+        // Model a rapid fresh grant before the device owner gets its next tick.
+        session.publish.store(3, Ordering::Release);
+        assert!(!handle.microphone_at(microphone, &[9; 480]));
+        assert!(session.take_audio().is_none());
+        let next = handle.audio_epoch(true).unwrap();
+        assert_ne!(next, microphone);
+        assert!(handle.microphone_at(next, &[2; 480]));
+        assert_eq!(
+            handle.audio_epoch(false),
+            Some(playback),
+            "mute keeps reception alive"
+        );
+        session.suspend();
+        session.deadline.store(60_000, Ordering::Release);
+        session.publish.store(3, Ordering::Release);
+        session.play_audio(&[3; 480]);
+        let mut out = [9; 480];
+        assert!(!handle.output_audio_at(playback, &mut out));
+        assert_eq!(out, [0; 480]);
+        assert!(handle.output_audio_at(handle.audio_epoch(false).unwrap(), &mut out));
+        assert_eq!(out, [3; 480]);
+        session.close();
+        assert!(!handle.microphone_at(next, &[4; 480]));
+        assert_eq!(handle.audio_epoch(false), None);
+    }
+
+    #[test]
+    fn a_device_failure_retires_pcm_already_waiting_for_the_encoder() {
+        let (_service, session, handle) = admitted();
+        session.publish.store(1, Ordering::Release);
+        assert!(handle.microphone(&[7; 480]));
+        handle.device_failed(true, false);
+        session.retry_devices(MediaWishes {
+            microphone: true,
+            camera: false,
+            screen: false,
+        });
+        session.publish.store(1, Ordering::Release);
+        assert!(session.take_audio().is_none());
+        assert!(handle.microphone(&[8; 480]));
+        assert_eq!(session.take_audio(), Some([8; 480]));
+    }
+
+    #[test]
+    fn explicit_device_retry_requires_a_fresh_grant_and_cannot_revive_a_call() {
+        let (_service, session, handle) = admitted();
+        session.publish.store(3, Ordering::Release);
+        handle.device_failed(true, true);
+        session.retry_devices(MediaWishes {
+            microphone: true,
+            camera: false,
+            screen: false,
+        });
+        assert_eq!(session.failed(), (false, true));
+        assert!(!handle.requested().microphone && !handle.requested().camera);
+        session.close();
+        session.retry_devices(MediaWishes {
+            microphone: true,
+            camera: true,
+            screen: false,
+        });
+        assert_eq!(session.failed(), (false, true));
+        assert_eq!(handle.requested(), MediaWishes::default());
+    }
+
     #[test]
     fn a_changed_device_lifts_the_failure_of_the_previous_one() {
         let (_service, session, handle) = admitted();

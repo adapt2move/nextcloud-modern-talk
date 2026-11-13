@@ -1031,6 +1031,7 @@ async fn media_loop(
             None
         };
         reconcile_participants(&mut participants, &bundle, &invitee_ids)?;
+        let mut microphone_epoch = session.microphone_epoch();
         while session.live() && !stop.is_closed() && !cancel.is_cancelled() {
             tick.tick().await;
             let mut refresh_needed = false;
@@ -1038,6 +1039,7 @@ async fn media_loop(
                 match command {
                     Command::Change { wishes, .. } if !end_pending => {
                         call.set_wishes(scope, wishes).map_err(|_| ())?;
+                        session.retry_devices(wishes);
                     }
                     Command::StartScreenShare(_) => {
                         if !SUPPORT.screen { continue; }
@@ -1428,6 +1430,8 @@ async fn media_loop(
             }
             stage = "media exchange";
             let wishes = session.publication();
+            let retired_audio = microphone_epoch != session.microphone_epoch();
+            microphone_epoch = session.microphone_epoch();
             let audio = session.take_audio();
             if policy_ready && wishes.microphone {
                 if let Some(samples) = &audio {
@@ -1536,6 +1540,13 @@ async fn media_loop(
                     let sdp = peer.engine.offer().await.map_err(|_| { stage = "direct offer"; })?;
                     send(&writes, Write::Signal(peer.session.clone(), negotiation.clone(), Signal::Description(sdp), peer.stream))?;
                     peer.negotiation = Some(negotiation);
+                }
+                // Two rapid mute/unmute commands can fit between actor ticks.
+                // Retire encoded PCM as well as native converter/queue state,
+                // even when the current publication is already enabled again.
+                if retired_audio {
+                    peer.engine.publish(false, publishes && if peer.stream == StreamKind::Screen { wishes.screen } else { wishes.camera })
+                        .map_err(|_| { stage = "audio epoch retirement"; })?;
                 }
                 peer.engine.publish(publishes && peer.stream == StreamKind::Camera && wishes.microphone,
                     publishes && if peer.stream == StreamKind::Screen { wishes.screen } else { wishes.camera }).map_err(|_| { stage = "publication switch"; })?;
@@ -1664,6 +1675,7 @@ async fn media_loop(
                 totals.audio_sent += c.audio_sent;
                 totals.audio_received += c.audio_received;
                 totals.video_sent += c.video_sent;
+                totals.video_transmitted += c.video_transmitted;
                 totals.video_received += c.video_received;
                 totals.data_received += c.data_received;
                 totals.offers_sent += c.offers_sent;
