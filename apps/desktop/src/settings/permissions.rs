@@ -237,7 +237,7 @@ fn platform(
             observation.guidance = PermissionGuidance::RestartRequired;
             observation.can_request = false;
         }
-        return Ok(Some(observation));
+        Ok(Some(observation))
     }
     #[cfg(not(target_os = "macos"))]
     {
