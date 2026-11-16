@@ -3449,8 +3449,13 @@ impl Desktop {
                     talk_core::ui::presentation::MediaState::Off
                         | talk_core::ui::presentation::MediaState::Active
                         | talk_core::ui::presentation::MediaState::Requested
+                        | talk_core::ui::presentation::MediaState::Unavailable
                 ) {
-                    let enabled = state == talk_core::ui::presentation::MediaState::Off;
+                    let enabled = matches!(
+                        state,
+                        talk_core::ui::presentation::MediaState::Off
+                            | talk_core::ui::presentation::MediaState::Unavailable
+                    );
                     let intent = if key == "m" {
                         UiIntent::SetMicrophone {
                             call: scope,

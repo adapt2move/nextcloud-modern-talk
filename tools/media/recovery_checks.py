@@ -18,3 +18,15 @@ def native_recovery(timeline, not_before_ms):
         checks["screen_flow_after_recovery"] |= (bool(row.get("screen_flowing"))
             and row.get("ms", 0) > interrupted.get("ms", 0) + 2000)
     return checks
+
+
+def fresh_camera_progress(samples):
+    """Require new VP8 decodes in the last quarter, allowing empty leave stats."""
+    if len(samples) < 4:
+        return False
+    counts = [max((r.get("framesDecoded", 0) for peer in sample
+                   for r in peer.get("rows", []) if r.get("type") == "inbound-rtp"
+                   and r.get("codec") in ("video/VP8", "video/vp8")), default=0)
+              for sample in samples]
+    late = max(1, len(counts) // 4)
+    return max(counts[-late:], default=0) > max(counts[:-late], default=0) + 10

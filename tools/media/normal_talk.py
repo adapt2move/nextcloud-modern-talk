@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse,urlencode
 from playwright.async_api import async_playwright
 from ice_settings import fetch_settings
-from recovery_checks import native_recovery
+from recovery_checks import native_recovery,fresh_camera_progress
 from talk_browser import LoopbackForward,FreshRoom,INSTRUMENT,press,media_checks,private_json,digest
 # Observe original browser SCTP messages without retaining any payloads.
 INSTRUMENT = INSTRUMENT.replace("const NativePC = window.RTCPeerConnection;", """const NativePC = window.RTCPeerConnection;
@@ -143,6 +143,10 @@ async def run(args,report):
      except TimeoutError:pass
     if process.returncode is None:process.kill();await process.wait();report['deadline_exceeded']=True
     report['exit']=process.returncode;report['native_log']=native_errors.decode(errors='replace');report['native']=json.loads(output.read_text()) if output.exists() else {};report['browser_samples']=samples;checks=media_checks(samples);channels=[c for sample in samples for peer in sample for c in peer.get('data_channels',[])];checks['sctp_sent']=any(c.get('sent',0)>=2 for c in channels);checks['sctp_received']=any(c.get('received',0)>=2 for c in channels);
+    if args.scenario=='camera-only':
+     checks.pop('received_native_opus_audio')
+     checks['native_microphone_stayed_off']=report['native'].get('raw_audio')==0
+     checks['fresh_native_video_without_microphone']=fresh_camera_progress(samples)
     if args.scenario in ('native-screen','native-static-screen','portal-screen'):checks['screen_received_at_720p']=any(r.get('type')=='inbound-rtp' and r.get('frameWidth')==1280 and r.get('frameHeight')==720 and r.get('framesDecoded',0)>10 for sample in samples for peer in sample for r in peer.get('rows',[]))
     if args.scenario in ('network-resume','session-replaced','web-screen-resume'):
      timeline=report['native'].get('samples',[]);recovery=native_recovery(timeline,report.get('fault_native_ms',float('inf')));checks.update({k:recovery[k] for k in ('reconnecting_observed','media_resumed')});checks['fault_after_initial_media']=report.get('fault_after_initial_media',False)
@@ -184,7 +188,7 @@ async def run(args,report):
     await context.close();await browser.close();report['room_cleanup']=await room.close();report['private_fixture_removed']=True
     if report['room_cleanup']!='absence_confirmed':report['result']='fail'
 def main():
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('--manifest',type=Path,required=True);p.add_argument('--executable',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--scenario',choices=['media','reconnect','policy-loss','incoming-accept','incoming-decline','native-screen','native-static-screen','portal-screen','web-screen','network-resume','session-replaced','web-screen-resume'],default='media');p.add_argument('--participants',type=int,choices=[2,3],default=2);p.add_argument('--hpb-target');p.add_argument('--lab-state',type=Path);p.add_argument('--rejoin-web-peer-after-replacement',action='store_true',help='Qualification only: explicitly leave/rejoin the web peer after HPB replacement');p.add_argument('--refresh-web-peer-flags-after-replacement',action='store_true',help='Diagnostic only: reassert the owned web peer call flags after native fresh admission');p.add_argument('--join-third-after-media',action='store_true',help='Join a third browser participant after established bidirectional AV');p.add_argument('--order',choices=['browser-first','native-first'],default='browser-first');args=p.parse_args()
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--manifest',type=Path,required=True);p.add_argument('--executable',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--scenario',choices=['media','camera-only','reconnect','policy-loss','incoming-accept','incoming-decline','native-screen','native-static-screen','portal-screen','web-screen','network-resume','session-replaced','web-screen-resume'],default='media');p.add_argument('--participants',type=int,choices=[2,3],default=2);p.add_argument('--hpb-target');p.add_argument('--lab-state',type=Path);p.add_argument('--rejoin-web-peer-after-replacement',action='store_true',help='Qualification only: explicitly leave/rejoin the web peer after HPB replacement');p.add_argument('--refresh-web-peer-flags-after-replacement',action='store_true',help='Diagnostic only: reassert the owned web peer call flags after native fresh admission');p.add_argument('--join-third-after-media',action='store_true',help='Join a third browser participant after established bidirectional AV');p.add_argument('--order',choices=['browser-first','native-first'],default='browser-first');args=p.parse_args()
  if (args.rejoin_web_peer_after_replacement or args.refresh_web_peer_flags_after_replacement) and (args.scenario!='session-replaced' or not args.hpb_target):p.error('web peer intervention requires session-replaced with an owned HPB target')
  if args.rejoin_web_peer_after_replacement and args.refresh_web_peer_flags_after_replacement:p.error('choose only one web peer intervention')
  if args.join_third_after_media and (args.scenario!='media' or args.participants!=3):p.error('late third join requires media with three participants')

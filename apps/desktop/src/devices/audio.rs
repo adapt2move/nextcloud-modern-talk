@@ -7,6 +7,8 @@ use cpal::{FromSample, Sample, SampleFormat, SizedSample};
 use std::sync::{Arc, atomic::Ordering};
 use std::time::Duration;
 
+mod pcm;
+
 pub(super) const TONE_DURATION: Duration = Duration::from_secs(4);
 const MAX_AUDIO_PER_KIND: usize = 20;
 
@@ -88,10 +90,14 @@ pub(super) struct Capture {
     // the runtime publishes its acknowledgement only after dropping this value.
     _stream: cpal::Stream,
     id: DeviceId,
+    epoch: Option<u64>,
 }
 impl Capture {
     pub(super) fn id(&self) -> &DeviceId {
         &self.id
+    }
+    pub(super) fn epoch(&self) -> Option<u64> {
+        self.epoch
     }
     fn record_voice(
         host: &cpal::Host,
@@ -129,6 +135,7 @@ impl Capture {
         Ok(Self {
             _stream: stream,
             id: id.clone(),
+            epoch: None,
         })
     }
     fn microphone(
@@ -163,6 +170,7 @@ impl Capture {
         Ok(Self {
             _stream: stream,
             id: id.clone(),
+            epoch: None,
         })
     }
     fn tone(host: &cpal::Host, id: &DeviceId, signal: Arc<Signal>) -> Result<Self, DeviceError> {
@@ -193,6 +201,7 @@ impl Capture {
         Ok(Self {
             _stream: stream,
             id: id.clone(),
+            epoch: None,
         })
     }
 }
@@ -385,23 +394,27 @@ impl Backend {
     ) -> Result<Capture, DeviceError> {
         let device = selected_device(&self.host, id)?;
         let config = if input {
-            device
-                .supported_input_configs()
-                .map_err(map_error)?
-                .take(64)
-                .find(call_config_supported)
+            call_config(device.supported_input_configs().map_err(map_error)?)
         } else {
-            device
-                .supported_output_configs()
-                .map_err(map_error)?
-                .take(64)
-                .find(call_config_supported)
+            call_config(device.supported_output_configs().map_err(map_error)?)
         }
-        .ok_or(DeviceError::Unavailable)?
-        .with_sample_rate(48_000);
+        .ok_or(DeviceError::Unavailable)?;
+        crate::diagnostics::note(
+            crate::diagnostics::Note::info(
+                if input {
+                    "call_microphone"
+                } else {
+                    "call_speaker"
+                },
+                "format",
+            )
+            .detail("native_rate_hz")
+            .count(u64::from(config.sample_rate())),
+        );
+        let epoch = sink.audio_epoch(input).ok_or(DeviceError::Stale)?;
         macro_rules! build {
             ($t:ty) => {
-                call_stream::<$t>(&device, config.config(), input, signal, sink)
+                call_stream::<$t>(&device, config.config(), input, signal, sink, epoch)
             };
         }
         let stream = match config.sample_format() {
@@ -416,16 +429,34 @@ impl Backend {
         Ok(Capture {
             _stream: stream,
             id: id.clone(),
+            epoch: Some(epoch),
         })
     }
+}
+fn call_config(
+    configs: impl IntoIterator<Item = cpal::SupportedStreamConfigRange>,
+) -> Option<cpal::SupportedStreamConfig> {
+    configs
+        .into_iter()
+        .take(64)
+        .filter(call_config_supported)
+        .map(|range| {
+            let rate = 48_000u32.clamp(
+                range.min_sample_rate().max(8_000),
+                range.max_sample_rate().min(192_000),
+            );
+            range.with_sample_rate(rate)
+        })
+        .min_by_key(|config| config.sample_rate().abs_diff(48_000))
 }
 fn call_config_supported(c: &cpal::SupportedStreamConfigRange) -> bool {
     // PulseAudio advertises U8 before I16. Select a format handled by the
     // stream builder, rather than failing a working device on its first range.
     c.channels() <= 2
         && c.channels() > 0
-        && c.min_sample_rate() <= 48_000
-        && c.max_sample_rate() >= 48_000
+        && c.min_sample_rate() <= c.max_sample_rate()
+        && c.min_sample_rate() <= 192_000
+        && c.max_sample_rate() >= 8_000
         && matches!(
             c.sample_format(),
             SampleFormat::F32
@@ -442,12 +473,23 @@ fn call_stream<T>(
     input: bool,
     signal: Arc<Signal>,
     sink: talk_adapters::media::CaptureHandle,
+    epoch: u64,
 ) -> Result<cpal::Stream, DeviceError>
 where
     T: SizedSample + FromSample<f32>,
     f32: FromSample<T>,
 {
     let channels = usize::from(config.channels);
+    let rate = config.sample_rate;
+    let mut converter = (rate != 48_000)
+        .then(|| {
+            if input {
+                pcm::Converter::new(rate, 48_000)
+            } else {
+                pcm::Converter::new(48_000, rate)
+            }
+        })
+        .transpose()?;
     let errors = signal.clone();
     if input {
         let mut frame = [0i16; 480];
@@ -461,11 +503,19 @@ where
                         used = 0;
                         return;
                     }
+                    if sink.audio_epoch(true) != Some(epoch) {
+                        return;
+                    }
                     if data.len() > 19_200 {
                         signal.fail(DeviceError::CaptureFailed);
                         sink.device_failed(true, false);
                         return;
                     }
+                    let mut native = Vec::with_capacity(if converter.is_some() {
+                        data.len() / channels
+                    } else {
+                        0
+                    });
                     for samples in data.chunks_exact(channels) {
                         let sample = samples
                             .iter()
@@ -473,11 +523,36 @@ where
                             .filter(|s| s.is_finite())
                             .sum::<f32>()
                             / channels as f32;
-                        frame[used] = (sample.clamp(-1., 1.) * 32767.) as i16;
+                        let sample = (sample.clamp(-1., 1.) * 32767.) as i16;
+                        if converter.is_some() {
+                            native.push(sample);
+                            continue;
+                        }
+                        frame[used] = sample;
                         used += 1;
                         if used == 480 {
-                            sink.microphone(&frame);
+                            sink.microphone_at(epoch, &frame);
                             used = 0;
+                        }
+                    }
+                    if let Some(converter) = &mut converter {
+                        let result = (|| {
+                            converter.push(&native)?;
+                            for _ in 0..12 {
+                                let Some(block) = converter.pull()? else {
+                                    break;
+                                };
+                                let block: &[i16; 480] = block
+                                    .as_slice()
+                                    .try_into()
+                                    .map_err(|_| DeviceError::CaptureFailed)?;
+                                sink.microphone_at(epoch, block);
+                            }
+                            Ok::<_, DeviceError>(())
+                        })();
+                        if let Err(error) = result {
+                            signal.fail(error);
+                            sink.device_failed(true, false);
                         }
                     }
                     signal.touch();
@@ -492,6 +567,9 @@ where
             )
             .map_err(map_error)
     } else {
+        let mut converted = Vec::<i16>::new();
+        let mut converted_position = 0;
+        let mut input_credit = 0u64;
         let mut frame = [0i16; 480];
         let mut position = 480;
         let mut ring_position = 0u64;
@@ -499,9 +577,59 @@ where
             .build_output_stream(
                 config,
                 move |data: &mut [T], _| {
+                    if sink.audio_epoch(false) != Some(epoch) {
+                        data.fill(T::from_sample(0.));
+                        return;
+                    }
+                    if data.len() > 19_200 {
+                        data.fill(T::from_sample(0.));
+                        signal.fail(DeviceError::CaptureFailed);
+                        return;
+                    }
+                    if let Some(converter) = &mut converter {
+                        // Feed exactly the callback's duration at 48 kHz. The
+                        // remainder carries fractional blocks (e.g. 44.1 kHz)
+                        // without accumulating an extra block every callback.
+                        input_credit += (data.len() / channels) as u64 * 48_000;
+                        while input_credit >= u64::from(rate) * 480 {
+                            if !sink.output_audio_at(epoch, &mut frame) && sink.outgoing_wait() {
+                                for sample in &mut frame {
+                                    *sample = ringback_sample(ring_position);
+                                    ring_position = ring_position.saturating_add(1);
+                                }
+                            }
+                            if let Err(error) = converter.push(&frame) {
+                                signal.fail(error);
+                                break;
+                            }
+                            input_credit -= u64::from(rate) * 480;
+                        }
+                    }
                     for samples in data.chunks_mut(channels) {
+                        if let Some(converter) = &converter {
+                            if converted_position == converted.len() {
+                                match converter.pull() {
+                                    Ok(Some(block)) => {
+                                        converted = block;
+                                        converted_position = 0;
+                                    }
+                                    Ok(None) => {}
+                                    Err(error) => signal.fail(error),
+                                }
+                            }
+                            let value = if signal.valid() && sink.audio_epoch(false) == Some(epoch)
+                            {
+                                converted.get(converted_position).copied().unwrap_or(0) as f32
+                                    / 32768.
+                            } else {
+                                0.
+                            };
+                            converted_position += usize::from(converted_position < converted.len());
+                            samples.fill(T::from_sample(value));
+                            continue;
+                        }
                         if position == 480 {
-                            if !sink.output_audio(&mut frame) && sink.outgoing_wait() {
+                            if !sink.output_audio_at(epoch, &mut frame) && sink.outgoing_wait() {
                                 for sample in &mut frame {
                                     *sample = ringback_sample(ring_position);
                                     ring_position = ring_position.saturating_add(1);
@@ -509,7 +637,7 @@ where
                             }
                             position = 0;
                         }
-                        let value = if signal.valid() && sink.receive_allowed() {
+                        let value = if signal.valid() && sink.audio_epoch(false) == Some(epoch) {
                             frame[position] as f32 / 32768.
                         } else {
                             0.
@@ -592,7 +720,7 @@ fn ringback_sample(position: u64) -> i16 {
 
 #[cfg(test)]
 mod call_sound_tests {
-    use super::{call_config_supported, ringback_sample};
+    use super::{call_config, call_config_supported, ringback_sample};
 
     #[test]
     fn call_selection_skips_unsupported_first_formats_and_keeps_rate_channel_bounds() {
@@ -615,11 +743,22 @@ mod call_sound_tests {
             .unwrap();
         assert_eq!(selected.sample_format(), SampleFormat::I16);
         assert_eq!(selected.with_sample_rate(48_000).sample_rate(), 48_000);
+        for rate in [8_000, 16_000, 24_000, 32_000, 44_100, 48_000, 96_000] {
+            let config = call_config([range(SampleFormat::F32, 1, rate, rate)]).unwrap();
+            assert_eq!(config.sample_rate(), rate);
+        }
+        let preferred = call_config([
+            range(SampleFormat::I16, 1, 16_000, 16_000),
+            range(SampleFormat::F32, 2, 48_000, 48_000),
+        ])
+        .unwrap();
+        assert_eq!(preferred.sample_rate(), 48_000);
         for rejected in [
             range(SampleFormat::I16, 0, 48_000, 48_000),
             range(SampleFormat::I16, 3, 48_000, 48_000),
-            range(SampleFormat::I16, 2, 8_000, 44_100),
-            range(SampleFormat::I16, 2, 96_000, 192_000),
+            range(SampleFormat::I16, 2, 96_000, 16_000),
+            range(SampleFormat::I16, 2, 4_000, 7_999),
+            range(SampleFormat::I16, 2, 192_001, 384_000),
         ] {
             assert!(!call_config_supported(&rejected));
         }

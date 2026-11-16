@@ -156,6 +156,7 @@ pub(super) struct CallUi {
     replacement_generation: bool,
     explicit_restart: bool,
     last_gate: Option<Gate>,
+    video_evidence: (bool, bool),
 }
 impl Accounts {
     pub(super) fn leave_for_breakout(
@@ -452,6 +453,7 @@ impl Accounts {
                 replacement_generation: false,
                 explicit_restart: false,
                 last_gate: None,
+                video_evidence: (false, false),
             });
             self.snapshot.conversations =
                 page(self.snapshot.conversations.as_slice().iter().map(|row| {
@@ -934,6 +936,7 @@ impl Accounts {
             replacement_generation: false,
             explicit_restart: false,
             last_gate: None,
+            video_evidence: (false, false),
         });
         self.snapshot.call = Some(CallView {
             scope,
@@ -1055,12 +1058,34 @@ impl Accounts {
             {
                 if value.call != requested {
                     ui.last_gate = None;
+                    ui.video_evidence = (false, false);
                     let prior_was_live = self.snapshot.call.as_ref().is_some_and(|call| {
                         call.scope == requested
                             && matches!(call.stage, CallStage::Active | CallStage::Reconnecting)
                     });
                     ui.replacement_generation = !ui.explicit_restart && prior_was_live;
                     ui.explicit_restart = false;
+                }
+                for (seen, count, detail) in [
+                    (
+                        &mut ui.video_evidence.0,
+                        value.counters.video_sent,
+                        "encoder_input",
+                    ),
+                    (
+                        &mut ui.video_evidence.1,
+                        value.counters.video_transmitted,
+                        "transport_accepted",
+                    ),
+                ] {
+                    if !*seen && count > 0 {
+                        crate::diagnostics::note(
+                            crate::diagnostics::Note::info("call_video", "flowing")
+                                .detail(detail)
+                                .count(count),
+                        );
+                        *seen = true;
+                    }
                 }
                 ui.scope = value.call;
                 ui.wishes = value.wishes;
@@ -1694,6 +1719,7 @@ mod action_tests {
             replacement_generation: false,
             explicit_restart: false,
             last_gate: None,
+            video_evidence: (false, false),
         });
         model.snapshot.call = Some(project(
             invitation(scope).call.as_ref().unwrap(),

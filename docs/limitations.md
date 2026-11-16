@@ -57,6 +57,16 @@ of complete parity with the official clients.
   [native media architecture](architecture/README.md#native-media).
   Opus reception uses bounded native 10 ms PCM blocks, including for 40/60 ms
   packets. This does not qualify physical audio devices or another platform.
+- Native call audio selects supported mono/stereo formats at 8–192 kHz and
+  converts device rates to/from the 48 kHz call boundary. Generated PCM checks
+  cover Bluetooth telephone rates and 44.1/48/96 kHz in both directions; they do
+  not qualify physical Bluetooth routing, profile changes or macOS CoreAudio.
+  A failed device can be retried explicitly without rejoining the call.
+- The local camera preview is not proof of remote video reception. Local logs
+  distinguish encoder input and transport acceptance once per call generation;
+  neither establishes remote decoding. Camera-only sending without a local
+  microphone is exercised against Talk 25 on Linux. Native macOS camera
+  publication remains unqualified.
 - Recovery is bounded and revalidates policy. HPB resume retains microphone/camera
   intent, but full network handover and Janus ICE recovery remain unqualified.
   Full HPB process replacement with an existing Talk 25 web peer can leave its
