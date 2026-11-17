@@ -815,11 +815,12 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('Löschen did not dispatch a scoped discard of the failed record')
         checks.append({'check': 'failed-row Löschen dispatches a scoped discard', 'result': 'pass'})
     elif scenario == 'chat-reply-draft':
-        run(['xdotool', 'mousemove', '--window', xid, '600', '735', 'click', '1',
-             'type', '--clearmodifiers', 'RETAINEDTEXT'], env)
+        click('Nachricht', xmin=280, ymin=600)
+        type_text('RETAINEDTEXT')
         expect('typed draft is visible before quoting', ['RETAINEDTEXT'])
-        run(['xdotool', 'mousemove', '--window', xid, '700', '270', 'click', '3'], env)
-        click('Antworten')
+        run(['xdotool', 'mousemove', '--window', xid, '700', '283'], env)
+        time.sleep(.6)
+        run(['xdotool', 'mousemove', '--window', xid, '1190', '242', 'click', '1'], env)
         expect('selecting a reply keeps the already typed text', ['RETAINEDTEXT'], footer_height=180)
         key('F7')
         time.sleep(.2)

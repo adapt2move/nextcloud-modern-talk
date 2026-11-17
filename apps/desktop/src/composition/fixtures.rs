@@ -1478,7 +1478,12 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         return state;
     }
     if scenario == Some("chat-reply-draft") {
-        return snapshot(Some("chat-ux"));
+        let mut state = message_states_snapshot(Some("chat-message-hover"));
+        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+            row.metadata.replyable = true;
+            row
+        }));
+        return state;
     }
     if scenario == Some("chat-long-message") {
         let mut state = snapshot(Some("chat-ux"));
