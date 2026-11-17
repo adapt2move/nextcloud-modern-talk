@@ -13,6 +13,11 @@
       "sha256": "aa8b5f3bb71fdc42625d9653e056b6b4d1d73d6319413e6e4a58fa95dd89b700"
     },
     {
+      "path": "src/elements/img.rs",
+      "original_sha256": "7cfe188df35d18f7bda96720ce44bcd753fa6b8af9de39bfb48634a7f89aaf8c",
+      "sha256": "d0fae87ddf1de87bdd5daf6016546fb6c51478c1c62f1305e5e665129bde3dda"
+    },
+    {
       "original_sha256": "7106499142d5416edaf44168da5c7dcd778c527398cb86e487131ba6689b94ff",
       "path": "src/platform.rs",
       "sha256": "b22012eea0b0e4c063c5cd67cdde0bcadacfa159210fd18cacddd4a4e520877a"
@@ -23,9 +28,9 @@
       "sha256": "3f3a865c916239f17e68f586966641d0be7f22d915ea5b35c41a8a8502bb89e7"
     },
     {
-      "original_sha256": "507b6fc7e69ce1fa2703b510f65f5aa2740c061f85e523220b742a65f18d8498",
       "path": "src/platform/blade/shaders.wgsl",
-      "sha256": "7cbf7d4b277b39c76365327ddb9b61e0a39160df600f4c587527b5e686dff0dc"
+      "original_sha256": "507b6fc7e69ce1fa2703b510f65f5aa2740c061f85e523220b742a65f18d8498",
+      "sha256": "89f509067b655cf159fb8820245acb8eed1037b50e0a9448810e7875b2f46cd5"
     },
     {
       "original_sha256": "abb2a5145c680d5064491c0039124257c96f84dd11c8c3af2dc5ccf26b01b8d3",
@@ -78,9 +83,9 @@
       "sha256": "4d8ac5bac786f45d7297ecaea4caa0d511a3dafdc509b43fdbca990e6b502352"
     },
     {
-      "original_sha256": "0061a0eccdb8467e89eaeacedc7d5d010be956a5c778fff0ad7d3b30bb736334",
       "path": "src/platform/mac/shaders.metal",
-      "sha256": "7eb58b2716d6221bc750bf499ecb8c40f08191aa216bbbe36abbb07900e17721"
+      "original_sha256": "0061a0eccdb8467e89eaeacedc7d5d010be956a5c778fff0ad7d3b30bb736334",
+      "sha256": "82940997655dffefb38f21029d8b994c1cd5e94acf9ae02c2c6ab3793013493b"
     },
     {
       "original_sha256": "c21da3de36159b51e62f02666b335359d5fff8c20ddf79c4fc9e3195047c3f35",
@@ -98,9 +103,14 @@
       "sha256": "37ad22a314826bf424ca7282b1ef245da25372c2ee2f634d9617075312e745c1"
     },
     {
-      "original_sha256": "aecaa953ed9b2fa291e926647aa34321016ed78967d38af89a371443f3d26530",
+      "path": "src/platform/windows/shaders.hlsl",
+      "original_sha256": "db10b40eeea152fd8548753d270139dbe2b52fed868ad2883ab61f62e46e7c60",
+      "sha256": "dbd3b8868190271dd5190738355f062896462c61cc88a12058750ca4e73a782b"
+    },
+    {
       "path": "src/scene.rs",
-      "sha256": "6115e54ad403007e593eae46200f78458eb6b816a9c6978f9daa3a2a5fd039e9"
+      "original_sha256": "aecaa953ed9b2fa291e926647aa34321016ed78967d38af89a371443f3d26530",
+      "sha256": "8a50db00f98c4b3d134ef087a3eb2411ba5ab7a9309d03600d979f4a290e2f72"
     },
     {
       "original_sha256": "02dc1e3d081dce7f4f77e4b76da018c59f19869a63ea0e532fe23c06d79ceadb",
@@ -108,9 +118,9 @@
       "sha256": "a00931225160c444535ffbf2cfe7f2bacd6c79e47d53b6b35ba6b68d935627df"
     },
     {
-      "original_sha256": "40d58470971ccd658ead4d4f788219658fb68b9486aff73e143835c09237ab18",
       "path": "src/window.rs",
-      "sha256": "db60a647e52397747b2c02a1c269b58e88e1ee28ba3cb80622405011e6a72991"
+      "original_sha256": "40d58470971ccd658ead4d4f788219658fb68b9486aff73e143835c09237ab18",
+      "sha256": "adc141910ab418429c2b86c73ef82de85c3fcf551bbd6eb73bddd162d23c8040"
     }
   ],
   "license": "Apache-2.0",

@@ -814,6 +814,28 @@ def exercise(scenario, env, xid, out, label, large=False):
         if 'UI_CHAT_UX failed discard operation=41' not in log.read_text():
             raise AssertionError('Löschen did not dispatch a scoped discard of the failed record')
         checks.append({'check': 'failed-row Löschen dispatches a scoped discard', 'result': 'pass'})
+    elif scenario == 'shared-media' and label == 'shared-media-light-blue':
+        path, _, _ = observe()
+        extent = run(['identify', '-format', '%w %h', str(path)], env).stdout
+        if extent != '1280 800':
+            raise AssertionError('Rounded media pixel check requires the inspected 1280x800 fixture')
+
+        def pixel(x, y):
+            value = run(['convert', str(path), '-crop', f'1x1+{x}+{y}', '+repage',
+                         '-format', '%[fx:r] %[fx:g] %[fx:b]', 'info:'], env).stdout
+            return tuple(map(float, value.split()))
+
+        # The portrait document is white at its source edges and cropped to a
+        # landscape tile. Each visible corner must reveal the inset/border,
+        # rather than the white offscreen image extending through that corner.
+        for x, y in [(647, 241), (800, 241), (647, 384), (800, 384)]:
+            if min(pixel(x, y)) >= .985:
+                raise AssertionError(f'The cropped document paints through its rounded corner at {x},{y}')
+        center = pixel(724, 313)
+        if center[2] - center[0] < .15:
+            raise AssertionError('The document thumbnail has not loaded its colored center')
+        checks.append({'check': 'cropped portrait thumbnail retains its content and all four rounded corners',
+                       'result': 'pass', 'image': path.name, 'sha256': sha(path)})
     elif scenario == 'chat-reply-draft':
         click('Nachricht', xmin=280, ymin=600)
         type_text('RETAINEDTEXT')

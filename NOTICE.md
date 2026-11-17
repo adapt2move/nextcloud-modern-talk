@@ -27,7 +27,7 @@ axis remains at its upstream default of 1. Preserve its separate
 [font provenance](apps/desktop/assets/fonts/googlesanscode-provenance.json).
 
 The patched GPUI 0.2.2 dependency remains Apache-2.0. Local changes include draining queued X11 map events before first refresh and cover backdrop
-rendering, the nullable macOS text-input range output pointer, an asynchronous
+rendering, fitted-image crop rounding, the nullable macOS text-input range output pointer, an asynchronous
 copy-only macOS file-promise drag source, per-surface drag admission, and bounded
 main-process macOS permission callbacks. Its
 [upstream license](vendor/gpui/LICENSE-APACHE) and
