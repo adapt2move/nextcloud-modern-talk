@@ -3150,6 +3150,7 @@ impl Window {
                 pad: 0,
                 grayscale: false,
                 bounds,
+                corner_bounds: bounds,
                 corner_radii: Default::default(),
                 content_mask,
                 tile,
@@ -3234,6 +3235,26 @@ impl Window {
         frame_index: usize,
         grayscale: bool,
     ) -> Result<()> {
+        self.paint_image_with_corner_bounds(
+            bounds,
+            bounds,
+            corner_radii,
+            data,
+            frame_index,
+            grayscale,
+        )
+    }
+
+    /// Fit and sample the image independently of its visible rounded crop.
+    pub(crate) fn paint_image_with_corner_bounds(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        data: Arc<RenderImage>,
+        frame_index: usize,
+        grayscale: bool,
+    ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
@@ -3255,7 +3276,13 @@ impl Window {
                 )))
             })?
             .expect("Callback above only returns Some");
-        let content_mask = self.content_mask().scale(scale_factor);
+        let content_mask = self
+            .content_mask()
+            .intersect(&ContentMask {
+                bounds: corner_bounds,
+            })
+            .scale(scale_factor);
+        let corner_bounds = corner_bounds.scale(scale_factor);
         let corner_radii = corner_radii.scale(scale_factor);
         let opacity = self.element_opacity();
 
@@ -3267,6 +3294,7 @@ impl Window {
                 .map_origin(|origin| origin.floor())
                 .map_size(|size| size.ceil()),
             content_mask,
+            corner_bounds,
             corner_radii,
             tile,
             opacity,

@@ -814,6 +814,51 @@ def exercise(scenario, env, xid, out, label, large=False):
         if 'UI_CHAT_UX failed discard operation=41' not in log.read_text():
             raise AssertionError('Löschen did not dispatch a scoped discard of the failed record')
         checks.append({'check': 'failed-row Löschen dispatches a scoped discard', 'result': 'pass'})
+    elif scenario == 'shared-media' and label == 'shared-media-light-blue':
+        path, _, _ = observe()
+        extent = run(['identify', '-format', '%w %h', str(path)], env).stdout
+        if extent != '1280 800':
+            raise AssertionError('Rounded media pixel check requires the inspected 1280x800 fixture')
+
+        def pixel(x, y):
+            value = run(['convert', str(path), '-crop', f'1x1+{x}+{y}', '+repage',
+                         '-format', '%[fx:r] %[fx:g] %[fx:b]', 'info:'], env).stdout
+            return tuple(map(float, value.split()))
+
+        # The portrait document is white at its source edges and cropped to a
+        # landscape tile. Each visible corner must reveal the inset/border,
+        # rather than the white offscreen image extending through that corner.
+        for x, y in [(647, 241), (800, 241), (647, 384), (800, 384)]:
+            if min(pixel(x, y)) >= .985:
+                raise AssertionError(f'The cropped document paints through its rounded corner at {x},{y}')
+        center = pixel(724, 313)
+        if center[2] - center[0] < .15:
+            raise AssertionError('The document thumbnail has not loaded its colored center')
+        checks.append({'check': 'cropped portrait thumbnail retains its content and all four rounded corners',
+                       'result': 'pass', 'image': path.name, 'sha256': sha(path)})
+    elif scenario == 'chat-reply-draft':
+        click('Nachricht', xmin=280, ymin=600)
+        type_text('RETAINEDTEXT')
+        expect('typed draft is visible before quoting', ['RETAINEDTEXT'])
+        run(['xdotool', 'mousemove', '--window', xid, '700', '283'], env)
+        time.sleep(.6)
+        run(['xdotool', 'mousemove', '--window', xid, '1190', '242', 'click', '1'], env)
+        expect('selecting a reply keeps the already typed text', ['RETAINEDTEXT'], footer_height=180)
+        key('F7')
+        time.sleep(.2)
+        if not re.search(r'UI_CHAT_STATE .*reply=Some\(\d+\)', (out / f'{label}.log').read_text()):
+            raise AssertionError('The reply action did not select a quote for the retained draft')
+    elif scenario == 'chat-long-message':
+        expect('long message initially follows its end', ['LONGEND', 'NEIGHBOREND'])
+        run(['xdotool', 'mousemove', '--window', xid, '700', '400',
+             'click', '--repeat', '50', '--delay', '20', '4'], env)
+        expect('wheel reaches the start of a message taller than the viewport', ['LONGSTART', 'NEIGHBORSTART'], ['LONGEND', 'NEIGHBOREND'])
+        # Hover the visible toolbar over the tall row before scrolling.
+        # Its surface must protect clicks while passing wheel input to the list.
+        run(['xdotool', 'mousemove', '--window', xid, '1100', '370'], env)
+        time.sleep(.6)
+        run(['xdotool', 'click', '--repeat', '50', '--delay', '20', '5'], env)
+        expect('wheel over the toolbar returns to the end of the tall message', ['LONGEND', 'NEIGHBOREND'], ['LONGSTART', 'NEIGHBORSTART'])
     elif scenario == 'chat-message-hover':
         rest, _, _ = observe()
         run(['xdotool', 'mousemove', '--window', xid, '700', '283'], env)

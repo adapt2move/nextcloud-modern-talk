@@ -468,13 +468,17 @@ impl Element for Img {
                         .style
                         .object_fit
                         .get_bounds(bounds, data.size(layout_state.frame_index));
+                    // Cover can extend beyond the element on one axis. Round
+                    // the visible intersection, not the offscreen fitted edges.
+                    let corner_bounds = new_bounds.intersect(&bounds);
                     let corner_radii = style
                         .corner_radii
                         .to_pixels(window.rem_size())
-                        .clamp_radii_for_quad_size(new_bounds.size);
+                        .clamp_radii_for_quad_size(corner_bounds.size);
                     window
-                        .paint_image(
+                        .paint_image_with_corner_bounds(
                             new_bounds,
+                            corner_bounds,
                             corner_radii,
                             data,
                             layout_state.frame_index,

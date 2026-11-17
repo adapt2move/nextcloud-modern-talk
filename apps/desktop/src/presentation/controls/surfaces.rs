@@ -6,6 +6,10 @@ use super::material;
 use crate::presentation::theme::Elevation;
 
 pub(in crate::presentation) const CONTENT_RADIUS: f32 = 16.;
+// GPUI overflow masks are rectangular. Inset the content viewport far enough
+// that its four corners lie inside the card's rounded border, even when a
+// scrolling/oversized descendant paints an opaque background to the clip edge.
+const CONTENT_INSET: f32 = 5.;
 
 #[derive(Clone, Copy)]
 pub(in crate::presentation) enum CardStyle {
@@ -159,14 +163,19 @@ impl Desktop {
             .gap(px(4.))
             .p_1()
     }
-    /// Keep the shadow outside the rectangular overflow mask. GPUI 0.2.2 does
-    /// not round that mask: full-bleed children must also round their exposed
-    /// corners, rather than relying on `overflow_hidden` to clip their fill.
+    /// Bound the card itself, not only its child: flex automatic minimums
+    /// otherwise let oversized history escape the available card viewport.
+    /// The card paints its own shadow before the child overflow mask. GPUI
+    /// masks remain rectangular; full-bleed surfaces still round their own fill.
     pub(in crate::presentation) fn content_card(&self, content: Div) -> Div {
         let t = self.theme;
         div()
             .relative()
             .size_full()
+            .min_w_0()
+            .min_h_0()
+            .overflow_hidden()
+            .p(px(CONTENT_INSET))
             .rounded(px(CONTENT_RADIUS))
             .bg(self.theme.content_material())
             .border_1()
@@ -180,6 +189,8 @@ impl Desktop {
                 content
                     .relative()
                     .size_full()
+                    .min_w_0()
+                    .min_h_0()
                     .rounded(px(CONTENT_RADIUS))
                     .overflow_hidden(),
             )
@@ -199,4 +210,21 @@ pub(in crate::presentation) fn inner_highlight(
         .rounded(px((radius - 1.).max(0.)))
         .border_t_1()
         .border_color(theme.inner_highlight())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opaque_content_viewport_corners_stay_inside_the_rounded_card() {
+        // The child clip is rectangular. Its corner, including an AA margin,
+        // must lie inside the parent's circular corner at every UI scale.
+        for scale in [1., 1.25, 1.5, 2.] {
+            let radius = CONTENT_RADIUS * scale;
+            let inset = (CONTENT_INSET + 1.) * scale; // card border
+            let corner_distance = 2_f32.sqrt() * (radius - inset);
+            assert!(corner_distance <= radius - scale);
+        }
+    }
 }

@@ -435,6 +435,44 @@ impl Drafts {
         true
     }
 
+    /// Changing a quote annotates the current draft; it must not select an
+    /// empty editor. Keep separately stored drafts and unresolved sends intact.
+    pub fn retarget_reply(
+        &mut self,
+        context: ConversationRef,
+        target: talk_core::ui::messaging::ComposeTarget,
+    ) -> bool {
+        let previous = self.target(context);
+        if previous.thread != target.thread || self.pending(context) {
+            return false;
+        }
+        let source = self.entries.iter().position(|draft| {
+            draft.context == context && same_draft_target(&draft.target, &previous)
+        });
+        let destination = self.entries.iter().position(|draft| {
+            draft.context == context && same_draft_target(&draft.target, &target)
+        });
+        if source != destination
+            && source.is_some_and(|index| !self.entries[index].text.as_str().is_empty())
+            && destination.is_some_and(|index| !self.entries[index].text.as_str().is_empty())
+        {
+            return false;
+        }
+        if !self.set_target(context, target.clone()) {
+            return false;
+        }
+        if let Some(source) = source
+            && Some(source) != destination
+            && !self.entries[source].text.as_str().is_empty()
+        {
+            self.entries[source].target = target;
+            if let Some(destination) = destination {
+                self.entries.remove(destination);
+            }
+        }
+        true
+    }
+
     pub fn retain_accounts(&mut self, snapshot: &PresentationSnapshot) {
         self.targets.retain(|(context, _)| {
             snapshot
@@ -1858,6 +1896,69 @@ pub(super) mod tests {
             assert_eq!(port.submissions, 2);
         }
     }
+    #[test]
+    fn changing_and_removing_a_quote_carries_the_unsent_text() {
+        use talk_core::ui::messaging::ComposeTarget;
+        for thread in [None, Some(9)] {
+            let mut drafts = Drafts::default();
+            let c = context(1);
+            let base = ComposeTarget {
+                thread,
+                ..Default::default()
+            };
+            assert!(drafts.set_target(c, base.clone()));
+            drafts.save(c, "Already typed text").unwrap();
+            for reply_to in [Some(7), Some(8), None] {
+                let target = ComposeTarget {
+                    reply_to,
+                    ..base.clone()
+                };
+                assert!(drafts.retarget_reply(c, target.clone()));
+                assert_eq!(drafts.text(c), "Already typed text");
+                assert_eq!(drafts.target(c), target);
+                assert_eq!(drafts.entries.len(), 1);
+            }
+            let mut port = Port {
+                fail: None,
+                submissions: 0,
+            };
+            let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+            assert!(!drafts.retarget_reply(
+                c,
+                ComposeTarget {
+                    reply_to: Some(7),
+                    ..base.clone()
+                }
+            ));
+            assert_eq!(drafts.target(c), base);
+            assert!(drafts.complete(SubmissionResult {
+                request,
+                context: c,
+                result: Completion::ServerAccepted
+            }));
+            assert_eq!(drafts.text(c), "");
+        }
+    }
+
+    #[test]
+    fn changing_a_quote_cannot_overwrite_a_separately_saved_draft() {
+        use talk_core::ui::messaging::ComposeTarget;
+        let c = context(1);
+        let mut drafts = Drafts::default();
+        drafts.save(c, "Original draft").unwrap();
+        let reply = ComposeTarget {
+            reply_to: Some(7),
+            ..Default::default()
+        };
+        assert!(drafts.set_target(c, reply.clone()));
+        drafts.save(c, "Separate reply").unwrap();
+        assert!(!drafts.retarget_reply(c, ComposeTarget::default()));
+        assert_eq!(drafts.target(c), reply);
+        assert_eq!(drafts.text(c), "Separate reply");
+        assert!(drafts.set_target(c, ComposeTarget::default()));
+        assert_eq!(drafts.text(c), "Original draft");
+    }
+
     #[test]
     fn successful_reply_retires_the_quote_and_restores_the_destination_draft() {
         use talk_core::ui::messaging::ComposeTarget;

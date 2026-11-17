@@ -1033,9 +1033,10 @@ impl Desktop {
             .top(px(-24.))
             .right(gutter)
             .opacity(if shown { 1. } else { 0. })
-            // Only a visible toolbar blocks what lies beneath its overhang, so the
-            // previous row's hover and clicks are untouched while it is hidden.
-            .when(shown, |d| d.occlude())
+            // Protect the visible overhang from clicks on the previous row,
+            // while passing wheel/trackpad input to the containing history.
+            // Occluding scroll traps the reader above a viewport-sized message.
+            .when(shown, |d| d.block_mouse_except_scroll())
             .when_some(tracked, |d, handle| d.track_focus(&handle.tab_stop(false)))
             .on_hover(cx.listener({
                 let hovered_id = toolbar_id.clone();
