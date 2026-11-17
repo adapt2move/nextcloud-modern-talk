@@ -1828,7 +1828,7 @@ impl Desktop {
                         .iter()
                         .any(|m| m.local_id == id && self.can_reply_to(m))
                 {
-                    if !self.drafts.set_target(
+                    if !self.drafts.retarget_reply(
                         context,
                         ComposeTarget {
                             reply_to: Some(id),
@@ -1843,7 +1843,7 @@ impl Desktop {
                     }
                     let value = self.drafts.text(context).to_owned();
                     if !self.load_composer_value(&value, cx) {
-                        self.drafts.set_target(context, previous);
+                        self.drafts.retarget_reply(context, previous);
                         return;
                     }
                     self.message_ui.menu.clear();
@@ -1885,13 +1885,23 @@ impl Desktop {
                     if !self.save_draft(cx) {
                         return;
                     }
-                    if !self.drafts.set_target(context, ComposeTarget::default()) {
+                    if !(if previous.reply_to.is_some() {
+                        self.drafts
+                            .retarget_reply(context, ComposeTarget::default())
+                    } else {
+                        self.drafts.set_target(context, ComposeTarget::default())
+                    }) {
+                        self.report_draft_error(talk_core::ui::SubmitError::Busy, context);
                         return;
                     }
                 }
                 let value = self.drafts.text(context).to_owned();
                 if !self.load_composer_value(&value, cx) {
-                    self.drafts.set_target(context, previous);
+                    if previous.reply_to.is_some() && self.message_ui.editing.is_none() {
+                        self.drafts.retarget_reply(context, previous);
+                    } else {
+                        self.drafts.set_target(context, previous);
+                    }
                     return;
                 }
                 self.message_ui.editing = None;

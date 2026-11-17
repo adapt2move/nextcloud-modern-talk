@@ -198,6 +198,10 @@ system integration or accessibility. The screen stage keeps camera and screen
 identities separate; the production media owner supplies scoped screen frames through the same stream metadata.
 Use `search-navigation` for the fictional quick switcher, `account-search` for grouped message results and filters, `discover` for open-conversation browsing, and `search-filter` for the sidebar filters and muted-room indicator. These previews do not query a directory or establish server behavior.
 
+Use `chat-long-message` to check wheel scrolling within a message taller than
+its viewport, including wheel input over its hover toolbar, and `chat-reply-draft` to check that selecting a reply preserves
+already typed text. These fictional fixtures contact no server.
+
 Use `chat-ux` and `chat-ux-call` for the header, search, reply and tooltip fixtures. They use fictional conversations and do not authorize a server send or call. Short transitions respect the observed system Reduce Motion preference; an unknown preference suppresses decorative motion. On Linux, observation uses the desktop's GNOME or KDE settings.
 
 Update development builds are not treated as installable packages. For installation checks use the private fixture in [tools/updates](../tools/updates/install_probe.py), which creates a disposable package and never overwrites a system installation. The PackageKit fixture uses a private D-Bus service, not the system package manager. Runtime checks and package-layout fixtures do not qualify native macOS or Windows installation.

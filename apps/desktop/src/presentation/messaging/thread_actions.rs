@@ -276,7 +276,7 @@ impl Desktop {
             return;
         }
         let previous = self.thread_drafts.target(context);
-        if !self.thread_drafts.set_target(
+        if !self.thread_drafts.retarget_reply(
             context,
             ComposeTarget {
                 thread: Some(root),
@@ -284,6 +284,7 @@ impl Desktop {
                 ..Default::default()
             },
         ) {
+            self.report_draft_error(talk_core::ui::SubmitError::Busy, context);
             return;
         }
         let body = self.thread_drafts.text(context).to_owned();
@@ -292,7 +293,7 @@ impl Desktop {
             cx.notify();
             loaded
         }) {
-            self.thread_drafts.set_target(context, previous);
+            self.thread_drafts.retarget_reply(context, previous);
             return;
         }
         self.thread_composer.focus_handle(cx).focus(window);
@@ -326,7 +327,8 @@ impl Desktop {
             }
             let mut target = self.thread_drafts.target(context);
             target.reply_to = None;
-            if !self.thread_drafts.set_target(context, target) {
+            if !self.thread_drafts.retarget_reply(context, target) {
+                self.report_draft_error(talk_core::ui::SubmitError::Busy, context);
                 return;
             }
         }

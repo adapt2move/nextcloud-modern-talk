@@ -111,6 +111,8 @@ pub const SCENARIOS: &[&str] = &[
     "chat-server-denied",
     "chat-server-unavailable",
     "accounts-server-denied",
+    "chat-reply-draft",
+    "chat-long-message",
     "chat-ux",
     "chat-presence",
     "people-card",
@@ -1473,6 +1475,30 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 false,
             )
         }));
+        return state;
+    }
+    if scenario == Some("chat-reply-draft") {
+        return snapshot(Some("chat-ux"));
+    }
+    if scenario == Some("chat-long-message") {
+        let mut state = snapshot(Some("chat-ux"));
+        let mut row = state.messages.as_slice()[0].clone();
+        row.body = text(&format!(
+            "LONGSTART\n{}\nLONGEND",
+            "Long message line for scrolling.\n".repeat(90)
+        ));
+        row.metadata.prepared = Some(talk_core::ui::markup::Prepared::new(row.body.clone()));
+        row.metadata.rich = Page::empty();
+        row.reply_count = 0;
+        let mut older = row.clone();
+        older.body = text("NEIGHBORSTART");
+        older.metadata.prepared = Some(talk_core::ui::markup::Prepared::new(older.body.clone()));
+        let mut newer = older.clone();
+        row.local_id = 2;
+        newer.local_id = 3;
+        newer.body = text("NEIGHBOREND");
+        newer.metadata.prepared = Some(talk_core::ui::markup::Prepared::new(newer.body.clone()));
+        state.messages = page([older, row, newer]);
         return state;
     }
     if matches!(scenario, Some("chat-ux" | "chat-ux-call")) {
