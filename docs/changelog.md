@@ -2,6 +2,15 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.27 alpha (2026-11-17)
+
+### Fixes
+
+- **desktop:** Preserve reply drafts and fix scrolling and rounded surfaces (#53) (`34ea143`)
+- **calls:** Support Bluetooth audio rates and retry failed devices (#48) (`536713f`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.27/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.27/docs/limitations.md)
+
 ## v0.0.26 alpha (2026-11-13)
 
 ### Fixes
