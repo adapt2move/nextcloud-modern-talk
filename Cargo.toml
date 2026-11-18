@@ -91,7 +91,7 @@ default-features = false
 
 # Snapshot the system timezone off the UI thread; formatting uses the cached zone.
 [workspace.dependencies.jiff]
-version = "=0.2.38"
+version = "=1.0.1"
 default-features = false
 features = ["std", "tz-system", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"]
 
