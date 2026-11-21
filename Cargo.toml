@@ -126,7 +126,7 @@ default-features = false
 features = ["crypto-rust"]
 
 [workspace.dependencies.zbus]
-version = "=6.2.1"
+version = "=6.5.0"
 default-features = false
 features = ["proxy", "tokio"]
 
