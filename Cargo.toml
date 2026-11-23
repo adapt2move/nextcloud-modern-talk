@@ -77,7 +77,7 @@ futures-lite = { version = "=2.6.1", default-features = false, features = ["std"
 
 # I2 identity: explicit stores; no sample/mock/default provider selection.
 [workspace.dependencies.keyring-core]
-version = "=1.0.1"
+version = "=1.1.0"
 default-features = false
 
 [workspace.dependencies.rusqlite]
