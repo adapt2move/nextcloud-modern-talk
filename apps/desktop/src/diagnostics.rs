@@ -398,12 +398,18 @@ impl Drop for Session {
     }
 }
 pub(crate) fn start() -> Session {
+    start_with_path(platform_path)
+}
+
+pub(crate) fn start_with_path(
+    path: impl FnOnce() -> io::Result<PathBuf> + Send + 'static,
+) -> Session {
     let (handle, receiver) = channel();
     let state = handle.state.clone();
     match thread::Builder::new()
         .name("local-diagnostics".into())
         .spawn(move || {
-            run(platform_path(), receiver, state, MAX_BYTES);
+            run(path(), receiver, state, MAX_BYTES);
         }) {
         Ok(worker) => {
             let _ = LOGGER.set(handle.clone());

@@ -143,7 +143,15 @@ impl Desired {
         })
     }
 }
+#[cfg(all(feature = "dev-probes", debug_assertions))]
+type PauseRequest = (
+    talk_core::ids::CallScope,
+    std::sync::mpsc::SyncSender<Result<(), DeviceError>>,
+);
+
 struct State {
+    #[cfg(all(feature = "dev-probes", debug_assertions))]
+    pause_microphone: Option<PauseRequest>,
     media: Option<Arc<talk_adapters::media::MediaService>>,
     snapshot: DeviceSnapshot,
     change: u64,
@@ -196,6 +204,8 @@ impl DeviceRuntime {
     pub fn start() -> Result<Self, DeviceError> {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
+                #[cfg(all(feature = "dev-probes", debug_assertions))]
+                pause_microphone: None,
                 media: None,
                 snapshot: empty_snapshot(),
                 change: 1,
@@ -237,6 +247,24 @@ impl DeviceRuntime {
             })
             .map_err(|_| DeviceError::Unavailable)?;
         Ok(Self { shared })
+    }
+    #[cfg(all(feature = "dev-probes", debug_assertions))]
+    pub(crate) fn pause_probe_microphone(
+        &self,
+        call: talk_core::ids::CallScope,
+    ) -> Result<(), DeviceError> {
+        let (reply, result) = std::sync::mpsc::sync_channel(1);
+        {
+            let mut state = self.shared.lock();
+            if state.pause_microphone.is_some() {
+                return Err(DeviceError::Busy);
+            }
+            state.pause_microphone = Some((call, reply));
+        }
+        self.shared.wake.notify_one();
+        result
+            .recv_timeout(Duration::from_secs(3))
+            .map_err(|_| DeviceError::Unavailable)?
     }
     pub fn attach_media(&self, media: Arc<talk_adapters::media::MediaService>) {
         let weak = Arc::downgrade(&self.shared);
@@ -799,6 +827,13 @@ fn run(shared: &Shared) {
                     session.phase = VoicePhase::Stopping;
                     state.changed();
                 }
+            }
+        }
+        #[cfg(all(feature = "dev-probes", debug_assertions))]
+        {
+            let request = shared.lock().pause_microphone.take();
+            if let Some((scope, reply)) = request {
+                let _ = reply.send(calls.pause_probe_microphone(scope));
             }
         }
         if let Some(media) = &media {

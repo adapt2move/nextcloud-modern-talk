@@ -3,6 +3,8 @@ mod accounts;
 mod assets;
 mod content_images;
 mod content_video;
+#[cfg(all(feature = "dev-probes", debug_assertions))]
+pub(crate) mod device_call;
 mod files;
 mod fixtures;
 mod lifecycle;
