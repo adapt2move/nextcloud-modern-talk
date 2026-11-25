@@ -1204,25 +1204,66 @@ impl MeetingWriter {
         context: &OperationContext,
         flags: ParticipantFlags,
     ) -> Result<(), Error> {
-        let context = self.binding.context(context)?;
+        let mut write_context = self.binding.context(context)?;
         let mut guard = ReadGuard(self.binding.lifetime.clone(), false);
         let route = format!(
             "ocs/v2.php/apps/spreed/api/v4/call/{}",
             self.binding.room.as_str()
         );
-        self.transport
+        // Leave time for one read after an ambiguous PUT. Both operations
+        // share the caller's scope, cancellation and overall deadline.
+        write_context.deadline.millis = write_context
+            .deadline
+            .millis
+            .min(self.now().millis.saturating_add(3_000));
+        let result = self
+            .transport
             .ocs(
-                &context,
+                &write_context,
                 Method::PUT,
                 &route,
                 &[],
                 &[("flags", flags.bits().to_string())],
                 false,
             )
-            .await
-            .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+            .await;
+        let result = match result {
+            Ok(_) => Ok(()),
+            Err(error)
+                if self.transport.request_dispatched()
+                    && matches!(
+                        error.kind,
+                        ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::ServerUnavailable
+                    ) =>
+            {
+                // A room response binds participantFlags to its sessionId. The
+                // attendee list aggregates multiple sessions and callFlag is room-wide.
+                let route = format!(
+                    "ocs/v2.php/apps/spreed/api/v4/room/{}",
+                    self.binding.room.as_str()
+                );
+                let read_context = self.binding.context(context)?;
+                let confirmed = self
+                    .transport
+                    .ocs(&read_context, Method::GET, &route, &[], &[], false)
+                    .await
+                    .is_ok_and(|response| {
+                        let room = response.data;
+                        response.status == 200
+                            && room["token"].as_str() == Some(self.binding.room.as_str())
+                            && crate::models::integer(room.get("id")) == Some(self.binding.room_id)
+                            && room["sessionId"].as_str() == Some(self.binding.session.as_str())
+                            && crate::models::integer(room.get("participantFlags"))
+                                == Some(u64::from(flags.bits()))
+                    });
+                if confirmed { Ok(()) } else { Err(error) }
+            }
+            Err(error) => Err(error),
+        };
+        // A completed failure belongs to the meeting owner. Dropping this
+        // future in flight still retires the lane through the abandonment guard.
         guard.1 = true;
-        Ok(())
+        result
     }
 }
 

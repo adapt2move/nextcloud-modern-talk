@@ -41,7 +41,7 @@ fn idle_runtime_has_no_permission_or_capture_side_effect() {
 #[test]
 fn missing_saved_identity_is_retained_without_selecting_a_different_default() {
     let saved = DeviceId::new("audio:missing-physical-device").unwrap();
-    let inventory = Inventory {
+    let mut inventory = Inventory {
         audio: vec![DeviceInfo {
             id: DeviceId::new("audio:different-device").unwrap(),
             label: safe_label("Other mic"),
@@ -61,6 +61,11 @@ fn missing_saved_identity_is_retained_without_selecting_a_different_default() {
     assert_eq!(
         inventory.effective(&choice, DeviceKind::Microphone),
         Err(DeviceError::Removed)
+    );
+    inventory.audio_error[0] = Some(DeviceError::PermissionDenied);
+    assert_eq!(
+        inventory.effective(&choice, DeviceKind::Microphone),
+        Err(DeviceError::PermissionDenied)
     );
 }
 

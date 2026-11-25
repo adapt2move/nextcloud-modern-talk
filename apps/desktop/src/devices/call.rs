@@ -60,12 +60,13 @@ impl Calls {
         // again. A specifically chosen device that disappears still stops.
         let mut changed = [false; 3];
         for (index, kind) in KINDS.into_iter().enumerate() {
-            if let Ok(id) = inventory.effective(selection(preferences, index), kind) {
-                changed[index] = self.resolved[index]
-                    .as_ref()
-                    .is_some_and(|previous| *previous != id);
-                self.resolved[index] = Some(id);
-            }
+            let current = inventory
+                .effective(selection(preferences, index), kind)
+                .ok();
+            // A route can disappear and return with the same persistent ID.
+            // Lift its failure latch only on the transition back to availability.
+            changed[index] = current.is_some() && self.resolved[index] != current;
+            self.resolved[index] = current;
         }
         if changed[0] || changed[2] {
             handle.device_retry(changed[0], changed[2]);
@@ -101,41 +102,37 @@ impl Calls {
             let restart = self.audio[index]
                 .as_ref()
                 .is_some_and(|(c, _)| c.epoch() != handle.audio_epoch(index == 0));
-            let invalid = self.audio[index].as_ref().is_some_and(|(c, s)| {
-                !requested
-                    || resolved.as_ref() != Ok(c.id())
-                    || !s.valid()
+            if let Some((capture, signal)) = &self.audio[index] {
+                let failure = if !requested || restart || changed[index] {
+                    None
+                } else {
+                    resolved
+                        .as_ref()
+                        .err()
+                        .copied()
+                        .or_else(|| stream_failure(signal))
+                };
+                if !requested
                     || restart
-                    || s.error.load(Ordering::Acquire) != 0
-                    || s.stalled()
-            });
-            // The old stream of a replaced device may already report an error
-            // or have stalled; that belongs to the device that went away.
-            let switched = changed[index]
-                && self.audio[index]
-                    .as_ref()
-                    .is_some_and(|(c, _)| resolved.as_ref().is_ok_and(|id| id != c.id()));
-            if invalid {
-                if let Some((_, s)) = self.audio[index].as_ref() {
-                    if requested && !switched && !restart {
+                    || resolved.as_ref() != Ok(capture.id())
+                    || failure.is_some()
+                {
+                    signal.revoke();
+                    self.audio[index] = None;
+                    if let Some(error) = failure {
                         note_failure(
                             if index == 0 {
                                 "call_microphone"
                             } else {
                                 "call_speaker"
                             },
-                            decode_error(s.error.load(Ordering::Acquire))
-                                .unwrap_or(DeviceError::Removed),
+                            error,
                         );
-                    }
-                    s.revoke();
-                }
-                self.audio[index] = None;
-                if requested && !switched && !restart {
-                    if index == 0 {
-                        handle.device_failed(true, false);
-                    } else {
-                        self.speaker_failed = true;
+                        if index == 0 {
+                            handle.device_failed(true, false);
+                        } else {
+                            self.speaker_failed = true;
+                        }
                     }
                 }
             }
@@ -154,6 +151,9 @@ impl Calls {
                 });
                 match result {
                     Ok(c) => self.audio[index] = Some((c, signal)),
+                    // The grant expired while opening the device. The next
+                    // grant will select a fresh stream and epoch.
+                    Err(DeviceError::Stale) => signal.revoke(),
                     Err(error) => {
                         note_failure(
                             if index == 0 {
@@ -227,10 +227,29 @@ impl Drop for Calls {
     }
 }
 
+fn stream_failure(signal: &Signal) -> Option<DeviceError> {
+    decode_error(signal.error.load(Ordering::Acquire)).or_else(|| {
+        if !signal.valid() {
+            Some(DeviceError::StreamInvalidated)
+        } else if signal.stalled() {
+            Some(DeviceError::StreamStalled)
+        } else if signal.last_activity.load(Ordering::Relaxed) == 0
+            && signal.born.elapsed() >= Duration::from_secs(8)
+        {
+            Some(DeviceError::StreamStartTimeout)
+        } else {
+            None
+        }
+    })
+}
+
 fn note_failure(kind: &'static str, error: DeviceError) {
     let reason = match error {
         DeviceError::PermissionDenied => "permission_denied",
         DeviceError::Removed => "removed",
+        DeviceError::StreamStartTimeout => "callback_start_timeout",
+        DeviceError::StreamInvalidated => "stream_invalidated",
+        DeviceError::StreamStalled => "callback_stalled",
         DeviceError::Busy => "busy",
         DeviceError::Unavailable => "unavailable",
         DeviceError::InvalidSelection => "invalid_selection",
@@ -238,4 +257,31 @@ fn note_failure(kind: &'static str, error: DeviceError) {
         DeviceError::CaptureFailed => "capture_failed",
     };
     crate::diagnostics::note(crate::diagnostics::Note::info(kind, "failed").detail(reason));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_first_callback_and_stalled_stream_have_distinct_causes() {
+        let mut signal = Signal::new();
+        assert_eq!(stream_failure(&signal), None);
+        signal.born -= Duration::from_secs(9);
+        assert_eq!(
+            stream_failure(&signal),
+            Some(DeviceError::StreamStartTimeout)
+        );
+        signal.last_activity.store(1, Ordering::Relaxed);
+        assert_eq!(stream_failure(&signal), Some(DeviceError::StreamStalled));
+        signal.touch();
+        assert_eq!(stream_failure(&signal), None);
+        signal.fail(audio::map_error(cpal::Error::new(
+            cpal::ErrorKind::StreamInvalidated,
+        )));
+        assert_eq!(
+            stream_failure(&signal),
+            Some(DeviceError::StreamInvalidated)
+        );
+    }
 }

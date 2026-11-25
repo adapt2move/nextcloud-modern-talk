@@ -34,8 +34,9 @@ does not reproduce every real participant's codec or network.
 
 The `camera-only` scenario keeps the native microphone disabled, requires fresh
 browser-decoded camera video plus received browser audio/video, and asserts that
-no native audio capture was submitted. It isolates camera publication from a
-missing or unavailable microphone; it does not emulate a physical headset.
+no native audio capture was submitted. Use `late-camera-only` to start receive-only,
+wait for an active call and then enable just the camera. Both cases require
+increasing decoded camera frames on the official browser receiver. They use generated camera input and do not emulate a physical headset.
 
 The participant count is two or three. Cases include `media`, `native-screen`,
 `native-static-screen`, `portal-screen`, `web-screen`, explicit `reconnect`,

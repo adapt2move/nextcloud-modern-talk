@@ -376,9 +376,10 @@ pub(super) fn map_error(error: cpal::Error) -> DeviceError {
     match error.kind() {
         cpal::ErrorKind::PermissionDenied => DeviceError::PermissionDenied,
         cpal::ErrorKind::DeviceBusy => DeviceError::Busy,
-        cpal::ErrorKind::DeviceNotAvailable
-        | cpal::ErrorKind::DeviceChanged
-        | cpal::ErrorKind::StreamInvalidated => DeviceError::Removed,
+        cpal::ErrorKind::DeviceNotAvailable => DeviceError::Unavailable,
+        cpal::ErrorKind::DeviceChanged | cpal::ErrorKind::StreamInvalidated => {
+            DeviceError::StreamInvalidated
+        }
         cpal::ErrorKind::HostUnavailable => DeviceError::Unavailable,
         _ => DeviceError::CaptureFailed,
     }
@@ -393,10 +394,27 @@ impl Backend {
         sink: talk_adapters::media::CaptureHandle,
     ) -> Result<Capture, DeviceError> {
         let device = selected_device(&self.host, id)?;
-        let config = if input {
-            call_config(device.supported_input_configs().map_err(map_error)?)
+        // CoreAudio sets the device-wide nominal rate when opening a stream.
+        // Keep the current route rate when possible, including on explicit retry.
+        #[cfg(target_os = "macos")]
+        let preferred_rate = (if input {
+            device.default_input_config()
         } else {
-            call_config(device.supported_output_configs().map_err(map_error)?)
+            device.default_output_config()
+        })
+        .map_or(48_000, |config| config.sample_rate());
+        #[cfg(not(target_os = "macos"))]
+        let preferred_rate = 48_000;
+        let config = if input {
+            call_config(
+                device.supported_input_configs().map_err(map_error)?,
+                preferred_rate,
+            )
+        } else {
+            call_config(
+                device.supported_output_configs().map_err(map_error)?,
+                preferred_rate,
+            )
         }
         .ok_or(DeviceError::Unavailable)?;
         crate::diagnostics::note(
@@ -435,19 +453,20 @@ impl Backend {
 }
 fn call_config(
     configs: impl IntoIterator<Item = cpal::SupportedStreamConfigRange>,
+    preferred_rate: u32,
 ) -> Option<cpal::SupportedStreamConfig> {
     configs
         .into_iter()
         .take(64)
         .filter(call_config_supported)
         .map(|range| {
-            let rate = 48_000u32.clamp(
+            let rate = preferred_rate.clamp(
                 range.min_sample_rate().max(8_000),
                 range.max_sample_rate().min(192_000),
             );
             range.with_sample_rate(rate)
         })
-        .min_by_key(|config| config.sample_rate().abs_diff(48_000))
+        .min_by_key(|config| config.sample_rate().abs_diff(preferred_rate))
 }
 fn call_config_supported(c: &cpal::SupportedStreamConfigRange) -> bool {
     // PulseAudio advertises U8 before I16. Select a format handled by the
@@ -744,15 +763,20 @@ mod call_sound_tests {
         assert_eq!(selected.sample_format(), SampleFormat::I16);
         assert_eq!(selected.with_sample_rate(48_000).sample_rate(), 48_000);
         for rate in [8_000, 16_000, 24_000, 32_000, 44_100, 48_000, 96_000] {
-            let config = call_config([range(SampleFormat::F32, 1, rate, rate)]).unwrap();
+            let config = call_config([range(SampleFormat::F32, 1, rate, rate)], 48_000).unwrap();
             assert_eq!(config.sample_rate(), rate);
         }
-        let preferred = call_config([
-            range(SampleFormat::I16, 1, 16_000, 16_000),
-            range(SampleFormat::F32, 2, 48_000, 48_000),
-        ])
+        let preferred = call_config(
+            [
+                range(SampleFormat::I16, 1, 16_000, 16_000),
+                range(SampleFormat::F32, 2, 48_000, 48_000),
+            ],
+            48_000,
+        )
         .unwrap();
         assert_eq!(preferred.sample_rate(), 48_000);
+        let current = call_config([range(SampleFormat::F32, 1, 8_000, 96_000)], 44_100).unwrap();
+        assert_eq!(current.sample_rate(), 44_100);
         for rejected in [
             range(SampleFormat::I16, 0, 48_000, 48_000),
             range(SampleFormat::I16, 3, 48_000, 48_000),

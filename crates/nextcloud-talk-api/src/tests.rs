@@ -871,6 +871,58 @@ async fn dropped_join_stays_uncertain_until_explicit_leave() {
 }
 
 #[tokio::test]
+async fn active_meeting_reconciles_only_its_own_flags_without_replaying_the_put() {
+    for (status, session, flags, expected) in [
+        (503, "own-session", 5, None),
+        (503, "own-session", 7, Some(ErrorKind::ServerUnavailable)),
+        (503, "other-session", 5, Some(ErrorKind::ServerUnavailable)),
+        (403, "own-session", 5, Some(ErrorKind::PermissionDenied)),
+        (400, "own-session", 5, Some(ErrorKind::BadRequest)),
+        (404, "own-session", 5, Some(ErrorKind::NotFound)),
+    ] {
+        let mut replies = join_replies();
+        replies.push((
+            status,
+            json!({"ocs":{"meta":{"status":"failure","statuscode":status},"data":[]}}).to_string(),
+            Duration::ZERO,
+        ));
+        if status == 503 {
+            replies.push(reply(json!({"id":7, "token":"testroom", "sessionId":session, "participantFlags":flags, "callFlag":5})));
+        }
+        if expected.is_none() {
+            replies.push(reply(json!([]))); // subsequent explicit camera-off intent
+        }
+        let server = Server::start(replies).await;
+        let (mut client, runtime) = client(&server);
+        let handle = join(&mut client, &runtime).await;
+        let (_reader, mut writer, stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+        let result = writer
+            .flags(&context(&runtime), ParticipantFlags::new(false, true))
+            .await;
+        assert_eq!(result.err().map(|e| e.kind), expected);
+        assert!(!stop.is_closed());
+        if expected.is_none() {
+            writer
+                .flags(&context(&runtime), ParticipantFlags::new(false, false))
+                .await
+                .unwrap();
+        }
+        let seen = server.seen.lock().unwrap();
+        assert_eq!(
+            seen.len(),
+            4 + usize::from(status == 503) + usize::from(expected.is_none())
+        );
+        if expected.is_none() {
+            assert!(seen[5].starts_with("PUT ") && seen[5].contains("flags=1"));
+        }
+        assert!(seen[3].starts_with("PUT ") && seen[3].contains("flags=5"));
+        if status == 503 {
+            assert!(seen[4].starts_with("GET /ocs/v2.php/apps/spreed/api/v4/room/testroom?"));
+        }
+    }
+}
+
+#[tokio::test]
 async fn call_flags_and_other_room_leave_preserve_only_the_current_session() {
     let mut replies = join_replies();
     replies.extend([

@@ -451,6 +451,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Rejoin to confirm your consent to the changed recording policy.",
         "Vuelve a unirte para confirmar tu consentimiento a la nueva política de grabación.",
     ),
+    (
+        "Medienstatus nicht bestätigt",
+        "Media status unconfirmed",
+        "Estado de los medios sin confirmar",
+    ),
+    (
+        "Der Server konnte deinen Mikrofon- und Kamerastatus nicht bestätigen. Tritt dem Anruf erneut bei.",
+        "The server could not confirm your microphone and camera status. Rejoin the call.",
+        "El servidor no pudo confirmar el estado de tu micrófono y cámara. Vuelve a unirte a la llamada.",
+    ),
     ("Verbinde …", "Connecting …", "Conectando…"),
     (
         "Verbindung zum Gespräch wird erneuert",

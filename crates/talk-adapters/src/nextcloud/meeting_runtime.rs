@@ -3,6 +3,7 @@
 mod activity;
 mod moderation;
 mod outgoing;
+mod publication;
 mod speaking;
 mod status;
 
@@ -75,7 +76,7 @@ enum Write {
     Select(PeerSession, Negotiation, StreamKind),
     Remove(PeerSession, StreamKind),
     Signal(PeerSession, Negotiation, Signal, StreamKind),
-    Flags(MediaWishes),
+    Flags(ParticipantFlags),
 }
 impl Write {
     /// A fixed label for the local diagnostic log.
@@ -215,6 +216,10 @@ impl LiveCall {
         account_rejection: Option<super::AccountRejection>,
     ) -> Result<Self, api::ErrorKind> {
         let scope = call.scope();
+        let joined = call
+            .grant()
+            .ok_or(api::ErrorKind::WrongScope)?
+            .publication();
         let grant = call
             .advance(
                 &initial.inputs,
@@ -315,6 +320,7 @@ impl LiveCall {
         tokio::spawn(media_loop(
             call,
             initial,
+            ParticipantFlags::new(joined.microphone, joined.camera),
             own,
             control,
             signals,
@@ -548,7 +554,7 @@ async fn write_loop(
     // and the request sequence it answers.
     let mut running: Option<(Sources, usize, Instant, u64)> = None;
     let mut tick = tokio::time::interval(Duration::from_millis(50));
-    while session.live() {
+    'writer: while session.live() {
         // Signaling writes go out between the reads of a refresh instead of
         // waiting for all six: candidates and device flags are not held back.
         if running.is_none() {
@@ -559,6 +565,7 @@ async fn write_loop(
                 break;
             };
             let name = command.name();
+            let updating_flags = matches!(command, Write::Flags(_));
             let result = match command {
                 Write::Refresh(after) => {
                     requested = requested.max(after);
@@ -603,22 +610,27 @@ async fn write_loop(
                     )
                     .await
                     .map(|_| ()),
-                Write::Flags(w) => {
+                Write::Flags(flags) => {
                     writer
-                        .flags(
-                            &context(scope, &network, &cancel, 3000),
-                            ParticipantFlags::new(w.microphone, w.camera),
-                        )
+                        .flags(&context(scope, &network, &cancel, 6000), flags)
                         .await
                 }
             };
-            if let Err(_error) = result {
-                crate::media::note_call_failure(Some((name, super::transport::kind(_error.kind))));
-                crate::media::note_call_stop("signaling write failed");
+            if let Err(error) = result {
+                if !session.live() || cancel.is_cancelled() {
+                    break 'writer;
+                }
+                crate::media::note_call_stop_failure(
+                    "signaling write failed",
+                    name,
+                    super::transport::kind(error.kind),
+                );
                 #[cfg(feature = "backend-test")]
-                eprintln!("normal write stopped: {:?}", _error.kind);
-                session.close();
-                break;
+                eprintln!("normal write stopped: {:?}", error.kind);
+                if updating_flags && let Ok(mut snapshot) = session.snapshot.lock() {
+                    snapshot.phase = Phase::Waiting(calls::Gate::ParticipantFlagsUnconfirmed);
+                }
+                break 'writer;
             }
         }
         if running.is_none() && Instant::now() >= refresh_at {
@@ -962,6 +974,7 @@ async fn reconcile(
 async fn media_loop(
     mut call: CallSession,
     mut bundle: Bundle,
+    joined: ParticipantFlags,
     own: PeerSession,
     mut control: mpsc::Receiver<(Command, u64)>,
     mut signals: mpsc::Receiver<SignalBatch>,
@@ -998,8 +1011,7 @@ async fn media_loop(
     let mut hinted = Instant::now();
     let mut tick = tokio::time::interval(Duration::from_millis(10));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut last_flags = call.wishes();
-    let mut camera_offer_pending = !last_flags.microphone && !last_flags.camera;
+    let mut publication = publication::Publication::new(joined);
     let mut local_speaking = speaking::Speaking::default();
     let mut hand_raised = false;
     let mut hand_timestamp = 0u64;
@@ -1363,9 +1375,6 @@ async fn media_loop(
                 call.sync(Instant::now(), &members);
                 call.poll(Instant::now());
             }
-            if !call.wishes().microphone && !call.wishes().camera {
-                camera_offer_pending = true;
-            }
             let recording = moderation::current_recording(
                 match bundle.inputs.room {
                     Observed::Known { value, lease } => Observed::Known { value: value.recording, lease },
@@ -1402,11 +1411,7 @@ async fn media_loop(
                 session.grant(grant, network.now());
                 // A receive-only HPB rejoin must advertise explicit unmute
                 // before a new publisher offer. The writer preserves FIFO.
-                let publication = session.publication();
-                if publication != last_flags {
-                    send(&writes, Write::Flags(publication))?;
-                    last_flags = publication;
-                }
+                publication.update(session.publication(), &writes)?;
                 stage = "peer setup";
                 reconcile(&mut peers, &bundle, &own, &writes,
                     &session,
@@ -1624,12 +1629,9 @@ async fn media_loop(
                     // handshake, as for a newly shared screen. A status message on
                     // SCTP cannot reach a subscriber that has not been created yet.
                     if peer.role == Role::Publisher && peer.stream == StreamKind::Camera
-                        && topology == Topology::Sfu && policy_ready && camera_offer_pending
+                        && topology == Topology::Sfu && policy_ready
                         && (wishes.microphone || wishes.camera) {
-                        for target in bundle.peers.iter().filter(|target| sfu_members.contains(&target.session)).take(16) {
-                            send(&writes, Write::SendStreamOffer(target.session.clone(), StreamKind::Camera))?;
-                        }
-                        camera_offer_pending = false;
+                        publication.announce(&bundle.peers, &sfu_members, &own, &writes)?;
                     }
                     if peer.stream == StreamKind::Screen && topology == Topology::Sfu {
                         for target in &bundle.peers {
@@ -1759,10 +1761,7 @@ async fn media_loop(
                 for (out, input) in output.iter_mut().zip(mix) { *out = input.clamp(i16::MIN as i32, i16::MAX as i32) as i16; }
                 session.play_audio(&output);
             }
-            if policy_ready && wishes != last_flags {
-                send(&writes, Write::Flags(wishes))?;
-                last_flags = wishes;
-            }
+
             let recovering = peers.iter().any(|p| p.stream == StreamKind::Camera && p.recovery.is_some());
             if policy_ready && any_connected && !recovering { call.connected(scope, network.now()).map_err(|_| { stage = "connected without a fresh grant"; })?; }
             if let Ok(mut snapshot) = session.snapshot.lock() {
@@ -1771,7 +1770,8 @@ async fn media_loop(
                 if snapshot.sharing == calls::SharingState::Idle {
                     snapshot.screen = if SUPPORT.screen && matches!(bundle.inputs.room, Observed::Known { value, .. } if value.permissions.publish_screen) { DeviceState::Off } else { DeviceState::Unavailable };
                 }
-                snapshot.phase = if session.control_degraded() && matches!(snapshot.phase, Phase::Waiting(calls::Gate::PolicyUnavailable(_))) {
+                snapshot.phase = if snapshot.phase == Phase::Waiting(calls::Gate::ParticipantFlagsUnconfirmed)
+                    || session.control_degraded() && matches!(snapshot.phase, Phase::Waiting(calls::Gate::PolicyUnavailable(_))) {
                     snapshot.phase
                 } else if recovering || !transport_ready || session.control_degraded() { Phase::Reconnecting } else { call.phase() };
                 snapshot.wishes = call.wishes();
@@ -1859,7 +1859,15 @@ fn closed_phase(owner: Phase, observed: Phase, completed: bool) -> Phase {
         {
             owner
         }
-        _ if matches!(observed, Phase::Waiting(calls::Gate::PolicyUnavailable(_))) => observed,
+        _ if matches!(
+            observed,
+            Phase::Waiting(
+                calls::Gate::PolicyUnavailable(_) | calls::Gate::ParticipantFlagsUnconfirmed
+            )
+        ) =>
+        {
+            observed
+        }
         Phase::Waiting(_) => owner,
         _ if completed => Phase::Ended,
         Phase::Reconnecting => Phase::Reconnecting,
@@ -1914,6 +1922,8 @@ mod policy_gate_tests {
             calls::PolicyEvidence::SignalingSettings,
         ));
         assert_eq!(closed_phase(Phase::Active, missing, true), missing);
+        let flags = Phase::Waiting(calls::Gate::ParticipantFlagsUnconfirmed);
+        assert_eq!(closed_phase(Phase::Active, flags, true), flags);
         assert_eq!(
             closed_phase(Phase::Waiting(calls::Gate::PolicyStale), missing, false),
             missing

@@ -142,6 +142,8 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
             return Err("decline observation incomplete".into());
         }
     }
+    let camera_only = matches!(mode, "camera-only" | "late-camera-only");
+    let start_receive_only = matches!(mode, "incoming-accept" | "late-camera-only");
     report["stage"] = json!("start");
     let mut current = snapshot(
         request(
@@ -152,8 +154,8 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
                 call,
                 entry,
                 wishes: MediaWishes {
-                    microphone: mode != "incoming-accept" && mode != "camera-only",
-                    camera: mode != "incoming-accept",
+                    microphone: !start_receive_only && !camera_only,
+                    camera: !start_receive_only,
                     screen: false,
                 },
             }),
@@ -191,7 +193,7 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
     let mut counters_before_mute = None;
     let mut publication_after_mute = None;
     let mut observed_before_reconnect = None;
-    let mut incoming_enabled = false;
+    let mut publication_enabled = false;
     let continuity = matches!(mode, "network-resume" | "session-replaced");
     let join_probe = mode == "participant-join";
     let recovery_probe = continuity
@@ -244,7 +246,7 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
         if previous.is_none() {
             previous = media.capture();
         }
-        if mode == "incoming-accept" && !incoming_enabled && current.phase == Phase::Active {
+        if start_receive_only && !publication_enabled && current.phase == Phase::Active {
             report["accepted_receive_only_before_toggle"] = json!(
                 media
                     .capture()
@@ -257,14 +259,14 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
                 ProtocolRequest::Meeting(Command::Change {
                     call,
                     wishes: MediaWishes {
-                        microphone: true,
+                        microphone: !camera_only,
                         camera: true,
                         screen: false,
                     },
                 }),
             )
             .await?;
-            incoming_enabled = true;
+            publication_enabled = true;
         }
         if (mode == "reconnect" || continuity)
             && (!recovery_probe || ready_at.is_some())
@@ -574,7 +576,7 @@ async fn run(fixture: &Path, output: &Path, mode: &str, report: &mut Value) -> R
     report["duration_ms"] = json!(started.elapsed().as_millis());
     let exchanged = current.phase == Phase::Active
         && current.counters.data_received > 0
-        && if mode == "camera-only" {
+        && if camera_only {
             current.counters.audio_sent == 0
         } else {
             current.counters.audio_sent > 100
@@ -710,6 +712,7 @@ fn main() {
         || ![
             "media",
             "camera-only",
+            "late-camera-only",
             "participant-join",
             "reconnect",
             "policy-loss",
