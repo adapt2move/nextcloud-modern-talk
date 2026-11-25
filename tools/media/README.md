@@ -84,7 +84,7 @@ Do not run two browser drivers concurrently on the same endpoints.
 
 Run `macos_device_call.py` in a logged-in macOS session with the development
 SDK and toolchain described in [development](../../docs/development.md).
-Use an isolated two-user Talk 25 lab with HPB/Janus. The Mac needs an HTTP(S)
+Use isolated two-user Talk 25 labs with HPB/Janus. The Mac needs an HTTP(S)
 origin on literal `127.0.0.1`, access to the signaling URL advertised by Talk
 and an ICE route to Janus or TURN. Forwarding HTTP alone leaves media unreachable.
 Use trusted certificates for HTTPS. The lab credential file must have mode
@@ -100,7 +100,14 @@ through CoreAudio and an AVFoundation camera provider visible to the app.
 Keep browser playback out of the microphone input. Grant the development sender
 microphone and camera access in the test session before unattended runs.
 
-Build the debug sender, install Playwright and run both scenarios from the repository root.
+The default matrix runs four independent calls. Configure Talk's boolean
+`spreed.call_end_to_end_encryption` app setting to false on the first lab and
+true on the second. On the respective disposable instances, use
+`occ config:app:set spreed call_end_to_end_encryption --type=boolean --value=false`
+or `--value=true`. The test reads each lab's advertised policy before joining.
+Each origin receives only its own credentials.
+
+Build the debug sender, install Playwright Chromium and run the matrix from the repository root.
 Use the Mac's configured local development signer if the rig pins device permissions to it.
 
 ```sh
@@ -111,13 +118,24 @@ python3 -m venv .venv
 .venv/bin/python -m pip install playwright
 .venv/bin/python -m playwright install chromium
 .venv/bin/python tools/media/macos_device_call.py \
-  --origin http://127.0.0.1:8088 --credentials /path/to/private/credentials.json \
+  --origin http://127.0.0.1:8088 --credentials /path/to/off/credentials.json \
+  --e2ee-origin http://127.0.0.1:8089 --e2ee-credentials /path/to/on/credentials.json \
   --executable target/debug/talk-desktop --inputs physical --output /tmp/device-call.json
 ```
 
 Use a fresh report name. `--inputs` records the operator's physical, virtual or
-mixed setup. Both scenarios run even if one fails. `--scenario microphone` and
-`--scenario camera` select an individual case.
+mixed setup. All selected cases run even if one fails. `--scenario microphone`
+and `--scenario camera` select a device scenario. With one lab, run twice using
+`--encryption disabled` and `--encryption required` with `--origin` and
+`--credentials` only. Set the lab policy before each run and keep separate reports.
+
+In every active phase the native sender checks the call's actual frame encryption
+state. For each phase requiring fresh audio or video, the browser also checks
+the receiving track. In the required mode Talk's decode transform must be attached
+to that track while it delivers the tone or changing pixels. In the disabled
+mode the track must have no transform. Unknown transform state fails the check.
+Use Chromium with `RTCRtpScriptTransform` and a readable receiver `transform`.
+The observer retains only transform identity and media measurements.
 
 - **Microphone.** The official Chromium Talk client must receive the 1 kHz tone
   with increasing Opus packet counts. The driver pauses the opened native input

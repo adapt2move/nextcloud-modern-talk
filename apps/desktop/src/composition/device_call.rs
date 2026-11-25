@@ -23,6 +23,11 @@ pub(crate) fn run() -> i32 {
         Some("microphone") => Scenario::Microphone,
         _ => return 2,
     };
+    let encrypted = match args.next().as_deref().and_then(|arg| arg.to_str()) {
+        Some("required") => true,
+        Some("disabled") => false,
+        _ => return 2,
+    };
     let Some(fixture) = args.next().map(PathBuf::from) else {
         return 2;
     };
@@ -35,7 +40,7 @@ pub(crate) fn run() -> i32 {
     Application::new().run(move |cx| {
         let worker = cx
             .background_executor()
-            .spawn(async move { send(&fixture, scenario) });
+            .spawn(async move { send(&fixture, scenario, encrypted) });
         cx.spawn(async move |cx| {
             match worker.await {
                 Ok(()) => result.store(true, Ordering::Release),
@@ -48,7 +53,7 @@ pub(crate) fn run() -> i32 {
     i32::from(!passed.load(Ordering::Acquire))
 }
 
-fn send(fixture: &Path, scenario: Scenario) -> Result<(), &'static str> {
+fn send(fixture: &Path, scenario: Scenario, encrypted: bool) -> Result<(), &'static str> {
     let directory = fixture.parent().ok_or("fixture directory")?;
     let logs = directory.join("logs");
     let diagnostics = crate::diagnostics::start_with_path(move || Ok(logs));
@@ -68,7 +73,7 @@ fn send(fixture: &Path, scenario: Scenario) -> Result<(), &'static str> {
             .map_err(|_| "device selection")?;
     }
     devices.attach_media(media.clone());
-    let result = device_call::run(fixture, scenario, media, |scope| {
+    let result = device_call::run(fixture, scenario, encrypted, media, |scope| {
         devices
             .pause_probe_microphone(scope)
             .map_err(|_| "pause native microphone")

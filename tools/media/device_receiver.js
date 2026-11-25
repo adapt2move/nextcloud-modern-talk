@@ -3,6 +3,28 @@
 (() => {
     const peers = new Set();
     const tracks = new WeakMap();
+    // Talk 25 installs its frame decryptor using operation "decode". Keep only
+    // transform identity; the worker, keys and encoded frames stay with Talk.
+    const decoders = new WeakSet();
+    const canObserveTransform = typeof window.RTCRtpScriptTransform === 'function'
+        && typeof Object.getOwnPropertyDescriptor(RTCRtpReceiver.prototype, 'transform')?.get === 'function';
+    if (canObserveTransform) {
+        window.RTCRtpScriptTransform = new Proxy(window.RTCRtpScriptTransform, {
+            construct(target, args, newTarget) {
+                const transform = Reflect.construct(target, args, newTarget);
+                if (args[1]?.operation === 'decode') decoders.add(transform);
+                return transform;
+            }
+        });
+    }
+
+    function hasTalkDecoder(receiver) {
+        if (!canObserveTransform) return null;
+        const transform = receiver.transform;
+        if (transform === null) return false;
+        return decoders.has(transform) ? true : null;
+    }
+
     let nextTrack = 1;
     let context;
     const canvas = document.createElement('canvas');
@@ -92,10 +114,11 @@
                 for (const row of stats.values()) {
                     if (row.type !== 'inbound-rtp') continue;
                     const codec = stats.get(row.codecId)?.mimeType?.toLowerCase();
+                    const decoder = hasTalkDecoder(receiver);
                     if (codec === 'audio/opus') {
-                        rows.push({id: state.id, packets: row.packetsReceived, tone: hasTone(state)});
+                        rows.push({id: state.id, decoder, packets: row.packetsReceived, tone: hasTone(state)});
                     } else if (codec === 'video/vp8') {
-                        rows.push({id: state.id, frames: row.framesDecoded, luma: visibleLuma(track)});
+                        rows.push({id: state.id, decoder, frames: row.framesDecoded, luma: visibleLuma(track)});
                     }
                 }
             }

@@ -21,6 +21,7 @@ pub enum Scenario {
 pub fn run(
     fixture: &Path,
     scenario: Scenario,
+    encrypted: bool,
     media: Arc<MediaService>,
     pause_microphone: impl FnOnce(CallScope) -> Result<()>,
 ) -> Result<()> {
@@ -29,7 +30,13 @@ pub fn run(
         .enable_all()
         .build()
         .map_err(|_| "runtime startup")?;
-    let outcome = runtime.block_on(exercise(fixture, scenario, media, pause_microphone));
+    let outcome = runtime.block_on(exercise(
+        fixture,
+        scenario,
+        encrypted,
+        media,
+        pause_microphone,
+    ));
     runtime.shutdown_timeout(Duration::from_secs(2));
     outcome
 }
@@ -38,6 +45,7 @@ struct Sender {
     client: NextcloudClient,
     network: NetworkRuntime,
     scope: AccountScope,
+    expected_encryption: bool,
 }
 
 impl Sender {
@@ -82,6 +90,9 @@ impl Sender {
                 };
                 if state.call != call || state.phase == Phase::Ended {
                     return Err("call generation ended");
+                }
+                if state.phase == Phase::Active && state.encrypted != self.expected_encryption {
+                    return Err("unexpected sender E2EE mode");
                 }
                 if state.phase == Phase::Active
                     && state.microphone == microphone
@@ -148,6 +159,7 @@ impl Sender {
 async fn exercise(
     fixture: &Path,
     scenario: Scenario,
+    encrypted: bool,
     media: Arc<MediaService>,
     pause_microphone: impl FnOnce(CallScope) -> Result<()>,
 ) -> Result<()> {
@@ -165,6 +177,7 @@ async fn exercise(
         client,
         network,
         scope,
+        expected_encryption: encrypted,
     };
     sender.request(ProtocolRequest::InspectAccount).await?;
     let room = sender.client.fixture_conversation().ok_or("fixture room")?;
