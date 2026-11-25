@@ -60,6 +60,8 @@ jobs:
           path: ~/.cargo/registry
           key: cargo-macos-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
       - run: python3 tools/cargo.py build --locked --workspace --all-targets --target aarch64-apple-darwin
+      - name: Compile macOS device-call sender
+        run: python3 tools/cargo.py build --locked -p talk-desktop --features dev-probes --target aarch64-apple-darwin
       - name: Assemble and verify the self-contained app and DMG
         run: |
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"

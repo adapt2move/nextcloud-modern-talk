@@ -1,6 +1,7 @@
 # Screen and continuity qualification
 
-Run these tools only on an owned disposable agent-dev-box VM. They are opt-in
+Run the Linux drivers on an owned disposable agent-dev-box VM. The macOS
+device-call driver below runs on a Mac connected to that lab. They are opt-in
 interop drivers, not production authentication or a substitute for native desktop
 qualification. `normal_talk.rs` uses the normal account-owned call actor and media
 engine. Its `native-screen` case supplies generated 720p RGBA; `portal-screen`
@@ -78,6 +79,83 @@ screen stays shared until 44 seconds after media readiness in that probe, so rec
 fresh screen frames before the explicit stop. REST success alone never stands
 in for a resumed signaling read; the recorded phase must become active again.
 Do not run two browser drivers concurrently on the same endpoints.
+
+## macOS microphone recovery and late camera publication
+
+Run `macos_device_call.py` in a logged-in macOS session with the development
+SDK and toolchain described in [development](../../docs/development.md).
+Use isolated two-user Talk 25 labs with HPB/Janus. The Mac needs an HTTP(S)
+origin on literal `127.0.0.1`, access to the signaling URL advertised by Talk
+and an ICE route to Janus or TURN. Forwarding HTTP alone leaves media unreachable.
+Use trusted certificates for HTTPS. The lab credential file must have mode
+0600 inside an owner-private 0700 directory and contain the lab's
+`users.lab_alice` and `users.lab_bob` entries. Each scenario creates and removes
+its own room. Unconfirmed cleanup leaves an ownership journal beside the credentials.
+
+Feed a continuous 1 kHz tone into the Mac's system-default microphone. Fill
+the first camera listed by the app with a target alternating between dark and
+light once per second. For physical inputs, a separate speaker and display can
+supply both signals. For a repeatable virtual setup, route the same signals
+through CoreAudio and an AVFoundation camera provider visible to the app.
+Keep browser playback out of the microphone input. Grant the development sender
+microphone and camera access in the test session before unattended runs.
+
+The default matrix runs four independent calls. Configure Talk's boolean
+`spreed.call_end_to_end_encryption` app setting to false on the first lab and
+true on the second. On the respective disposable instances, use
+`occ config:app:set spreed call_end_to_end_encryption --type=boolean --value=false`
+or `--value=true`. The test reads each lab's advertised policy before joining.
+Each origin receives only its own credentials.
+
+Build the debug sender, install Playwright Chromium and run the matrix from the repository root.
+Use the Mac's configured local development signer if the rig pins device permissions to it.
+
+```sh
+python3 tools/cargo.py build --locked -p talk-desktop --features dev-probes
+# After the usual one-time task dev:setup, sign with the configured local identity.
+PYTHONPATH=tools python3 -c 'from pathlib import Path; import dev; dev.sign(Path("target/debug/talk-desktop"))'
+python3 -m venv .venv
+.venv/bin/python -m pip install playwright
+.venv/bin/python -m playwright install chromium
+.venv/bin/python tools/media/macos_device_call.py \
+  --origin http://127.0.0.1:8088 --credentials /path/to/off/credentials.json \
+  --e2ee-origin http://127.0.0.1:8089 --e2ee-credentials /path/to/on/credentials.json \
+  --executable target/debug/talk-desktop --inputs physical --output /tmp/device-call.json
+```
+
+Use a fresh report name. `--inputs` records the operator's physical, virtual or
+mixed setup. All selected cases run even if one fails. `--scenario microphone`
+and `--scenario camera` select a device scenario. With one lab, run twice using
+`--encryption disabled` and `--encryption required` with `--origin` and
+`--credentials` only. Set the lab policy before each run and keep separate reports.
+
+In every active phase the native sender checks the call's actual frame encryption
+state. For each phase requiring fresh audio or video, the browser also checks
+the receiving track. In the required mode Talk's decode transform must be attached
+to that track while it delivers the tone or changing pixels. In the disabled
+mode the track must have no transform. Unknown transform state fails the check.
+Use Chromium with `RTCRtpScriptTransform` and a readable receiver `transform`.
+The observer retains only transform identity and media measurements.
+
+- **Microphone.** The official Chromium Talk client must receive the 1 kHz tone
+  with increasing Opus packet counts. The driver pauses the opened native input
+  stream and waits for the ordinary device watchdog. It requires the
+  `callback_stalled` diagnostic, receive-only flags and loss of the tone. The
+  normal retry command must restore the tone and fresh packets in the same call.
+- **Camera.** The sender joins receive-only, requests a missing microphone and
+  then enables the native camera. The browser must see flags 5 for the same
+  native room session, answer an HPB subscriber offer for that publisher, decode
+  increasing VP8 frames and show repeated dark/light transitions in its remote
+  video element. The report also records whether the browser sent `requestoffer`:
+  HPB can deliver a publisher-triggered offer for a late camera.
+
+The report contains phase outcomes and media measurements. The native process
+uses the production call commands and device owners. Desktop control clicks,
+an exact reproduction of a field device failure and Janus admin logs are outside
+this test. Hosted macOS native checks build the sender. A completed run with
+`--inputs physical` on an equipped Mac supplies physical-device evidence.
+
+## Additional Linux qualification
 
 When extending a driver into a sustained native-UI journey, keep X11 commands,
 OCR and other blocking work off the asyncio thread that owns its forwards

@@ -354,6 +354,19 @@ INSTRUMENT = r"""() => {
 }"""
 
 
+async def join_call(page, url):
+    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    await page.wait_for_timeout(1800)
+    await press(page, ["Close", "Dismiss", "Skip"])
+    leave = page.get_by_role("button", name="Leave call", exact=True)
+    for _ in range(5):
+        if await leave.count():
+            return True
+        await press(page, ["Start call", "Join call", "Join the call", "Join"])
+        await page.wait_for_timeout(1000)
+    return bool(await leave.count())
+
+
 async def press(page, names):
     for name in names:
         choices = page.get_by_role("button", name=name, exact=True)

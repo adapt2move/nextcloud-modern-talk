@@ -9,7 +9,7 @@ from urllib.parse import urlparse,urlencode
 from playwright.async_api import async_playwright
 from ice_settings import fetch_settings
 from recovery_checks import native_recovery,fresh_camera_progress
-from talk_browser import LoopbackForward,FreshRoom,INSTRUMENT,press,media_checks,private_json,digest
+from talk_browser import LoopbackForward,FreshRoom,INSTRUMENT,press,media_checks,private_json,digest,join_call
 # Observe original browser SCTP messages without retaining any payloads.
 INSTRUMENT = INSTRUMENT.replace("const NativePC = window.RTCPeerConnection;", """const NativePC = window.RTCPeerConnection;
  const Socket=window.WebSocket, socketStates=[];window.__nmt_sockets=socketStates;
@@ -53,12 +53,6 @@ async def spawn_native(executable,fixture,output,scenario,recovery_window,late_j
   while block:=await process.stderr.read(4096):
    if len(errors)<16384:errors.extend(block[:16384-len(errors)])
  return process,errors,asyncio.create_task(drain())
-async def join_third(page,url):
- await page.goto(url,wait_until='domcontentloaded',timeout=30000);await page.wait_for_timeout(1800);await press(page,['Close','Dismiss','Skip'])
- for _ in range(5):
-  if await page.get_by_role('button',name='Leave call',exact=True).count():return True
-  await press(page,['Start call','Join call','Join the call','Join']);await page.wait_for_timeout(1000)
- return bool(await page.get_by_role('button',name='Leave call',exact=True).count())
 async def run(args,report):
  m=private_json(args.manifest);c=private_json(m['credentials_file']);origin=urlparse(m['client_url']);target=urlparse(m['vm_url'])
  if not m['ready'] or origin.hostname!='127.0.0.1' or origin.scheme not in ('http','https'):raise RuntimeError('fixture origin')
@@ -89,7 +83,7 @@ async def run(args,report):
      await asyncio.to_thread(room.request,'POST','/'+token+'/participants',{'newParticipant':'lab_outsider','source':'users'})
      extra_context=await browser.new_context(viewport={'width':1280,'height':900},locale='en-US',permissions=['camera','microphone']);await extra_context.add_init_script('('+INSTRUMENT+')()');extra_page=await extra_context.new_page()
      await extra_page.goto(m['client_url']+'/login',wait_until='domcontentloaded',timeout=30000);await extra_page.locator('#user').fill('lab_outsider');await extra_page.locator('#password').fill(c['users']['lab_outsider']);await extra_page.get_by_role('button',name='Log in',exact=True).click();await extra_page.wait_for_url(lambda url:'/login' not in urlparse(url).path,timeout=30000)
-     if not args.join_third_after_media:await join_third(extra_page,m['client_url']+'/index.php/call/'+token)
+     if not args.join_third_after_media:await join_call(extra_page,m['client_url']+'/index.php/call/'+token)
     if args.order=='native-first':process,native_errors,error_task=await spawn_native(args.executable,fixture,output,args.scenario,recovery_window,args.join_third_after_media)
     report['stage']='browser call';await page.goto(m['client_url']+'/index.php/call/'+token,wait_until='domcontentloaded',timeout=30000);await page.wait_for_timeout(1800);await press(page,['Close','Dismiss','Skip']);report['ui_actions']=[]
     for _ in range(5):
@@ -111,7 +105,7 @@ async def run(args,report):
      if extra_page and len(extra_samples)<(256 if args.join_third_after_media else 192):extra_samples.append(await extra_page.evaluate('window.__nmt_stats()'))
      if args.join_third_after_media and third_join is None and elapsed is not None and elapsed>=5 and all(media_checks(samples).values()):
       third_join=dict(timeline[-1]);report['third_join_after_media']=True;report['third_join_native_ms']=third_join['ms']
-      report['third_joined']=await join_third(extra_page,m['client_url']+'/index.php/call/'+token)
+      report['third_joined']=await join_call(extra_page,m['client_url']+'/index.php/call/'+token)
      if args.scenario in ('network-resume','session-replaced','web-screen-resume') and not network_cut and elapsed is not None and elapsed>=9 and all(media_checks(samples).values()) and (not extra_page or all(media_checks(extra_samples).values())):
       report['fault_after_initial_media']=True;fault_sample=len(samples)-1;report['fault_native_ms']=timeline[-1]['ms']
       if args.scenario=='session-replaced':

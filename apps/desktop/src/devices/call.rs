@@ -13,6 +13,18 @@ pub(super) struct Calls {
     screen: Option<(u64, screen::Capture)>,
 }
 impl Calls {
+    #[cfg(all(feature = "dev-probes", debug_assertions))]
+    pub(super) fn pause_probe_microphone(
+        &self,
+        scope: talk_core::ids::CallScope,
+    ) -> Result<(), DeviceError> {
+        if self.scope != Some(scope) {
+            return Err(DeviceError::Stale);
+        }
+        let (capture, _) = self.audio[0].as_ref().ok_or(DeviceError::Unavailable)?;
+        capture.pause()
+    }
+
     pub(super) fn stop(&mut self) -> Result<(), DeviceError> {
         for slot in &mut self.audio {
             if let Some((_, signal)) = slot.as_ref() {

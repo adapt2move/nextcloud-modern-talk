@@ -1,4 +1,7 @@
 //! Explicit, default-off synthetic fixture intake. This is not Login Flow or app storage.
+#[cfg(all(feature = "backend-test", debug_assertions))]
+pub mod device_call;
+
 use super::{AuthenticatedBinding, ServerOrigin};
 use super::{NetworkRuntime, NextcloudClient, wire};
 use std::path::Path;
@@ -65,9 +68,7 @@ pub(crate) fn private_file(path: &Path) -> Result<Zeroizing<Vec<u8>>, ErrorKind>
     let parent = path.parent().ok_or(ErrorKind::Malformed)?;
     let dir = std::fs::symlink_metadata(parent).map_err(|_| ErrorKind::PermissionDenied)?;
     let before = std::fs::symlink_metadata(path).map_err(|_| ErrorKind::PermissionDenied)?;
-    let owner = std::fs::metadata("/proc/self")
-        .map_err(|_| ErrorKind::Unsupported)?
-        .uid();
+    let owner = rustix::process::geteuid().as_raw();
     if !dir.is_dir()
         || dir.uid() != owner
         || dir.mode() & 0o777 != 0o700

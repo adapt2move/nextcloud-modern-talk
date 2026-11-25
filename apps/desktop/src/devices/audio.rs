@@ -93,6 +93,11 @@ pub(super) struct Capture {
     epoch: Option<u64>,
 }
 impl Capture {
+    #[cfg(all(feature = "dev-probes", debug_assertions))]
+    pub(super) fn pause(&self) -> Result<(), DeviceError> {
+        self._stream.pause().map_err(map_error)
+    }
+
     pub(super) fn id(&self) -> &DeviceId {
         &self.id
     }
