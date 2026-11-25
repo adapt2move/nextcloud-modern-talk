@@ -2,6 +2,14 @@
 
 Changes per release, newest first. Generated from Conventional Commits.
 
+## v0.0.28 alpha (2026-11-25)
+
+### Fixes
+
+- **calls:** Recover media flags, microphone routes and late HPB camera offers (#61) (`b4dc664`)
+
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.28/docs/install.md) · [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.28/docs/limitations.md)
+
 ## v0.0.27 alpha (2026-11-17)
 
 ### Fixes
