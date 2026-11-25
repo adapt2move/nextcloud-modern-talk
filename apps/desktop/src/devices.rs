@@ -771,7 +771,12 @@ fn run(shared: &Shared) {
                 .filter(|v| v.phase == VoicePhase::Recording)
             {
                 let error = decode_error(session.signal.error.load(Ordering::Acquire))
-                    .or_else(|| session.signal.stalled().then_some(DeviceError::Removed))
+                    .or_else(|| {
+                        session
+                            .signal
+                            .stalled()
+                            .then_some(DeviceError::StreamStalled)
+                    })
                     .or_else(|| {
                         voice_capture
                             .as_ref()
@@ -893,7 +898,7 @@ fn run(shared: &Shared) {
                     item.desired
                         .signal
                         .stalled()
-                        .then_some(DeviceError::Removed)
+                        .then_some(DeviceError::StreamStalled)
                 });
             let tone_done = index == 1 && item.started.elapsed() >= audio::TONE_DURATION;
             let starved = (tone_done || item.started.elapsed() >= Duration::from_secs(8))
@@ -1128,14 +1133,16 @@ impl Inventory {
                     }
             })
             .map(|d| d.id.clone())
-            .ok_or_else(|| match selection {
-                DeviceSelection::Specific(_) => DeviceError::Removed,
-                DeviceSelection::SystemDefault => if kind == DeviceKind::Camera {
+            .ok_or_else(|| {
+                let enumeration_error = if kind == DeviceKind::Camera {
                     self.camera_error
                 } else {
                     self.audio_error[kind_index(kind)]
-                }
-                .unwrap_or(DeviceError::Unavailable),
+                };
+                enumeration_error.unwrap_or(match selection {
+                    DeviceSelection::Specific(_) => DeviceError::Removed,
+                    DeviceSelection::SystemDefault => DeviceError::Unavailable,
+                })
             })
     }
     fn resolve(&self, choice: &DeviceSelection, kind: DeviceKind) -> SelectionState {
@@ -1213,6 +1220,9 @@ fn error_code(error: DeviceError) -> u8 {
         DeviceError::Removed => 2,
         DeviceError::Busy => 3,
         DeviceError::Unavailable => 4,
+        DeviceError::StreamInvalidated => 6,
+        DeviceError::StreamStalled => 7,
+        DeviceError::StreamStartTimeout => 8,
         _ => 5,
     }
 }
@@ -1223,6 +1233,9 @@ fn decode_error(code: u8) -> Option<DeviceError> {
         2 => Some(DeviceError::Removed),
         3 => Some(DeviceError::Busy),
         4 => Some(DeviceError::Unavailable),
+        6 => Some(DeviceError::StreamInvalidated),
+        7 => Some(DeviceError::StreamStalled),
+        8 => Some(DeviceError::StreamStartTimeout),
         _ => Some(DeviceError::CaptureFailed),
     }
 }

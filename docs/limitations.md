@@ -61,12 +61,17 @@ of complete parity with the official clients.
   converts device rates to/from the 48 kHz call boundary. Generated PCM checks
   cover Bluetooth telephone rates and 44.1/48/96 kHz in both directions; they do
   not qualify physical Bluetooth routing, profile changes or macOS CoreAudio.
-  A failed device can be retried explicitly without rejoining the call.
+  A failed device can be retried explicitly without rejoining the call. Call audio
+  diagnostics distinguish a missing first callback, a stalled callback and stream
+  invalidation. Physical Mac microphone retry remains unverified.
 - The local camera preview is not proof of remote video reception. Local logs
   distinguish encoder input and transport acceptance once per call generation;
   neither establishes remote decoding. Camera-only sending without a local
   microphone is exercised against Talk 25 on Linux. Native macOS camera
   publication remains unqualified.
+- After an ambiguous participant flags update, the client reads the room once.
+  It continues if the server confirms the requested flags for the same room and
+  session. Otherwise the call closes with a media status message.
 - Recovery is bounded and revalidates policy. HPB resume retains microphone/camera
   intent, but full network handover and Janus ICE recovery remain unqualified.
   Full HPB process replacement with an existing Talk 25 web peer can leave its

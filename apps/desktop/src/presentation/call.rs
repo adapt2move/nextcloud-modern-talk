@@ -2453,6 +2453,10 @@ fn policy_gate_copy(gate: CallPolicyReason) -> (&'static str, &'static str) {
             "Verbinde …",
             "Aktuelle Anrufberechtigungen werden abgerufen. Ohne Bestätigung wird kein Anruf verbunden.",
         ),
+        CallPolicyReason::ParticipantFlagsUnconfirmed => (
+            "Medienstatus nicht bestätigt",
+            "Der Server konnte deinen Mikrofon- und Kamerastatus nicht bestätigen. Tritt dem Anruf erneut bei.",
+        ),
         CallPolicyReason::MembershipLost => (
             "Verbindung zum Gespräch wird erneuert",
             "Deine Sitzung im Gespräch konnte nicht bestätigt werden. Versuche es erneut.",
@@ -2488,6 +2492,7 @@ mod media_contract_tests {
             CallPolicyReason::PendingSignaling,
             CallPolicyReason::IncompatiblePolicy,
             CallPolicyReason::PendingPolicy,
+            CallPolicyReason::ParticipantFlagsUnconfirmed,
             CallPolicyReason::MembershipLost,
             CallPolicyReason::SignalingUnsupported,
             CallPolicyReason::MediaUnavailable,

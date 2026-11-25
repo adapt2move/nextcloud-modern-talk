@@ -590,6 +590,7 @@ fn error_name(error: ErrorKind) -> &'static str {
         ErrorKind::Lobby => "lobby",
         ErrorKind::PermissionDenied => "permission_denied",
         ErrorKind::ReauthenticationRequired => "reauthentication_required",
+        ErrorKind::BadRequest => "bad_request",
         ErrorKind::Malformed => "malformed",
         ErrorKind::Uncertain => "uncertain",
         ErrorKind::StorageUnavailable => "storage_unavailable",

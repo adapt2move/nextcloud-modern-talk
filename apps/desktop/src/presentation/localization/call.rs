@@ -170,6 +170,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El servidor puede grabar audio y vídeo. No puedes unirte sin dar tu consentimiento.",
     ),
     (
+        "Der Server konnte deinen Mikrofon- und Kamerastatus nicht bestätigen. Tritt dem Anruf erneut bei.",
+        "The server could not confirm your microphone and camera status. Rejoin the call.",
+        "El servidor no pudo confirmar el estado de tu micrófono y cámara. Vuelve a unirte a la llamada.",
+    ),
+    (
         "Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden werden informiert.",
         "The server will record this call’s audio and video. Everyone will be informed.",
         "El servidor grabará el audio y el vídeo de esta llamada. Se informará a todas las personas participantes.",
@@ -346,6 +351,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Micrófono del portátil",
     ),
     ("Link kopieren", "Copy link", "Copiar enlace"),
+    (
+        "Medienstatus nicht bestätigt",
+        "Media status unconfirmed",
+        "Estado de los medios sin confirmar",
+    ),
     (
         "Mikrofon auswählen",
         "Choose microphone",

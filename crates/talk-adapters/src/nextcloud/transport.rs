@@ -121,6 +121,7 @@ pub(super) fn kind(k: api::ErrorKind) -> ErrorKind {
         api::ErrorKind::PasswordRequired => ErrorKind::PasswordRequired,
         api::ErrorKind::Lobby => ErrorKind::Lobby,
         api::ErrorKind::ReauthenticationRequired => ErrorKind::ReauthenticationRequired,
+        api::ErrorKind::BadRequest => ErrorKind::BadRequest,
         api::ErrorKind::Malformed => ErrorKind::Malformed,
         api::ErrorKind::Uncertain => ErrorKind::Uncertain,
         api::ErrorKind::WrongScope => ErrorKind::WrongScope,

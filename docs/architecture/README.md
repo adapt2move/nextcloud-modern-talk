@@ -106,7 +106,7 @@ from call publication. Required E2EE and unsupported profiles fail closed. See
 [known limitations](../limitations.md) for the actual supported profile.
 
 The device owner accepts supported mono/stereo rates from 8 to 192 kHz,
-preferring 48 kHz when the device offers it. Other rates (including Bluetooth
+preferring the current device rate on macOS to avoid changing the shared CoreAudio route, and 48 kHz elsewhere. Other rates (including Bluetooth
 telephone profiles) use bounded GStreamer `audioresample`/`audiobuffersplit`
 pipelines in both directions. CPAL callbacks never wait for converter output;
 an underflow renders silence and overload drops old buffers. Native input

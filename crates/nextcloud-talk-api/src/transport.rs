@@ -1139,6 +1139,7 @@ fn classify_ocs(
         {
             ErrorKind::PasswordRequired
         }
+        400 if state == Some("failure") && !account_probe => ErrorKind::BadRequest,
         412 => ErrorKind::Lobby,
         401 | 997 | 403 => ErrorKind::PermissionDenied,
         404 => ErrorKind::NotFound,

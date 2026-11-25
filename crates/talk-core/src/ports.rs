@@ -54,6 +54,7 @@ pub enum ErrorKind {
     NotFound,
     Conflict,
     RateLimited,
+    BadRequest,
     ServerUnavailable,
 }
 

@@ -1220,6 +1220,9 @@ fn project(
                     Gate::PolicyUnavailable(_) | Gate::PolicyUnknown | Gate::PolicyStale => {
                         CallPolicyReason::PendingPolicy
                     }
+                    Gate::ParticipantFlagsUnconfirmed => {
+                        CallPolicyReason::ParticipantFlagsUnconfirmed
+                    }
                     Gate::MembershipLost => CallPolicyReason::MembershipLost,
                     Gate::SignalingUnsupported => CallPolicyReason::SignalingUnsupported,
                     Gate::MediaUnavailable => CallPolicyReason::MediaUnavailable,

@@ -42,6 +42,7 @@ pub enum Gate {
     RequiredEncryption,
     SignalingUnsupported,
     MediaUnavailable,
+    ParticipantFlagsUnconfirmed,
     MembershipLost,
     WrongScope,
 }
@@ -117,6 +118,7 @@ impl Gate {
             Self::RequiredEncryption => "required_e2ee_unsupported",
             Self::SignalingUnsupported => "signaling_unsupported",
             Self::MediaUnavailable => "media_unavailable",
+            Self::ParticipantFlagsUnconfirmed => "participant_flags_unconfirmed",
             Self::MembershipLost => "own_session_missing",
             Self::WrongScope => "scope_mismatch",
         }

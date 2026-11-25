@@ -636,7 +636,7 @@ impl RoomSession {
         self.0
     }
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ParticipantFlags(u8);
 impl ParticipantFlags {
     pub fn new(audio: bool, video: bool) -> Self {

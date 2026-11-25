@@ -781,7 +781,10 @@ pub(super) fn device_error_key(error: DeviceError) -> Option<&'static str> {
         }
         DeviceError::Stale => "Die Geräteauswahl hat sich geändert. Bitte erneut versuchen.",
         DeviceError::InvalidSelection => "Bitte wähle ein verfügbares Gerät.",
-        DeviceError::CaptureFailed => "Der Gerätetest ist fehlgeschlagen.",
+        DeviceError::StreamStalled
+        | DeviceError::StreamStartTimeout
+        | DeviceError::StreamInvalidated
+        | DeviceError::CaptureFailed => "Der Gerätetest ist fehlgeschlagen.",
     })
 }
 

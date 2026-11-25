@@ -447,6 +447,7 @@ pub enum CallPolicyReason {
     PendingSignaling,
     IncompatiblePolicy,
     PendingPolicy,
+    ParticipantFlagsUnconfirmed,
     MembershipLost,
     SignalingUnsupported,
     MediaUnavailable,
