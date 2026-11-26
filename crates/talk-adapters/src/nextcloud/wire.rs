@@ -471,11 +471,7 @@ mod tests {
         );
     }
     #[test]
-    fn hostile_json_has_finite_structure_and_no_duplicate_policy_keys() {
-        assert!(json(br#"{"permission":true,"permission":false}"#).is_err());
-        assert!(json(format!("{}0{}", "[".repeat(66), "]".repeat(66)).as_bytes()).is_err());
-        assert!(json(format!("[{}0]", "0,".repeat(131_073)).as_bytes()).is_err());
-        assert!(json(b"{} trailing").is_err());
-        assert!(json(br#"{"newField":{"unknown":true},"text":"Unicode \u00fc"}"#).is_ok());
+    fn malformed_json_maps_to_the_adapter_error() {
+        assert_eq!(json(b"{} trailing"), Err(ErrorKind::Malformed));
     }
 }

@@ -130,6 +130,23 @@ async fn actual_rust_adapter_against_released_nextcloud() {
     assert!(
         people.people.as_slice().len() >= 2 && people.people.as_slice().iter().any(|p| p.is_self)
     );
+    let ProtocolReply::Send(anchor) = bob
+        .request(
+            context(&runtime, 2),
+            ProtocolRequest::Send(SendMessage {
+                conversation: bid,
+                operation: OperationId::from_local(54),
+                text: Text::new("Pagination anchor").unwrap(),
+            }),
+        )
+        .await
+        .expect("send pagination anchor")
+    else {
+        panic!("send reply")
+    };
+    let SendState::ServerAccepted(anchor) = anchor.state else {
+        panic!("pagination anchor must be accepted")
+    };
     let operation = OperationId::from_local(55);
     let ProtocolReply::Send(receipt) = bob
         .request(
@@ -161,13 +178,13 @@ async fn actual_rust_adapter_against_released_nextcloud() {
     else {
         panic!("history reply")
     };
-    assert!(
-        history
-            .messages
-            .as_slice()
-            .iter()
-            .any(|m| m.id.sequence == sent.sequence && m.text.as_str().contains("Grüße"))
-    );
+    let newest = history
+        .messages
+        .as_slice()
+        .iter()
+        .find(|m| m.id.sequence == sent.sequence && m.text.as_str().contains("Grüße"))
+        .expect("member sees the sent message")
+        .id;
     let ProtocolReply::History(own) = bob
         .request(
             context(&runtime, 2),
@@ -186,6 +203,35 @@ async fn actual_rust_adapter_against_released_nextcloud() {
             .as_slice()
             .iter()
             .any(|m| m.own_operation == Some(operation))
+    );
+    // A server-provided end cursor may legitimately yield an empty page.
+    // The newer send gives us a separate cursor with a known predecessor.
+    let ProtocolReply::History(previous) = alice
+        .request(
+            context(&runtime, 1),
+            ProtocolRequest::History {
+                conversation: aid,
+                before: Some(newest),
+            },
+        )
+        .await
+        .expect("history before the newer send")
+    else {
+        panic!("history reply")
+    };
+    assert!(
+        previous
+            .messages
+            .as_slice()
+            .iter()
+            .any(|m| m.id.sequence == anchor.sequence)
+    );
+    assert!(
+        previous
+            .messages
+            .as_slice()
+            .iter()
+            .all(|m| m.id.sequence < newest.sequence)
     );
     let cursor = history.older.expect("bounded backwards pagination cursor");
     let ProtocolReply::History(older) = alice

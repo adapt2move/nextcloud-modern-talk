@@ -13,7 +13,7 @@ spec.loader.exec_module(policy)
 
 
 class PolicyTests(unittest.TestCase):
-    def check(self, old=None, new=None, file="ci.yml"):
+    def check(self, old=None, new=None, file="ci.yml", expected_error=None):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             shutil.copytree(ROOT / ".github", root / ".github")
@@ -24,8 +24,10 @@ class PolicyTests(unittest.TestCase):
                 body = path.read_text()
                 self.assertIn(old, body)
                 path.write_text(body.replace(old, new, 1))
-                with self.assertRaises(ValueError):
+                with self.assertRaises(ValueError) as raised:
                     policy.check(root)
+                if expected_error is not None:
+                    self.assertEqual(str(raised.exception), expected_error)
             else:
                 policy.check(root)
 
@@ -44,13 +46,13 @@ class PolicyTests(unittest.TestCase):
     def test_write_token_in_compile_job(self):
         self.check("    name: Compile only (Windows x86_64 MSVC)", "    permissions:\n      contents: write\n    name: Compile only (Windows x86_64 MSVC)", file="native.yml")
 
-    def test_windows_cannot_execute_tests(self):
-        self.check("python tools/cargo.py build --locked --workspace --all-targets --target x86_64-pc-windows-msvc", "cargo test --locked --workspace --target x86_64-pc-windows-msvc", file="native.yml")
-
-    def test_compile_jobs_cannot_execute_through_cargo_wrapper(self):
-        for command in ("test", "run", "bench", "nextest"):
+    def test_compile_jobs_cannot_execute_cargo_commands(self):
+        build = "      - run: python tools/cargo.py build --locked --workspace --all-targets --target x86_64-pc-windows-msvc"
+        for command in ("cargo test", "python tools/cargo.py test", "python tools/cargo.py run",
+                        "python tools/cargo.py bench", "python tools/cargo.py nextest"):
             with self.subTest(command=command):
-                self.check("python tools/cargo.py build", "python tools/cargo.py " + command, file="native.yml")
+                self.check(build, f"{build}\n      - run: {command} --locked", file="native.yml",
+                           expected_error="Tests/application execution must run on Linux: windows")
 
     def test_wrapped_check_cannot_replace_required_compilation(self):
         self.check("python tools/cargo.py build", "python tools/cargo.py check", file="native.yml")
