@@ -121,7 +121,7 @@ features = ["crypto-rust"]
 
 # Direct typed operations with prompt execution disabled; Linux provider only.
 [workspace.dependencies.dbus-secret-service]
-version = "=4.1.0"
+version = "=4.2.0"
 default-features = false
 features = ["crypto-rust"]
 
